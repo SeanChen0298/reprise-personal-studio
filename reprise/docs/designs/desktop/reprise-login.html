@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reprise — Log in</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #F9F9F9;
+    --surface: #FFFFFF;
+    --border: #E4E4E4;
+    --border-subtle: #EFEFEF;
+    --text-primary: #111111;
+    --text-secondary: #555555;
+    --text-muted: #999999;
+    --accent: #111111;
+    --theme: #2563EB;
+    --theme-light: #EFF6FF;
+    --theme-text: #1D4ED8;
+  }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    color: var(--text-primary);
+    min-height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ─── LAYOUT ─── */
+  .auth-layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    min-height: 100vh;
+  }
+
+  /* ─── LEFT PANEL ─── */
+  .panel-left {
+    background: #111111;
+    padding: 52px 56px;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .panel-left::before {
+    content: '';
+    position: absolute;
+    top: -100px; right: -100px;
+    width: 320px; height: 320px;
+    border-radius: 50%;
+    background: var(--theme);
+    opacity: 0.07;
+    pointer-events: none;
+  }
+
+  .panel-left::after {
+    content: '';
+    position: absolute;
+    bottom: -80px; left: -80px;
+    width: 240px; height: 240px;
+    border-radius: 50%;
+    background: var(--theme);
+    opacity: 0.05;
+    pointer-events: none;
+  }
+
+  .panel-logo {
+    font-family: 'DM Serif Display', serif;
+    font-size: 21px;
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .panel-logo-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--theme);
+    margin-bottom: 2px;
+    flex-shrink: 0;
+  }
+
+  .panel-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 64px 0 48px;
+  }
+
+  .panel-tagline {
+    font-family: 'DM Serif Display', serif;
+    font-size: 36px;
+    line-height: 1.18;
+    letter-spacing: -0.8px;
+    color: #fff;
+    margin-bottom: 40px;
+  }
+
+  .panel-tagline em {
+    font-style: italic;
+    color: #93C5FD;
+  }
+
+  /* Recent song card */
+  .recent-card {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 18px 20px;
+    margin-bottom: 12px;
+  }
+
+  .recent-label {
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.3);
+    margin-bottom: 14px;
+  }
+
+  .recent-song {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .recent-song-art {
+    width: 36px; height: 36px;
+    border-radius: 6px;
+    background: linear-gradient(135deg, rgba(37,99,235,0.6), rgba(147,197,253,0.3));
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+  }
+
+  .recent-song-info { flex: 1; min-width: 0; }
+
+  .recent-song-title {
+    font-size: 13.5px;
+    font-weight: 500;
+    color: rgba(255,255,255,0.85);
+    margin-bottom: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .recent-song-artist {
+    font-size: 12px;
+    color: rgba(255,255,255,0.35);
+    font-weight: 300;
+  }
+
+  .recent-progress {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .progress-track {
+    flex: 1;
+    height: 3px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    width: 62%;
+    background: linear-gradient(90deg, #2563EB, #93C5FD);
+    border-radius: 2px;
+  }
+
+  .progress-pct {
+    font-size: 11px;
+    color: rgba(255,255,255,0.35);
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+
+  .panel-footer-note {
+    font-size: 12px;
+    color: rgba(255,255,255,0.22);
+  }
+
+  /* ─── RIGHT PANEL ─── */
+  .panel-right {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 52px 56px;
+    background: var(--bg);
+    overflow-y: auto;
+  }
+
+  .auth-form-wrap {
+    width: 100%;
+    max-width: 370px;
+    animation: fadeUp 0.5s ease both;
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .auth-heading {
+    font-family: 'DM Serif Display', serif;
+    font-size: 27px;
+    letter-spacing: -0.5px;
+    margin-bottom: 4px;
+  }
+
+  .auth-sub {
+    font-size: 13.5px;
+    color: var(--text-muted);
+    margin-bottom: 28px;
+    font-weight: 300;
+  }
+
+  /* Google button */
+  .google-btn {
+    width: 100%;
+    padding: 11px;
+    border-radius: 9px;
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    color: var(--text-primary);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13.5px;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    transition: border-color 0.15s, background 0.15s;
+    margin-bottom: 20px;
+  }
+  .google-btn:hover { border-color: #aaa; background: #f5f5f5; }
+
+  /* Divider */
+  .divider {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 20px;
+  }
+  .divider::before, .divider::after {
+    content: ''; flex: 1; height: 1px; background: var(--border-subtle);
+  }
+  .divider span { font-size: 12px; color: var(--text-muted); }
+
+  /* Form */
+  .form-group { margin-bottom: 12px; }
+
+  .form-label-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 5px;
+  }
+
+  .form-label {
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text-secondary);
+  }
+
+  .forgot-link {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-decoration: none;
+    transition: color 0.15s;
+  }
+  .forgot-link:hover { color: var(--text-primary); }
+
+  .form-input {
+    width: 100%;
+    padding: 9px 13px;
+    border-radius: 7px;
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    color: var(--text-primary);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13.5px;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .form-input:focus {
+    border-color: var(--theme);
+    box-shadow: 0 0 0 3px rgba(37,99,235,0.09);
+  }
+  .form-input::placeholder { color: var(--text-muted); }
+
+  /* Error state */
+  .form-error {
+    font-size: 12px;
+    color: #DC2626;
+    margin-top: 5px;
+    display: none;
+  }
+  .form-error.visible { display: block; }
+  .form-input.error { border-color: #DC2626; }
+  .form-input.error:focus { box-shadow: 0 0 0 3px rgba(220,38,38,0.09); }
+
+  /* Submit */
+  .form-submit {
+    width: 100%;
+    padding: 11px;
+    border-radius: 9px;
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13.5px;
+    font-weight: 500;
+    cursor: pointer;
+    margin-top: 6px;
+    transition: opacity 0.15s, transform 0.15s;
+  }
+  .form-submit:hover { opacity: 0.82; transform: translateY(-1px); }
+
+  .auth-switch {
+    text-align: center;
+    margin-top: 22px;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+  .auth-switch a {
+    color: var(--text-primary);
+    font-weight: 500;
+    text-decoration: none;
+    border-bottom: 1px solid var(--border);
+    transition: border-color 0.15s;
+  }
+  .auth-switch a:hover { border-color: var(--text-primary); }
+</style>
+</head>
+<body>
+
+<div class="auth-layout">
+
+  <!-- ─── LEFT PANEL ─── -->
+  <div class="panel-left">
+    <div class="panel-logo">
+      Reprise
+      <span class="panel-logo-dot"></span>
+    </div>
+
+    <div class="panel-body">
+      <div class="panel-tagline">
+        Pick up right<br>where you <em>left off</em>.
+      </div>
+
+      <!-- Mock "last practiced" card -->
+      <div class="recent-card">
+        <div class="recent-label">Last practiced</div>
+        <div class="recent-song">
+          <div class="recent-song-art">♪</div>
+          <div class="recent-song-info">
+            <div class="recent-song-title">Prema</div>
+            <div class="recent-song-artist">Fujii Kaze</div>
+          </div>
+        </div>
+        <div class="recent-progress">
+          <div class="progress-track">
+            <div class="progress-fill"></div>
+          </div>
+          <div class="progress-pct">62% mastered</div>
+        </div>
+      </div>
+
+      <div class="recent-card" style="opacity:0.5;">
+        <div class="recent-label">Also in progress</div>
+        <div class="recent-song">
+          <div class="recent-song-art" style="background:linear-gradient(135deg,rgba(124,58,237,0.5),rgba(196,181,253,0.2));">♪</div>
+          <div class="recent-song-info">
+            <div class="recent-song-title">Blinding Lights</div>
+            <div class="recent-song-artist">The Weeknd</div>
+          </div>
+        </div>
+        <div class="recent-progress">
+          <div class="progress-track">
+            <div class="progress-fill" style="width:28%;background:linear-gradient(90deg,#7C3AED,#C4B5FD);"></div>
+          </div>
+          <div class="progress-pct">28% mastered</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel-footer-note">© 2025 Reprise · Built for singers.</div>
+  </div>
+
+  <!-- ─── RIGHT PANEL ─── -->
+  <div class="panel-right">
+    <div class="auth-form-wrap">
+
+      <div class="auth-heading">Welcome back</div>
+      <div class="auth-sub">Sign in to continue practicing.</div>
+
+      <button class="google-btn">
+        <svg width="15" height="15" viewBox="0 0 24 24">
+          <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+          <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+          <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
+          <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+        </svg>
+        Continue with Google
+      </button>
+
+      <div class="divider"><span>or</span></div>
+
+      <div class="form-group">
+        <label class="form-label">Email address</label>
+        <input class="form-input" type="email" placeholder="you@example.com" id="email-input">
+      </div>
+
+      <div class="form-group">
+        <div class="form-label-row">
+          <span class="form-label">Password</span>
+          <a href="reprise-forgot-password.html" class="forgot-link">Forgot password?</a>
+        </div>
+        <input class="form-input" type="password" placeholder="Your password" id="pw-input">
+        <div class="form-error" id="form-error">Incorrect email or password. Please try again.</div>
+      </div>
+
+      <button class="form-submit" id="submit-btn">Log in</button>
+
+      <div class="auth-switch">
+        No account yet? <a href="reprise-signup.html">Sign up free</a>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // Demo: show error state on submit with empty fields
+  document.getElementById('submit-btn').addEventListener('click', () => {
+    const email = document.getElementById('email-input');
+    const pw    = document.getElementById('pw-input');
+    const err   = document.getElementById('form-error');
+
+    const invalid = !email.value || !pw.value;
+    email.classList.toggle('error', !email.value);
+    pw.classList.toggle('error', !pw.value);
+    err.classList.toggle('visible', invalid);
+  });
+
+  ['email-input','pw-input'].forEach(id => {
+    document.getElementById(id).addEventListener('input', () => {
+      document.getElementById('form-error').classList.remove('visible');
+      document.getElementById(id).classList.remove('error');
+    });
+  });
+</script>
+
+</body>
+</html>
