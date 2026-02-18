@@ -1,0 +1,8 @@
+{
+  "name": "reprise",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
+}
