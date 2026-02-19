@@ -34,7 +34,7 @@ Personal practice studio for singers. Cross-platform (Tauri/React Native).
 - **Sync:** Always include `updated_at` and `user_id` in DB-related schemas.
 
 ## Core Data Entities
-- **Song:** Metadata, file paths (vocals/inst/ref), bpm, mastery %.
+- **Song:** Metadata, file paths (vocals/inst/ref), bpm, mastery %, `thumbnail_b64` (base64 JPEG from yt-dlp), `pinned` (bool).
 - **Line:** `start_ms`, `end_ms`, `status` (not_started/learning/mastered).
 - **Annotation:** JSON array: `[{ text: string, type: HighlightType }]`.
 - **Recording:** `line_id`, `file_path`, `is_master_take`.

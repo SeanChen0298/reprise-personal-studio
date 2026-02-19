@@ -1,0 +1,81 @@
+@import url("https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&display=swap");
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "DM Sans", sans-serif;
+  --font-serif: "DM Serif Display", serif;
+  --color-bg: #f9f9f9;
+  --color-surface: #ffffff;
+  --color-border: #e4e4e4;
+  --color-border-subtle: #efefef;
+  --color-text-primary: #111111;
+  --color-text-secondary: #555555;
+  --color-text-muted: #999999;
+  --color-accent: #111111;
+  --color-theme: #2563eb;
+  --color-theme-light: #eff6ff;
+  --color-theme-text: #1d4ed8;
+  --radius-card: 12px;
+}
+
+:root {
+  --bg: #f9f9f9;
+  --surface: #ffffff;
+  --border: #e4e4e4;
+  --border-subtle: #efefef;
+  --text-primary: #111111;
+  --text-secondary: #555555;
+  --text-muted: #999999;
+  --accent: #111111;
+  --theme: #2563eb;
+  --theme-light: #eff6ff;
+  --theme-text: #1d4ed8;
+  --radius: 12px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: "DM Sans", sans-serif;
+  background: var(--bg);
+  color: var(--text-primary);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Fade-up animation used across auth pages */
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-up {
+  animation: fadeUp 0.5s ease both;
+}
+
+/* Waveform bar animation for landing page preview */
+@keyframes wave {
+  from {
+    transform: scaleY(0.35);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}

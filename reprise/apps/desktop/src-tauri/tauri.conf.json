@@ -1,0 +1,27 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicedoc/tauri/main/crates/tauri-config-schema/schema.json",
+  "productName": "Reprise",
+  "version": "0.1.0",
+  "identifier": "com.reprise.app",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Reprise",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  }
+}

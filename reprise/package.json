@@ -1,8 +1,7 @@
 {
   "name": "reprise",
   "private": true,
-  "workspaces": [
-    "apps/*",
-    "packages/*"
-  ]
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  }
 }
