@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reprise — Song Setup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #F9F9F9;
+    --surface: #FFFFFF;
+    --border: #E4E4E4;
+    --border-subtle: #EFEFEF;
+    --text-primary: #111111;
+    --text-secondary: #555555;
+    --text-muted: #999999;
+    --accent: #111111;
+    --accent-light: #F0F0F0;
+    --theme: #2563EB;
+    --theme-light: #EFF6FF;
+    --theme-text: #1D4ED8;
+    --radius: 12px;
+  }
+
+  html, body { height: 100%; overflow: hidden; }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text-primary);
+    display: flex;
+    height: 100vh;
+  }
+
+  /* ─── SIDEBAR ─── */
+  .sidebar {
+    width: 220px;
+    height: 100vh;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+
+  .sidebar-header { padding: 18px 18px 16px; border-bottom: 1px solid var(--border-subtle); }
+
+  .logo {
+    font-family: 'DM Serif Display', serif;
+    font-size: 18px;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .logo-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--theme); display: inline-block; }
+
+  .sidebar-nav { padding: 12px 10px; display: flex; flex-direction: column; gap: 2px; flex: 1; }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 8px 10px;
+    border-radius: 7px;
+    font-size: 13.5px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    text-decoration: none;
+    transition: background 0.12s, color 0.12s;
+    user-select: none;
+  }
+  .nav-item:hover { background: var(--bg); color: var(--text-primary); }
+  .nav-item.active { background: var(--accent-light); color: var(--text-primary); }
+
+  .sidebar-footer { padding: 12px 10px; border-top: 1px solid var(--border-subtle); }
+
+  .user-row {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 8px 10px;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: background 0.12s;
+  }
+  .user-row:hover { background: var(--bg); }
+
+  .avatar {
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    font-size: 10.5px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .user-info { flex: 1; min-width: 0; }
+  .user-name { font-size: 12.5px; font-weight: 500; }
+  .user-email { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* ─── MAIN ─── */
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+  .topbar {
+    height: 54px;
+    padding: 0 28px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--surface);
+    flex-shrink: 0;
+  }
+
+  .topbar-left { display: flex; align-items: center; gap: 10px; }
+
+  .back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--text-muted);
+    text-decoration: none;
+    transition: color 0.15s;
+    cursor: pointer;
+  }
+  .back-link svg { transition: transform 0.15s; }
+  .back-link:hover { color: var(--text-primary); }
+  .back-link:hover svg { transform: translateX(-2px); }
+
+  .topbar-right { display: flex; align-items: center; gap: 8px; }
+
+  .btn-done {
+    padding: 7px 18px;
+    border-radius: 7px;
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    transition: opacity 0.15s, transform 0.15s;
+  }
+  .btn-done:hover { opacity: 0.82; transform: translateY(-1px); }
+
+  /* ─── CONTENT ─── */
+  .content { flex: 1; overflow-y: auto; padding: 32px 28px 64px; }
+
+  .setup-wrap {
+    max-width: 640px;
+    margin: 0 auto;
+    animation: fadeUp 0.4s ease both;
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ─── SONG HEADER ─── */
+  .song-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 28px;
+  }
+
+  .song-header-art {
+    width: 56px;
+    height: 56px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #DBEAFE, #BFDBFE);
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .song-header-info { flex: 1; min-width: 0; }
+
+  .song-header-title {
+    font-family: 'DM Serif Display', serif;
+    font-size: 22px;
+    letter-spacing: -0.4px;
+    margin-bottom: 2px;
+  }
+
+  .song-header-artist {
+    font-size: 13px;
+    color: var(--text-muted);
+    font-weight: 400;
+  }
+
+  .setup-sub {
+    font-size: 13.5px;
+    color: var(--text-muted);
+    margin-bottom: 28px;
+    font-weight: 300;
+    line-height: 1.6;
+  }
+
+  /* ─── SECTION ─── */
+  .section { margin-bottom: 24px; }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  .section-title {
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .section-line { flex: 1; height: 1px; background: var(--border-subtle); }
+
+  /* ─── AUDIO FILE CARD ─── */
+  .file-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 16px 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 8px;
+    transition: box-shadow 0.15s;
+  }
+  .file-card:hover { box-shadow: 0 2px 12px rgba(0,0,0,0.05); }
+
+  .file-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 9px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .file-icon.reference { background: var(--theme-light); color: var(--theme-text); }
+  .file-icon.vocals { background: #DCFCE7; color: #15803D; }
+  .file-icon.instrumental { background: #FFF7ED; color: #C2410C; }
+
+  .file-info { flex: 1; min-width: 0; }
+
+  .file-name {
+    font-size: 13.5px;
+    font-weight: 500;
+    margin-bottom: 2px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .file-status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .file-status-dot.ready { background: #22C55E; }
+  .file-status-dot.missing { background: var(--border); }
+  .file-status-dot.processing { background: #F59E0B; animation: pulse 1.5s ease-in-out infinite; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  .file-meta {
+    font-size: 11.5px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .file-size {
+    font-size: 10.5px;
+    color: var(--text-muted);
+    background: var(--bg);
+    border: 1px solid var(--border-subtle);
+    padding: 2px 8px;
+    border-radius: 20px;
+  }
+
+  .file-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .file-btn {
+    padding: 5px 12px;
+    border-radius: 6px;
+    border: 1.5px solid var(--border);
+    background: transparent;
+    color: var(--text-secondary);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+  }
+  .file-btn:hover { border-color: #888; color: var(--text-primary); background: var(--accent-light); }
+
+  .file-btn.download {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+  .file-btn.download:hover { opacity: 0.85; }
+
+  .file-btn.danger { color: #DC2626; border-color: #FECACA; }
+  .file-btn.danger:hover { background: #FEF2F2; border-color: #DC2626; }
+
+  /* ─── PROCESSING CARD ─── */
+  .processing-card {
+    padding: 16px 18px;
+    background: #FFFBEB;
+    border: 1px solid #FDE68A;
+    border-radius: var(--radius);
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .processing-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 9px;
+    background: #FEF3C7;
+    color: #D97706;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .processing-info { flex: 1; }
+
+  .processing-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: #92400E;
+    margin-bottom: 6px;
+  }
+
+  .processing-bar-track {
+    height: 4px;
+    background: #FDE68A;
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .processing-bar-fill {
+    height: 100%;
+    width: 65%;
+    background: linear-gradient(90deg, #F59E0B, #D97706);
+    border-radius: 2px;
+    transition: width 0.5s ease;
+    animation: progressPulse 2s ease-in-out infinite;
+  }
+
+  @keyframes progressPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+  }
+
+  .processing-pct {
+    font-size: 11px;
+    color: #B45309;
+    margin-top: 4px;
+    font-weight: 500;
+  }
+
+  /* ─── EMPTY FILE CARD ─── */
+  .file-card.empty {
+    border-style: dashed;
+    border-color: var(--border);
+    background: var(--bg);
+  }
+
+  .file-icon.empty {
+    background: var(--accent-light);
+    color: var(--text-muted);
+  }
+
+  .file-name.muted { color: var(--text-muted); font-weight: 400; }
+
+  /* ─── UPLOAD ZONE ─── */
+  .upload-zone {
+    padding: 24px;
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .upload-zone:hover {
+    border-color: var(--theme);
+    background: var(--theme-light);
+  }
+
+  .upload-icon {
+    color: var(--text-muted);
+    margin-bottom: 8px;
+  }
+
+  .upload-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+  }
+
+  .upload-hint {
+    font-size: 11.5px;
+    color: var(--text-muted);
+  }
+
+  /* ─── INFO NOTE ─── */
+  .info-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 14px 16px;
+    background: var(--theme-light);
+    border: 1px solid #BFDBFE;
+    border-radius: 9px;
+    margin-top: 24px;
+  }
+
+  .info-note-icon {
+    color: var(--theme-text);
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  .info-note-text {
+    font-size: 12.5px;
+    color: var(--theme-text);
+    line-height: 1.6;
+  }
+
+  .info-note-text strong { font-weight: 600; }
+</style>
+</head>
+<body>
+
+<!-- ─── SIDEBAR ─── -->
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <div class="logo">Reprise <span class="logo-dot"></span></div>
+  </div>
+
+  <nav class="sidebar-nav">
+    <a class="nav-item" href="reprise-home-library.html">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
+      </svg>
+      Library
+    </a>
+  </nav>
+
+  <div class="sidebar-footer">
+    <a class="nav-item" href="reprise-settings.html" style="margin-bottom:6px;">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+      </svg>
+      Settings
+    </a>
+    <div class="user-row">
+      <div class="avatar">AY</div>
+      <div class="user-info">
+        <div class="user-name">Akira Yamada</div>
+        <div class="user-email">akira@example.com</div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<!-- ─── MAIN ─── -->
+<div class="main">
+
+  <header class="topbar">
+    <div class="topbar-left">
+      <a class="back-link" href="reprise-add-song.html">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M19 12H5M12 19l-7-7 7-7"/>
+        </svg>
+        Back to Song
+      </a>
+    </div>
+    <div class="topbar-right">
+      <button class="btn-done">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+        Done
+      </button>
+    </div>
+  </header>
+
+  <div class="content">
+    <div class="setup-wrap">
+
+      <!-- Song header -->
+      <div class="song-header">
+        <div class="song-header-art">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#93C5FD" stroke-width="1.5" stroke-linecap="round">
+            <path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
+          </svg>
+        </div>
+        <div class="song-header-info">
+          <div class="song-header-title">Prema</div>
+          <div class="song-header-artist">Fujii Kaze</div>
+        </div>
+      </div>
+
+      <div class="setup-sub">Manage the audio files for this song. Download reference audio from YouTube, or generate separate vocal and instrumental tracks using Demucs.</div>
+
+      <!-- ─── REFERENCE AUDIO ─── -->
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">Reference audio</span>
+          <div class="section-line"></div>
+        </div>
+
+        <div class="file-card">
+          <div class="file-icon reference">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
+            </svg>
+          </div>
+          <div class="file-info">
+            <div class="file-name">
+              <span class="file-status-dot ready"></span>
+              prema-reference.mp3
+            </div>
+            <div class="file-meta">
+              Downloaded from YouTube
+              <span class="file-size">8.2 MB</span>
+            </div>
+          </div>
+          <div class="file-actions">
+            <button class="file-btn">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Preview
+            </button>
+            <button class="file-btn">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+              Replace
+            </button>
+            <button class="file-btn danger">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6M10 11v6M14 11v6"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── SEPARATED TRACKS ─── -->
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">Separated tracks (Demucs)</span>
+          <div class="section-line"></div>
+        </div>
+
+        <!-- Vocals - ready -->
+        <div class="file-card">
+          <div class="file-icon vocals">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
+              <path d="M19 10v2a7 7 0 01-14 0v-2"/>
+              <line x1="12" y1="19" x2="12" y2="23"/>
+              <line x1="8" y1="23" x2="16" y2="23"/>
+            </svg>
+          </div>
+          <div class="file-info">
+            <div class="file-name">
+              <span class="file-status-dot ready"></span>
+              prema-vocals.wav
+            </div>
+            <div class="file-meta">
+              Vocals track (isolated)
+              <span class="file-size">24.1 MB</span>
+            </div>
+          </div>
+          <div class="file-actions">
+            <button class="file-btn">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Preview
+            </button>
+            <button class="file-btn danger">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6M10 11v6M14 11v6"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Instrumental - processing -->
+        <div class="processing-card">
+          <div class="processing-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12 6 12 12 16 14"/>
+            </svg>
+          </div>
+          <div class="processing-info">
+            <div class="processing-label">Separating instrumental track...</div>
+            <div class="processing-bar-track">
+              <div class="processing-bar-fill"></div>
+            </div>
+            <div class="processing-pct">65% complete — estimated 30s remaining</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── ADDITIONAL FILES ─── -->
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">Additional files</span>
+          <div class="section-line"></div>
+        </div>
+
+        <div class="file-card empty">
+          <div class="file-icon empty">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+            </svg>
+          </div>
+          <div class="file-info">
+            <div class="file-name muted">No additional files</div>
+            <div class="file-meta">Upload custom audio files (karaoke tracks, practice mixes, etc.)</div>
+          </div>
+          <div class="file-actions">
+            <button class="file-btn download">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+              Upload
+            </button>
+          </div>
+        </div>
+
+        <!-- Drop zone -->
+        <div class="upload-zone">
+          <div class="upload-icon">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+          </div>
+          <div class="upload-label">Drag & drop audio files here</div>
+          <div class="upload-hint">Supports MP3, WAV, FLAC, OGG (max 200 MB)</div>
+        </div>
+      </div>
+
+      <!-- Info note -->
+      <div class="info-note">
+        <div class="info-note-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="16" x2="12" y2="12"/>
+            <line x1="12" y1="8" x2="12.01" y2="8"/>
+          </svg>
+        </div>
+        <div class="info-note-text">
+          <strong>Demucs separation</strong> runs locally on your machine. It requires the Demucs sidecar to be installed. Separation quality depends on your hardware — GPU acceleration is recommended for faster processing.
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+</body>
+</html>

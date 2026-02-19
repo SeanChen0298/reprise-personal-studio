@@ -1,0 +1,1119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reprise — Settings</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #F9F9F9;
+    --surface: #FFFFFF;
+    --border: #E4E4E4;
+    --border-subtle: #EFEFEF;
+    --text-primary: #111111;
+    --text-secondary: #555555;
+    --text-muted: #999999;
+    --accent: #111111;
+    --accent-light: #F0F0F0;
+    --theme: #2563EB;
+    --theme-light: #EFF6FF;
+    --theme-text: #1D4ED8;
+    --radius: 12px;
+  }
+
+  html, body { height: 100%; overflow: hidden; }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text-primary);
+    display: flex;
+    height: 100vh;
+  }
+
+  /* ─── SIDEBAR ─── */
+  .sidebar {
+    width: 220px;
+    height: 100vh;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+
+  .sidebar-header { padding: 18px 18px 16px; border-bottom: 1px solid var(--border-subtle); }
+
+  .logo {
+    font-family: 'DM Serif Display', serif;
+    font-size: 18px;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .logo-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--theme); display: inline-block; }
+
+  .sidebar-nav { padding: 12px 10px; display: flex; flex-direction: column; gap: 2px; flex: 1; }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 8px 10px;
+    border-radius: 7px;
+    font-size: 13.5px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    text-decoration: none;
+    transition: background 0.12s, color 0.12s;
+    user-select: none;
+  }
+  .nav-item:hover { background: var(--bg); color: var(--text-primary); }
+  .nav-item.active { background: var(--accent-light); color: var(--text-primary); }
+
+  .sidebar-footer { padding: 12px 10px; border-top: 1px solid var(--border-subtle); }
+
+  .user-row {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 8px 10px;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: background 0.12s;
+  }
+  .user-row:hover { background: var(--bg); }
+
+  .avatar {
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    font-size: 10.5px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .user-info { flex: 1; min-width: 0; }
+  .user-name { font-size: 12.5px; font-weight: 500; }
+  .user-email { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* ─── MAIN ─── */
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+  .topbar {
+    height: 54px;
+    padding: 0 28px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--surface);
+    flex-shrink: 0;
+  }
+
+  .topbar-left { display: flex; align-items: center; gap: 10px; }
+  .page-title { font-size: 14px; font-weight: 500; }
+
+  .back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--text-muted);
+    text-decoration: none;
+    transition: color 0.15s;
+    cursor: pointer;
+  }
+  .back-link svg { transition: transform 0.15s; }
+  .back-link:hover { color: var(--text-primary); }
+  .back-link:hover svg { transform: translateX(-2px); }
+
+  /* ─── CONTENT ─── */
+  .content { flex: 1; overflow-y: auto; padding: 32px 28px 64px; }
+
+  .settings-wrap {
+    max-width: 640px;
+    margin: 0 auto;
+    animation: fadeUp 0.4s ease both;
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .settings-heading {
+    font-family: 'DM Serif Display', serif;
+    font-size: 24px;
+    letter-spacing: -0.5px;
+    margin-bottom: 4px;
+  }
+
+  .settings-sub {
+    font-size: 13.5px;
+    color: var(--text-muted);
+    margin-bottom: 24px;
+    font-weight: 300;
+  }
+
+  /* ─── TABS ─── */
+  .tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 28px;
+  }
+
+  .tab {
+    padding: 9px 18px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s, border-color 0.15s;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .tab:hover { color: var(--text-primary); }
+  .tab.active { color: var(--text-primary); border-bottom-color: var(--accent); }
+
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* ─── SECTION ─── */
+  .section { margin-bottom: 28px; }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+
+  .section-title {
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .section-line { flex: 1; height: 1px; background: var(--border-subtle); }
+
+  /* ─── FORM ELEMENTS ─── */
+  .form-group { margin-bottom: 16px; }
+
+  .form-label {
+    display: block;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin-bottom: 5px;
+  }
+
+  .form-input {
+    width: 100%;
+    padding: 9px 13px;
+    border-radius: 7px;
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    color: var(--text-primary);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13.5px;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .form-input:focus {
+    border-color: var(--theme);
+    box-shadow: 0 0 0 3px rgba(37,99,235,0.09);
+  }
+  .form-input::placeholder { color: var(--text-muted); }
+
+  .form-input-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 4px;
+  }
+
+  .form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  /* ─── BUTTONS ─── */
+  .btn-primary {
+    padding: 8px 18px;
+    border-radius: 7px;
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    transition: opacity 0.15s, transform 0.15s;
+  }
+  .btn-primary:hover { opacity: 0.82; transform: translateY(-1px); }
+
+  .btn-outline {
+    padding: 8px 16px;
+    border-radius: 7px;
+    border: 1.5px solid var(--border);
+    background: transparent;
+    color: var(--text-secondary);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .btn-outline:hover { border-color: #888; color: var(--text-primary); }
+
+  .btn-danger {
+    padding: 8px 16px;
+    border-radius: 7px;
+    border: 1.5px solid #FECACA;
+    background: transparent;
+    color: #DC2626;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .btn-danger:hover { background: #FEF2F2; border-color: #DC2626; }
+
+  /* ════════════════════════════════════════
+     TAB 1: HIGHLIGHT TYPES
+     ════════════════════════════════════════ */
+
+  .highlight-list { display: flex; flex-direction: column; gap: 6px; }
+
+  .highlight-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    transition: box-shadow 0.15s;
+  }
+  .highlight-item:hover { box-shadow: 0 2px 12px rgba(0,0,0,0.05); }
+
+  .hl-swatch {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    flex-shrink: 0;
+    cursor: pointer;
+    transition: transform 0.12s;
+    border: 1px solid rgba(0,0,0,0.06);
+  }
+  .hl-swatch:hover { transform: scale(1.1); }
+
+  .hl-info { flex: 1; min-width: 0; }
+
+  .hl-name {
+    font-size: 13.5px;
+    font-weight: 500;
+    margin-bottom: 1px;
+  }
+
+  .hl-desc {
+    font-size: 11.5px;
+    color: var(--text-muted);
+  }
+
+  .hl-example {
+    font-size: 12px;
+    padding: 2px 10px;
+    border-radius: 4px;
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+
+  .hl-actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+
+  .hl-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+  }
+  .hl-btn:hover { border-color: #888; color: var(--text-primary); background: var(--accent-light); }
+  .hl-btn.danger:hover { color: #DC2626; border-color: #FECACA; background: #FEF2F2; }
+
+  .add-highlight-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .add-highlight-input {
+    flex: 1;
+    padding: 8px 13px;
+    border-radius: 7px;
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    color: var(--text-primary);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .add-highlight-input:focus {
+    border-color: var(--theme);
+    box-shadow: 0 0 0 3px rgba(37,99,235,0.09);
+  }
+  .add-highlight-input::placeholder { color: var(--text-muted); }
+
+  /* ════════════════════════════════════════
+     TAB 2: ACCOUNT
+     ════════════════════════════════════════ */
+
+  .profile-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  .profile-avatar {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    font-size: 18px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    position: relative;
+    cursor: pointer;
+  }
+
+  .profile-avatar-edit {
+    position: absolute;
+    bottom: -2px;
+    right: -2px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    transition: border-color 0.15s;
+  }
+  .profile-avatar:hover .profile-avatar-edit { border-color: var(--theme); color: var(--theme); }
+
+  .profile-info { flex: 1; }
+  .profile-name {
+    font-size: 15px;
+    font-weight: 500;
+    margin-bottom: 2px;
+  }
+  .profile-email {
+    font-size: 12.5px;
+    color: var(--text-muted);
+  }
+
+  .danger-zone {
+    padding: 18px 20px;
+    border: 1px solid #FECACA;
+    border-radius: var(--radius);
+    background: #FEF2F2;
+  }
+
+  .danger-title {
+    font-size: 13px;
+    font-weight: 500;
+    color: #991B1B;
+    margin-bottom: 4px;
+  }
+
+  .danger-desc {
+    font-size: 12px;
+    color: #B91C1C;
+    line-height: 1.6;
+    margin-bottom: 14px;
+  }
+
+  /* ════════════════════════════════════════
+     TAB 3: PREFERENCES
+     ════════════════════════════════════════ */
+
+  /* Theme color picker */
+  .theme-picker {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 6px;
+  }
+
+  .theme-swatch {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2.5px solid transparent;
+    transition: transform 0.15s, border-color 0.15s;
+    position: relative;
+  }
+  .theme-swatch:hover { transform: scale(1.12); }
+  .theme-swatch.active { border-color: var(--text-primary); }
+
+  .theme-swatch.active::after {
+    content: '';
+    position: absolute;
+    inset: 4px;
+    border-radius: 50%;
+    border: 2px solid #fff;
+  }
+
+  .theme-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-align: center;
+    margin-top: 4px;
+  }
+
+  .theme-option {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+  }
+
+  /* Setting row */
+  .setting-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .setting-row:last-child { border-bottom: none; }
+
+  .setting-info { flex: 1; }
+
+  .setting-label {
+    font-size: 13px;
+    font-weight: 500;
+    margin-bottom: 2px;
+  }
+
+  .setting-desc {
+    font-size: 11.5px;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+
+  /* Toggle switch */
+  .toggle {
+    position: relative;
+    width: 38px;
+    height: 22px;
+    flex-shrink: 0;
+  }
+
+  .toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  .toggle-track {
+    position: absolute;
+    inset: 0;
+    background: var(--border);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  .toggle-track::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform 0.2s;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+  }
+
+  .toggle input:checked + .toggle-track {
+    background: var(--theme);
+  }
+
+  .toggle input:checked + .toggle-track::after {
+    transform: translateX(16px);
+  }
+
+  /* Select dropdown */
+  .form-select {
+    padding: 7px 32px 7px 12px;
+    border-radius: 7px;
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    color: var(--text-primary);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    outline: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2' xmlns='http://www.w3.org/2000/svg'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    cursor: pointer;
+    transition: border-color 0.15s;
+    flex-shrink: 0;
+  }
+  .form-select:focus { border-color: var(--theme); }
+
+  /* Slider */
+  .slider-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .slider {
+    flex: 1;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+  }
+
+  .slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    border: 2px solid #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+  }
+
+  .slider-value {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    min-width: 36px;
+    text-align: right;
+  }
+</style>
+</head>
+<body>
+
+<!-- ─── SIDEBAR ─── -->
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <div class="logo">Reprise <span class="logo-dot"></span></div>
+  </div>
+
+  <nav class="sidebar-nav">
+    <a class="nav-item" href="reprise-home-library.html">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
+      </svg>
+      Library
+    </a>
+  </nav>
+
+  <div class="sidebar-footer">
+    <a class="nav-item active" href="#" style="margin-bottom:6px;">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+      </svg>
+      Settings
+    </a>
+    <div class="user-row">
+      <div class="avatar">AY</div>
+      <div class="user-info">
+        <div class="user-name">Akira Yamada</div>
+        <div class="user-email">akira@example.com</div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<!-- ─── MAIN ─── -->
+<div class="main">
+
+  <header class="topbar">
+    <div class="topbar-left">
+      <a class="back-link" href="reprise-home-library.html">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M19 12H5M12 19l-7-7 7-7"/>
+        </svg>
+        Back to Library
+      </a>
+    </div>
+  </header>
+
+  <div class="content">
+    <div class="settings-wrap">
+
+      <div class="settings-heading">Settings</div>
+      <div class="settings-sub">Manage your highlights, account, and app preferences.</div>
+
+      <!-- ─── TABS ─── -->
+      <div class="tabs">
+        <div class="tab active" data-tab="highlights">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/>
+          </svg>
+          Highlights
+        </div>
+        <div class="tab" data-tab="account">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/>
+            <circle cx="12" cy="7" r="4"/>
+          </svg>
+          Account
+        </div>
+        <div class="tab" data-tab="preferences">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
+          </svg>
+          Preferences
+        </div>
+      </div>
+
+      <!-- ════════════════════════════════════════
+           TAB: HIGHLIGHTS
+           ════════════════════════════════════════ -->
+      <div class="tab-panel active" id="panel-highlights">
+
+        <div class="section">
+          <div class="section-header">
+            <span class="section-title">Annotation highlight types</span>
+            <div class="section-line"></div>
+          </div>
+
+          <div class="highlight-list">
+            <!-- Falsetto -->
+            <div class="highlight-item">
+              <div class="hl-swatch" style="background: #DBEAFE;"></div>
+              <div class="hl-info">
+                <div class="hl-name">Falsetto</div>
+                <div class="hl-desc">Mark sections that use falsetto technique</div>
+              </div>
+              <div class="hl-example" style="background:#DBEAFE; color:#1D4ED8;">sample text</div>
+              <div class="hl-actions">
+                <button class="hl-btn">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                </button>
+                <button class="hl-btn danger">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6M10 11v6M14 11v6"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- Whisper -->
+            <div class="highlight-item">
+              <div class="hl-swatch" style="background: #DCFCE7;"></div>
+              <div class="hl-info">
+                <div class="hl-name">Whisper</div>
+                <div class="hl-desc">Soft, breathy vocal sections</div>
+              </div>
+              <div class="hl-example" style="background:#DCFCE7; color:#15803D;">sample text</div>
+              <div class="hl-actions">
+                <button class="hl-btn">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                </button>
+                <button class="hl-btn danger">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6M10 11v6M14 11v6"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- Accent -->
+            <div class="highlight-item">
+              <div class="hl-swatch" style="background: #FEE2E2;"></div>
+              <div class="hl-info">
+                <div class="hl-name">Accent</div>
+                <div class="hl-desc">Words or syllables to emphasize</div>
+              </div>
+              <div class="hl-example" style="background:#FEE2E2; color:#B91C1C;">sample text</div>
+              <div class="hl-actions">
+                <button class="hl-btn">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                </button>
+                <button class="hl-btn danger">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6M10 11v6M14 11v6"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- Vibrato -->
+            <div class="highlight-item">
+              <div class="hl-swatch" style="background: #F5F3FF;"></div>
+              <div class="hl-info">
+                <div class="hl-name">Vibrato</div>
+                <div class="hl-desc">Sections with intentional vibrato</div>
+              </div>
+              <div class="hl-example" style="background:#F5F3FF; color:#6D28D9;">sample text</div>
+              <div class="hl-actions">
+                <button class="hl-btn">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                </button>
+                <button class="hl-btn danger">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6M10 11v6M14 11v6"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- Breath -->
+            <div class="highlight-item">
+              <div class="hl-swatch" style="background: #FFF7ED;"></div>
+              <div class="hl-info">
+                <div class="hl-name">Breath mark</div>
+                <div class="hl-desc">Where to take breaths</div>
+              </div>
+              <div class="hl-example" style="background:#FFF7ED; color:#C2410C;">sample text</div>
+              <div class="hl-actions">
+                <button class="hl-btn">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                </button>
+                <button class="hl-btn danger">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6M10 11v6M14 11v6"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Add new -->
+          <div class="add-highlight-row">
+            <input class="add-highlight-input" type="text" placeholder="New highlight name...">
+            <button class="btn-primary">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+              Add
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ════════════════════════════════════════
+           TAB: ACCOUNT
+           ════════════════════════════════════════ -->
+      <div class="tab-panel" id="panel-account">
+
+        <!-- Profile section -->
+        <div class="section">
+          <div class="section-header">
+            <span class="section-title">Profile</span>
+            <div class="section-line"></div>
+          </div>
+
+          <div class="profile-header">
+            <div class="profile-avatar">
+              AY
+              <div class="profile-avatar-edit">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+              </div>
+            </div>
+            <div class="profile-info">
+              <div class="profile-name">Akira Yamada</div>
+              <div class="profile-email">akira@example.com</div>
+            </div>
+          </div>
+
+          <div class="form-row" style="margin-bottom:16px;">
+            <div class="form-group" style="margin-bottom:0;">
+              <label class="form-label">Display name</label>
+              <input class="form-input" type="text" value="Akira Yamada">
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+              <label class="form-label">Email</label>
+              <input class="form-input" type="email" value="akira@example.com">
+            </div>
+          </div>
+
+          <button class="btn-primary">Save changes</button>
+        </div>
+
+        <!-- Password section -->
+        <div class="section">
+          <div class="section-header">
+            <span class="section-title">Password</span>
+            <div class="section-line"></div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Current password</label>
+            <input class="form-input" type="password" placeholder="Enter current password">
+          </div>
+
+          <div class="form-row" style="margin-bottom:16px;">
+            <div class="form-group" style="margin-bottom:0;">
+              <label class="form-label">New password</label>
+              <input class="form-input" type="password" placeholder="New password">
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+              <label class="form-label">Confirm new password</label>
+              <input class="form-input" type="password" placeholder="Confirm password">
+            </div>
+          </div>
+
+          <button class="btn-outline">Update password</button>
+        </div>
+
+        <!-- Danger zone -->
+        <div class="section">
+          <div class="section-header">
+            <span class="section-title">Danger zone</span>
+            <div class="section-line"></div>
+          </div>
+
+          <div class="danger-zone">
+            <div class="danger-title">Delete account</div>
+            <div class="danger-desc">Permanently delete your account and all data. This action cannot be undone. All your songs, recordings, and progress will be lost.</div>
+            <button class="btn-danger">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6M10 11v6M14 11v6"/></svg>
+              Delete my account
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ════════════════════════════════════════
+           TAB: PREFERENCES
+           ════════════════════════════════════════ -->
+      <div class="tab-panel" id="panel-preferences">
+
+        <!-- Theme color -->
+        <div class="section">
+          <div class="section-header">
+            <span class="section-title">Theme color</span>
+            <div class="section-line"></div>
+          </div>
+
+          <div class="theme-picker">
+            <div class="theme-option">
+              <div class="theme-swatch active" style="background:#2563EB;" data-theme="blue"></div>
+              <span class="theme-label">Blue</span>
+            </div>
+            <div class="theme-option">
+              <div class="theme-swatch" style="background:#111111;" data-theme="midnight"></div>
+              <span class="theme-label">Midnight</span>
+            </div>
+            <div class="theme-option">
+              <div class="theme-swatch" style="background:#7C3AED;" data-theme="violet"></div>
+              <span class="theme-label">Violet</span>
+            </div>
+            <div class="theme-option">
+              <div class="theme-swatch" style="background:#059669;" data-theme="emerald"></div>
+              <span class="theme-label">Emerald</span>
+            </div>
+            <div class="theme-option">
+              <div class="theme-swatch" style="background:#DC2626;" data-theme="red"></div>
+              <span class="theme-label">Red</span>
+            </div>
+            <div class="theme-option">
+              <div class="theme-swatch" style="background:#D97706;" data-theme="amber"></div>
+              <span class="theme-label">Amber</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Playback defaults -->
+        <div class="section">
+          <div class="section-header">
+            <span class="section-title">Playback defaults</span>
+            <div class="section-line"></div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <div class="setting-label">Default playback speed</div>
+              <div class="setting-desc">Speed when opening a song for the first time</div>
+            </div>
+            <div class="slider-row" style="width:180px;">
+              <input type="range" class="slider" min="50" max="100" value="100" id="speed-slider">
+              <span class="slider-value" id="speed-value">1.0x</span>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <div class="setting-label">Auto-play next line</div>
+              <div class="setting-desc">Automatically advance to the next line during practice</div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" checked>
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <div class="setting-label">Loop mode</div>
+              <div class="setting-desc">Default loop behavior when practicing a line</div>
+            </div>
+            <select class="form-select">
+              <option>Loop forever</option>
+              <option selected>Loop 3 times</option>
+              <option>Loop 5 times</option>
+              <option>No loop</option>
+            </select>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <div class="setting-label">Count-in before recording</div>
+              <div class="setting-desc">Play a metronome count before recording starts</div>
+            </div>
+            <select class="form-select">
+              <option>None</option>
+              <option>1 bar</option>
+              <option selected>2 bars</option>
+              <option>4 bars</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- General -->
+        <div class="section">
+          <div class="section-header">
+            <span class="section-title">General</span>
+            <div class="section-line"></div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <div class="setting-label">Show waveforms in library</div>
+              <div class="setting-desc">Display audio waveforms on song cards</div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" checked>
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <div class="setting-label">Confirm before deleting songs</div>
+              <div class="setting-desc">Show a confirmation dialog when removing songs</div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" checked>
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <div class="setting-label">Auto-sync to cloud</div>
+              <div class="setting-desc">Automatically sync progress and recordings to Supabase</div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" checked>
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+  // ─── Tab switching ───
+  const tabs = document.querySelectorAll('.tab');
+  const panels = document.querySelectorAll('.tab-panel');
+
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      tabs.forEach(t => t.classList.remove('active'));
+      panels.forEach(p => p.classList.remove('active'));
+      tab.classList.add('active');
+      document.getElementById('panel-' + tab.dataset.tab).classList.add('active');
+    });
+  });
+
+  // ─── Theme swatch selection ───
+  const swatches = document.querySelectorAll('.theme-swatch');
+  const themes = {
+    blue:     { theme: '#2563EB', light: '#EFF6FF', text: '#1D4ED8' },
+    midnight: { theme: '#111111', light: '#F5F5F5', text: '#111111' },
+    violet:   { theme: '#7C3AED', light: '#F5F3FF', text: '#6D28D9' },
+    emerald:  { theme: '#059669', light: '#ECFDF5', text: '#047857' },
+    red:      { theme: '#DC2626', light: '#FEF2F2', text: '#B91C1C' },
+    amber:    { theme: '#D97706', light: '#FFFBEB', text: '#B45309' },
+  };
+
+  swatches.forEach(sw => {
+    sw.addEventListener('click', () => {
+      swatches.forEach(s => s.classList.remove('active'));
+      sw.classList.add('active');
+      const t = themes[sw.dataset.theme];
+      if (t) {
+        document.documentElement.style.setProperty('--theme', t.theme);
+        document.documentElement.style.setProperty('--theme-light', t.light);
+        document.documentElement.style.setProperty('--theme-text', t.text);
+      }
+    });
+  });
+
+  // ─── Speed slider ───
+  const speedSlider = document.getElementById('speed-slider');
+  const speedValue = document.getElementById('speed-value');
+  speedSlider.addEventListener('input', () => {
+    speedValue.textContent = (speedSlider.value / 100).toFixed(1) + 'x';
+  });
+</script>
+</body>
+</html>
