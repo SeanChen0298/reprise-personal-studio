@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reprise — Lyrics Editor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #F9F9F9;
+    --surface: #FFFFFF;
+    --border: #E4E4E4;
+    --border-subtle: #EFEFEF;
+    --text-primary: #111111;
+    --text-secondary: #555555;
+    --text-muted: #999999;
+    --accent: #111111;
+    --accent-light: #F0F0F0;
+    --theme: #2563EB;
+    --theme-light: #EFF6FF;
+    --theme-text: #1D4ED8;
+    --radius: 12px;
+  }
+
+  html, body { height: 100%; overflow: hidden; }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text-primary);
+    display: flex;
+    height: 100vh;
+  }
+
+  /* ─── SIDEBAR ─── */
+  .sidebar {
+    width: 220px; height: 100vh;
+    background: var(--surface); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; flex-shrink: 0;
+  }
+  .sidebar-header { padding: 18px 18px 16px; border-bottom: 1px solid var(--border-subtle); }
+  .logo { font-family: 'DM Serif Display', serif; font-size: 18px; color: var(--text-primary); display: flex; align-items: center; gap: 7px; }
+  .logo-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--theme); display: inline-block; }
+  .sidebar-nav { padding: 12px 10px; display: flex; flex-direction: column; gap: 2px; flex: 1; }
+  .nav-item { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 7px; font-size: 13.5px; font-weight: 500; color: var(--text-secondary); cursor: pointer; text-decoration: none; transition: background 0.12s, color 0.12s; user-select: none; }
+  .nav-item:hover { background: var(--bg); color: var(--text-primary); }
+  .sidebar-footer { padding: 12px 10px; border-top: 1px solid var(--border-subtle); }
+  .user-row { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 7px; cursor: pointer; transition: background 0.12s; }
+  .user-row:hover { background: var(--bg); }
+  .avatar { width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 10.5px; font-weight: 600; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .user-info { flex: 1; min-width: 0; }
+  .user-name { font-size: 12.5px; font-weight: 500; }
+  .user-email { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* ─── MAIN ─── */
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+  .topbar {
+    height: 54px; padding: 0 28px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--surface); flex-shrink: 0;
+  }
+  .topbar-left { display: flex; align-items: center; gap: 10px; }
+  .topbar-right { display: flex; align-items: center; gap: 8px; }
+
+  .back-link {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 13px; color: var(--text-muted); text-decoration: none;
+    transition: color 0.15s; cursor: pointer;
+  }
+  .back-link svg { transition: transform 0.15s; }
+  .back-link:hover { color: var(--text-primary); }
+  .back-link:hover svg { transform: translateX(-2px); }
+
+  .btn-save {
+    padding: 7px 18px; border-radius: 7px; border: none;
+    background: var(--accent); color: #fff;
+    font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 500;
+    cursor: pointer; display: flex; align-items: center; gap: 5px;
+    transition: opacity 0.15s, transform 0.15s;
+  }
+  .btn-save:hover { opacity: 0.82; transform: translateY(-1px); }
+
+  .btn-outline {
+    padding: 7px 14px; border-radius: 7px;
+    border: 1.5px solid var(--border); background: transparent;
+    color: var(--text-secondary);
+    font-family: 'DM Sans', sans-serif; font-size: 12.5px; font-weight: 500;
+    cursor: pointer; display: flex; align-items: center; gap: 5px;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .btn-outline:hover { border-color: #888; color: var(--text-primary); }
+
+  .line-count-badge {
+    font-size: 11.5px; color: var(--text-muted);
+    background: var(--bg); border: 1px solid var(--border-subtle);
+    padding: 2px 9px; border-radius: 20px;
+  }
+
+  /* ─── CONTENT ─── */
+  .content { flex: 1; overflow-y: auto; padding: 28px 28px 64px; }
+
+  .lyrics-wrap {
+    max-width: 640px;
+    margin: 0 auto;
+    animation: fadeUp 0.4s ease both;
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ─── SONG HEADER ─── */
+  .song-header {
+    display: flex; align-items: center; gap: 14px;
+    margin-bottom: 20px;
+  }
+  .song-header-art {
+    width: 48px; height: 48px; border-radius: 9px;
+    background: linear-gradient(135deg, #DBEAFE, #BFDBFE);
+    flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  }
+  .song-header-info { flex: 1; }
+  .song-header-title { font-family: 'DM Serif Display', serif; font-size: 20px; letter-spacing: -0.4px; }
+  .song-header-artist { font-size: 12.5px; color: var(--text-muted); }
+
+  /* ─── INSTRUCTIONS ─── */
+  .instructions {
+    font-size: 13px; color: var(--text-muted); line-height: 1.6;
+    margin-bottom: 20px; font-weight: 300;
+  }
+
+  /* ─── MODE TABS ─── */
+  .mode-tabs {
+    display: flex; gap: 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+  }
+  .mode-tab {
+    padding: 8px 16px; font-size: 12.5px; font-weight: 500;
+    color: var(--text-muted); cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s, border-color 0.15s;
+    display: flex; align-items: center; gap: 5px; user-select: none;
+  }
+  .mode-tab:hover { color: var(--text-primary); }
+  .mode-tab.active { color: var(--text-primary); border-bottom-color: var(--accent); }
+
+  .mode-panel { display: none; }
+  .mode-panel.active { display: block; }
+
+  /* ─── BULK PASTE ─── */
+  .bulk-textarea {
+    width: 100%;
+    min-height: 320px;
+    padding: 16px;
+    border-radius: var(--radius);
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    color: var(--text-primary);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px;
+    line-height: 1.8;
+    outline: none;
+    resize: vertical;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .bulk-textarea:focus {
+    border-color: var(--theme);
+    box-shadow: 0 0 0 3px rgba(37,99,235,0.09);
+  }
+  .bulk-textarea::placeholder { color: var(--text-muted); }
+
+  .bulk-hint {
+    font-size: 11.5px; color: var(--text-muted); margin-top: 8px; line-height: 1.5;
+  }
+
+  .bulk-actions {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 16px;
+  }
+
+  .bulk-preview-count {
+    font-size: 12.5px; color: var(--text-secondary);
+    display: flex; align-items: center; gap: 5px;
+  }
+
+  /* ─── LINE-BY-LINE ─── */
+  .line-editor-list { display: flex; flex-direction: column; gap: 4px; }
+
+  .line-editor-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    transition: box-shadow 0.15s, border-color 0.15s;
+  }
+  .line-editor-row:focus-within {
+    border-color: var(--theme);
+    box-shadow: 0 0 0 3px rgba(37,99,235,0.09);
+  }
+
+  .line-drag {
+    color: var(--text-muted);
+    cursor: grab;
+    flex-shrink: 0;
+    display: flex; align-items: center;
+    transition: color 0.12s;
+  }
+  .line-drag:hover { color: var(--text-secondary); }
+
+  .line-editor-num {
+    width: 22px; text-align: center;
+    font-size: 11px; font-weight: 500; color: var(--text-muted);
+    flex-shrink: 0; font-variant-numeric: tabular-nums;
+  }
+
+  .line-editor-input {
+    flex: 1; border: none; outline: none;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px; color: var(--text-primary);
+    background: transparent; min-width: 0;
+  }
+  .line-editor-input::placeholder { color: var(--text-muted); }
+
+  .line-editor-actions {
+    display: flex; align-items: center; gap: 2px;
+    flex-shrink: 0;
+  }
+
+  .le-btn {
+    width: 26px; height: 26px; border-radius: 5px;
+    border: none; background: transparent;
+    color: var(--text-muted); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: color 0.12s, background 0.12s;
+  }
+  .le-btn:hover { color: var(--text-primary); background: var(--accent-light); }
+  .le-btn.danger:hover { color: #DC2626; background: #FEF2F2; }
+
+  /* Add line button */
+  .add-line-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px;
+    border: 2px dashed var(--border);
+    border-radius: 9px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    margin-top: 4px;
+  }
+  .add-line-row:hover {
+    border-color: var(--theme);
+    background: var(--theme-light);
+  }
+
+  .add-line-label {
+    font-size: 12.5px; font-weight: 500;
+    color: var(--text-muted);
+    display: flex; align-items: center; gap: 5px;
+    transition: color 0.15s;
+  }
+  .add-line-row:hover .add-line-label { color: var(--theme-text); }
+
+  /* ─── TOAST ─── */
+  .toast {
+    position: fixed; bottom: 28px; left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: var(--accent); color: #fff;
+    padding: 10px 20px; border-radius: 9px;
+    font-size: 13px; font-weight: 500;
+    display: flex; align-items: center; gap: 8px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.18);
+    transition: transform 0.3s ease; z-index: 100;
+  }
+  .toast.visible { transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<!-- ─── SIDEBAR ─── -->
+<aside class="sidebar">
+  <div class="sidebar-header"><div class="logo">Reprise <span class="logo-dot"></span></div></div>
+  <nav class="sidebar-nav">
+    <a class="nav-item" href="reprise-home-library.html">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+      Library
+    </a>
+  </nav>
+  <div class="sidebar-footer">
+    <a class="nav-item" href="reprise-settings.html" style="margin-bottom:6px;">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+      Settings
+    </a>
+    <div class="user-row">
+      <div class="avatar">AY</div>
+      <div class="user-info"><div class="user-name">Akira Yamada</div><div class="user-email">akira@example.com</div></div>
+    </div>
+  </div>
+</aside>
+
+<!-- ─── MAIN ─── -->
+<div class="main">
+
+  <header class="topbar">
+    <div class="topbar-left">
+      <a class="back-link" href="reprise-song-detail.html">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        Song Detail
+      </a>
+      <span class="line-count-badge" id="line-count">18 lines</span>
+    </div>
+    <div class="topbar-right">
+      <button class="btn-outline" onclick="window.location.href='reprise-timestamp-mapping.html'">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        Set timestamps
+      </button>
+      <button class="btn-save" id="btn-save">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+        Save lyrics
+      </button>
+    </div>
+  </header>
+
+  <div class="content">
+    <div class="lyrics-wrap">
+
+      <div class="song-header">
+        <div class="song-header-art">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#93C5FD" stroke-width="1.5"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+        </div>
+        <div class="song-header-info">
+          <div class="song-header-title">Prema</div>
+          <div class="song-header-artist">Fujii Kaze</div>
+        </div>
+      </div>
+
+      <div class="instructions">
+        Add lyrics line by line. Each line will become a separate practice segment you can drill individually.
+      </div>
+
+      <!-- ─── MODE TABS ─── -->
+      <div class="mode-tabs">
+        <div class="mode-tab active" data-mode="lines">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+          Line by line
+        </div>
+        <div class="mode-tab" data-mode="bulk">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+          Bulk paste
+        </div>
+      </div>
+
+      <!-- ─── LINE BY LINE ─── -->
+      <div class="mode-panel active" id="panel-lines">
+        <div class="line-editor-list" id="line-list">
+          <!-- These are populated by JS for demo -->
+        </div>
+
+        <div class="add-line-row" id="add-line">
+          <span class="add-line-label">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+            Add line
+          </span>
+        </div>
+      </div>
+
+      <!-- ─── BULK PASTE ─── -->
+      <div class="mode-panel" id="panel-bulk">
+        <textarea class="bulk-textarea" id="bulk-textarea" placeholder="Paste full lyrics here...&#10;&#10;Each line will become a separate lyric line.&#10;Empty lines will be ignored."></textarea>
+        <div class="bulk-hint">Tip: Paste lyrics from a lyrics website. Each newline becomes a separate line. Empty lines are ignored.</div>
+        <div class="bulk-actions">
+          <div class="bulk-preview-count" id="bulk-count">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+            <span>0 lines detected</span>
+          </div>
+          <button class="btn-save" id="btn-apply-bulk">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            Apply to editor
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+  Lyrics saved!
+</div>
+
+<script>
+  // ─── Demo data ───
+  const demoLines = [
+    'あなたの目に映る世界が',
+    'どうか美しいものでありますように',
+    'この声が届くなら遠くまで',
+    'きっと何かが変わるはず',
+    'Prema, prema, prema',
+    '愛という名の光の中で',
+    '僕らは踊り続ける',
+    'この夜が明けるまで',
+    'どんな言葉よりも',
+    '強く響くメロディー',
+    'あの日の約束を胸に',
+    '歩き出す　一歩ずつ',
+    '風に吹かれて消えてゆく',
+    'その声が聞こえたら',
+    'Prema, prema',
+    '永遠に続くこの歌を',
+    'あなたに届けたい',
+    'ずっと、ずっと...',
+  ];
+
+  const lineList = document.getElementById('line-list');
+  const lineCountBadge = document.getElementById('line-count');
+
+  function updateCount() {
+    const rows = lineList.querySelectorAll('.line-editor-row');
+    lineCountBadge.textContent = rows.length + ' lines';
+  }
+
+  function createLineRow(text, index) {
+    const row = document.createElement('div');
+    row.className = 'line-editor-row';
+    row.innerHTML = `
+      <div class="line-drag">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="5" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="19" r="1"/></svg>
+      </div>
+      <span class="line-editor-num">${index + 1}</span>
+      <input class="line-editor-input" type="text" value="${text}" placeholder="Enter lyric line…">
+      <div class="line-editor-actions">
+        <button class="le-btn" title="Insert line below">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+        <button class="le-btn danger" title="Delete line">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+    `;
+
+    // Insert line below
+    row.querySelector('.le-btn').addEventListener('click', () => {
+      const newRow = createLineRow('', 0);
+      row.after(newRow);
+      renumber();
+      newRow.querySelector('.line-editor-input').focus();
+    });
+
+    // Delete line
+    row.querySelector('.le-btn.danger').addEventListener('click', () => {
+      row.remove();
+      renumber();
+    });
+
+    return row;
+  }
+
+  function renumber() {
+    lineList.querySelectorAll('.line-editor-row').forEach((row, i) => {
+      row.querySelector('.line-editor-num').textContent = i + 1;
+    });
+    updateCount();
+  }
+
+  // Populate
+  demoLines.forEach((text, i) => {
+    lineList.appendChild(createLineRow(text, i));
+  });
+
+  // Add line button
+  document.getElementById('add-line').addEventListener('click', () => {
+    const rows = lineList.querySelectorAll('.line-editor-row');
+    const newRow = createLineRow('', rows.length);
+    lineList.appendChild(newRow);
+    renumber();
+    newRow.querySelector('.line-editor-input').focus();
+  });
+
+  // ─── Mode tabs ───
+  const modeTabs = document.querySelectorAll('.mode-tab');
+  const modePanels = document.querySelectorAll('.mode-panel');
+
+  modeTabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      modeTabs.forEach(t => t.classList.remove('active'));
+      modePanels.forEach(p => p.classList.remove('active'));
+      tab.classList.add('active');
+      document.getElementById('panel-' + tab.dataset.mode).classList.add('active');
+    });
+  });
+
+  // ─── Bulk textarea line count ───
+  const bulkTextarea = document.getElementById('bulk-textarea');
+  const bulkCount = document.getElementById('bulk-count');
+
+  bulkTextarea.addEventListener('input', () => {
+    const lines = bulkTextarea.value.split('\n').filter(l => l.trim());
+    bulkCount.querySelector('span').textContent = lines.length + ' lines detected';
+  });
+
+  // Apply bulk
+  document.getElementById('btn-apply-bulk').addEventListener('click', () => {
+    const lines = bulkTextarea.value.split('\n').filter(l => l.trim());
+    if (!lines.length) return;
+    lineList.innerHTML = '';
+    lines.forEach((text, i) => lineList.appendChild(createLineRow(text.trim(), i)));
+    renumber();
+    // Switch to line view
+    modeTabs.forEach(t => t.classList.remove('active'));
+    modePanels.forEach(p => p.classList.remove('active'));
+    modeTabs[0].classList.add('active');
+    modePanels[0].classList.add('active');
+  });
+
+  // ─── Save toast ───
+  document.getElementById('btn-save').addEventListener('click', () => {
+    const toast = document.getElementById('toast');
+    toast.classList.add('visible');
+    setTimeout(() => toast.classList.remove('visible'), 2500);
+  });
+</script>
+</body>
+</html>

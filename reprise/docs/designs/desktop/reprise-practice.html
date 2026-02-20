@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reprise — Practice</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #F9F9F9;
+    --surface: #FFFFFF;
+    --border: #E4E4E4;
+    --border-subtle: #EFEFEF;
+    --text-primary: #111111;
+    --text-secondary: #555555;
+    --text-muted: #999999;
+    --accent: #111111;
+    --accent-light: #F0F0F0;
+    --theme: #2563EB;
+    --theme-light: #EFF6FF;
+    --theme-text: #1D4ED8;
+    --radius: 12px;
+  }
+
+  html, body { height: 100%; overflow: hidden; }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text-primary);
+    display: flex;
+    height: 100vh;
+  }
+
+  /* ─── LEFT PANEL: LINE NAVIGATOR ─── */
+  .line-nav {
+    width: 260px;
+    height: 100vh;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+
+  .line-nav-header {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .ln-back {
+    display: flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 6px;
+    border: 1px solid var(--border); background: transparent;
+    color: var(--text-muted); cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+    flex-shrink: 0; text-decoration: none;
+  }
+  .ln-back:hover { border-color: #888; color: var(--text-primary); }
+
+  .ln-title-wrap { flex: 1; min-width: 0; }
+  .ln-song-title { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ln-song-artist { font-size: 11px; color: var(--text-muted); }
+
+  .line-nav-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+  }
+
+  .ln-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: background 0.12s;
+    margin-bottom: 2px;
+  }
+  .ln-item:hover { background: var(--bg); }
+  .ln-item.active { background: var(--theme-light); }
+
+  .ln-num {
+    width: 20px; text-align: center;
+    font-size: 10.5px; font-weight: 500; color: var(--text-muted);
+    flex-shrink: 0; font-variant-numeric: tabular-nums;
+  }
+  .ln-item.active .ln-num { color: var(--theme-text); }
+
+  .ln-dot {
+    width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+  }
+  .ln-dot.mastered { background: #22C55E; }
+  .ln-dot.learning { background: var(--theme); }
+  .ln-dot.not-started { background: var(--border); }
+
+  .ln-text {
+    font-size: 12.5px; color: var(--text-secondary);
+    flex: 1; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .ln-item.active .ln-text { color: var(--theme-text); font-weight: 500; }
+
+  .line-nav-footer {
+    padding: 10px 16px;
+    border-top: 1px solid var(--border-subtle);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+
+  .ln-progress-label { font-size: 11px; color: var(--text-muted); }
+  .ln-progress-pct { font-size: 12px; font-weight: 500; color: var(--theme-text); }
+
+  .ln-progress-track {
+    width: 100%;
+    height: 3px; border-radius: 2px;
+    background: var(--border-subtle);
+    margin-top: 6px;
+    overflow: hidden;
+  }
+  .ln-progress-fill { height: 100%; border-radius: 2px; background: var(--theme); }
+
+  /* ─── MAIN PRACTICE AREA ─── */
+  .practice-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  /* ─── TOPBAR ─── */
+  .practice-topbar {
+    height: 48px;
+    padding: 0 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--surface);
+    flex-shrink: 0;
+  }
+
+  .pt-left { display: flex; align-items: center; gap: 12px; }
+  .pt-right { display: flex; align-items: center; gap: 8px; }
+
+  .loop-badge {
+    font-size: 11px; font-weight: 500;
+    color: var(--theme-text); background: var(--theme-light);
+    padding: 3px 10px; border-radius: 20px;
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+
+  .speed-control {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11.5px; color: var(--text-secondary);
+  }
+
+  .speed-btn {
+    width: 24px; height: 24px; border-radius: 5px;
+    border: 1px solid var(--border); background: transparent;
+    color: var(--text-muted); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 600;
+    transition: border-color 0.12s, color 0.12s;
+  }
+  .speed-btn:hover { border-color: #888; color: var(--text-primary); }
+
+  .speed-value {
+    font-size: 12px; font-weight: 500; color: var(--text-primary);
+    min-width: 32px; text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .pt-btn {
+    padding: 5px 12px; border-radius: 6px;
+    border: 1px solid var(--border); background: transparent;
+    color: var(--text-secondary);
+    font-family: 'DM Sans', sans-serif; font-size: 11.5px; font-weight: 500;
+    cursor: pointer; display: flex; align-items: center; gap: 4px;
+    transition: border-color 0.12s, color 0.12s, background 0.12s;
+  }
+  .pt-btn:hover { border-color: #888; color: var(--text-primary); background: var(--accent-light); }
+  .pt-btn.active { background: var(--theme-light); color: var(--theme-text); border-color: #BFDBFE; }
+
+  /* ─── CENTER CONTENT ─── */
+  .practice-center {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 48px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Previous/Next context lines */
+  .context-line {
+    font-size: 15px;
+    color: var(--text-muted);
+    font-weight: 300;
+    text-align: center;
+    max-width: 600px;
+    line-height: 1.6;
+    opacity: 0.5;
+    margin: 6px 0;
+    transition: opacity 0.3s;
+  }
+  .context-line.prev { opacity: 0.35; }
+
+  /* Current line — the hero */
+  .current-line-wrap {
+    text-align: center;
+    margin: 20px 0;
+    animation: fadeUp 0.3s ease both;
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .current-line-text {
+    font-family: 'DM Serif Display', serif;
+    font-size: 32px;
+    letter-spacing: -0.5px;
+    line-height: 1.35;
+    color: var(--text-primary);
+    max-width: 640px;
+  }
+
+  .hl-falsetto { background: #DBEAFE; border-radius: 4px; padding: 2px 5px; }
+  .hl-whisper { background: #DCFCE7; border-radius: 4px; padding: 2px 5px; }
+  .hl-accent { background: #FEE2E2; border-radius: 4px; padding: 2px 5px; }
+
+  .current-line-meta {
+    display: flex; align-items: center; justify-content: center; gap: 12px;
+    margin-top: 10px;
+  }
+
+  .clm-item {
+    font-size: 11.5px; color: var(--text-muted);
+    display: flex; align-items: center; gap: 4px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .line-status-tag {
+    font-size: 10.5px; font-weight: 500;
+    padding: 2px 9px; border-radius: 20px;
+  }
+  .line-status-tag.learning { background: var(--theme-light); color: var(--theme-text); }
+  .line-status-tag.mastered { background: #DCFCE7; color: #15803D; }
+  .line-status-tag.not-started { background: #F1F5F9; color: #64748B; }
+
+  /* ─── WAVEFORM (line segment) ─── */
+  .line-waveform-wrap {
+    width: 100%;
+    max-width: 560px;
+    margin-top: 24px;
+  }
+
+  .line-waveform {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 56px;
+    cursor: pointer;
+  }
+
+  .lwf-b {
+    flex: 1; border-radius: 2px 2px 0 0;
+    background: #E8E8E8; min-width: 1.5px;
+    transform-origin: bottom;
+    transition: background 0.12s;
+  }
+  .lwf-b.pl { background: var(--theme); }
+
+  .lwf-b.pl.pulse {
+    animation: wfPulse 0.7s ease-in-out infinite alternate;
+  }
+
+  @keyframes wfPulse {
+    to { transform: scaleY(0.74); opacity: 0.78; }
+  }
+
+  .lwf-times {
+    display: flex; justify-content: space-between;
+    font-size: 10px; color: var(--text-muted);
+    font-variant-numeric: tabular-nums; margin-top: 4px;
+  }
+
+  /* ─── TRANSPORT CONTROLS ─── */
+  .transport {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 28px;
+  }
+
+  .transport-btn {
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: border-color 0.15s, color 0.15s, background 0.15s, transform 0.12s;
+  }
+  .transport-btn:hover { border-color: #888; color: var(--text-primary); transform: scale(1.05); }
+
+  .transport-btn.play {
+    width: 56px; height: 56px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+  }
+  .transport-btn.play:hover { opacity: 0.85; transform: scale(1.05); }
+
+  .transport-btn.record {
+    width: 56px; height: 56px;
+    background: #DC2626;
+    color: #fff;
+    border: none;
+    position: relative;
+  }
+  .transport-btn.record:hover { opacity: 0.85; transform: scale(1.05); }
+  .transport-btn.record.recording {
+    animation: recordPulse 1.2s ease-in-out infinite;
+  }
+
+  @keyframes recordPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(220,38,38,0.3); }
+    50% { box-shadow: 0 0 0 10px rgba(220,38,38,0); }
+  }
+
+  /* ─── BOTTOM BAR: RECORDINGS ─── */
+  .recordings-bar {
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    padding: 12px 24px;
+    flex-shrink: 0;
+  }
+
+  .recordings-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 8px;
+  }
+
+  .recordings-title {
+    font-size: 10.5px; font-weight: 500;
+    letter-spacing: 0.09em; text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
+  .recordings-count {
+    font-size: 11px; color: var(--text-muted);
+  }
+
+  .recordings-list {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  .recording-card {
+    min-width: 180px;
+    padding: 10px 14px;
+    background: var(--bg);
+    border: 1px solid var(--border-subtle);
+    border-radius: 9px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    flex-shrink: 0;
+  }
+  .recording-card:hover { border-color: #C8C8C8; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+  .recording-card.master { border-color: #BFDBFE; background: var(--theme-light); }
+
+  .rec-play {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: var(--surface); border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; color: var(--text-secondary);
+    transition: border-color 0.12s;
+  }
+  .recording-card:hover .rec-play { border-color: #888; }
+  .recording-card.master .rec-play { background: #fff; border-color: #93C5FD; }
+
+  .rec-info { flex: 1; min-width: 0; }
+
+  .rec-label {
+    font-size: 12px; font-weight: 500;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .recording-card.master .rec-label { color: var(--theme-text); }
+
+  .rec-meta {
+    font-size: 10.5px; color: var(--text-muted);
+    display: flex; align-items: center; gap: 6px;
+  }
+
+  .master-badge {
+    font-size: 9.5px; font-weight: 600;
+    color: var(--theme-text); background: #DBEAFE;
+    padding: 1px 6px; border-radius: 3px;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+
+  .rec-mini-wf {
+    display: flex; align-items: flex-end; gap: 1px;
+    height: 18px; flex-shrink: 0; width: 40px;
+  }
+
+  .rec-wf-b {
+    flex: 1; border-radius: 1px 1px 0 0;
+    background: var(--border); min-width: 1px;
+  }
+  .recording-card.master .rec-wf-b { background: #93C5FD; }
+</style>
+</head>
+<body>
+
+<!-- ─── LINE NAVIGATOR ─── -->
+<aside class="line-nav">
+  <div class="line-nav-header">
+    <a class="ln-back" href="reprise-song-detail.html">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+    </a>
+    <div class="ln-title-wrap">
+      <div class="ln-song-title">Prema</div>
+      <div class="ln-song-artist">Fujii Kaze</div>
+    </div>
+  </div>
+
+  <div class="line-nav-list" id="line-nav-list">
+    <!-- Populated by JS -->
+  </div>
+
+  <div class="line-nav-footer">
+    <div>
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <span class="ln-progress-label">Mastery</span>
+        <span class="ln-progress-pct">65%</span>
+      </div>
+      <div class="ln-progress-track">
+        <div class="ln-progress-fill" style="width:65%"></div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<!-- ─── PRACTICE MAIN ─── -->
+<div class="practice-main">
+
+  <!-- Topbar -->
+  <div class="practice-topbar">
+    <div class="pt-left">
+      <span class="loop-badge">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg>
+        Loop 3/3
+      </span>
+      <div class="speed-control">
+        <button class="speed-btn" id="speed-down">−</button>
+        <span class="speed-value" id="speed-val">0.8x</span>
+        <button class="speed-btn" id="speed-up">+</button>
+      </div>
+    </div>
+    <div class="pt-right">
+      <button class="pt-btn active" id="btn-vocals">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/></svg>
+        Vocals
+      </button>
+      <button class="pt-btn" id="btn-instrumental">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+        Instrumental
+      </button>
+      <button class="pt-btn" id="btn-reference">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/></svg>
+        Reference
+      </button>
+    </div>
+  </div>
+
+  <!-- Center -->
+  <div class="practice-center">
+    <div class="context-line prev">きっと何かが変わるはず</div>
+
+    <div class="current-line-wrap">
+      <div class="current-line-text">
+        <span class="hl-accent">Prema</span>, <span class="hl-accent">prema</span>, <span class="hl-whisper">prema</span>
+      </div>
+      <div class="current-line-meta">
+        <span class="clm-item">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          0:36 — 0:44
+        </span>
+        <span class="clm-item">Line 5 of 18</span>
+        <span class="line-status-tag learning">Learning</span>
+      </div>
+    </div>
+
+    <div class="context-line">愛という名の光の中で</div>
+
+    <!-- Waveform for this line segment -->
+    <div class="line-waveform-wrap">
+      <div class="line-waveform" id="line-wf"></div>
+      <div class="lwf-times"><span>0:36</span><span>0:44</span></div>
+    </div>
+
+    <!-- Transport -->
+    <div class="transport">
+      <button class="transport-btn" title="Previous line" id="btn-prev">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg>
+      </button>
+      <button class="transport-btn play" title="Play line" id="btn-play">
+        <svg class="i-play" width="20" height="20" viewBox="0 0 24 24" fill="#fff" style="margin-left:2px;">
+          <polygon points="5,3 19,12 5,21"/>
+        </svg>
+        <svg class="i-pause" width="20" height="20" viewBox="0 0 24 24" fill="#fff" style="display:none;">
+          <rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>
+        </svg>
+      </button>
+      <button class="transport-btn record" title="Record" id="btn-record">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="6" fill="#fff" stroke="none"/>
+        </svg>
+      </button>
+      <button class="transport-btn" title="Next line" id="btn-next">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Recordings bar -->
+  <div class="recordings-bar">
+    <div class="recordings-header">
+      <span class="recordings-title">Your recordings</span>
+      <span class="recordings-count">4 takes</span>
+    </div>
+    <div class="recordings-list" id="recordings-list">
+      <!-- Populated by JS -->
+    </div>
+  </div>
+</div>
+
+<script>
+  // ─── Line navigator data ───
+  const lines = [
+    { text: 'あなたの目に映る世界が', status: 'mastered' },
+    { text: 'どうか美しいものでありますように', status: 'mastered' },
+    { text: 'この声が届くなら遠くまで', status: 'learning' },
+    { text: 'きっと何かが変わるはず', status: 'learning' },
+    { text: 'Prema, prema, prema', status: 'learning' },
+    { text: '愛という名の光の中で', status: 'learning' },
+    { text: '僕らは踊り続ける', status: 'not-started' },
+    { text: 'この夜が明けるまで', status: 'not-started' },
+    { text: 'どんな言葉よりも', status: 'learning' },
+    { text: '強く響くメロディー', status: 'mastered' },
+    { text: 'あの日の約束を胸に', status: 'mastered' },
+    { text: '歩き出す　一歩ずつ', status: 'learning' },
+    { text: '風に吹かれて消えてゆく', status: 'not-started' },
+    { text: 'その声が聞こえたら', status: 'not-started' },
+    { text: 'Prema, prema', status: 'learning' },
+    { text: '永遠に続くこの歌を', status: 'mastered' },
+    { text: 'あなたに届けたい', status: 'not-started' },
+    { text: 'ずっと、ずっと...', status: 'learning' },
+  ];
+
+  let activeLine = 4; // 0-indexed, "Prema, prema, prema"
+
+  const navList = document.getElementById('line-nav-list');
+  lines.forEach((line, i) => {
+    const item = document.createElement('div');
+    item.className = 'ln-item' + (i === activeLine ? ' active' : '');
+    item.innerHTML = `
+      <span class="ln-num">${i + 1}</span>
+      <span class="ln-dot ${line.status}"></span>
+      <span class="ln-text">${line.text}</span>
+    `;
+    item.addEventListener('click', () => {
+      navList.querySelectorAll('.ln-item').forEach(el => el.classList.remove('active'));
+      item.classList.add('active');
+      activeLine = i;
+    });
+    navList.appendChild(item);
+  });
+
+  // Scroll active into view
+  setTimeout(() => {
+    navList.querySelector('.ln-item.active')?.scrollIntoView({ block: 'center' });
+  }, 100);
+
+  // ─── Line waveform ───
+  function seededRand(seed) {
+    let s = seed | 0;
+    return () => { s = Math.imul(1664525, s) + 1013904223 | 0; return (s >>> 0) / 4294967295; };
+  }
+
+  const wfEl = document.getElementById('line-wf');
+  const rand = seededRand(7777);
+  const count = 80;
+  const playedCount = Math.round(count * 0.45);
+  for (let i = 0; i < count; i++) {
+    const h = 12 + rand() * 88;
+    const bar = document.createElement('div');
+    bar.className = 'lwf-b' + (i < playedCount ? ' pl pulse' : '');
+    bar.style.height = h + '%';
+    if (i < playedCount) bar.style.animationDelay = ((i * 0.035) % 0.68).toFixed(3) + 's';
+    wfEl.appendChild(bar);
+  }
+
+  // ─── Play/Pause toggle ───
+  const btnPlay = document.getElementById('btn-play');
+  let isPlaying = true;
+
+  btnPlay.addEventListener('click', () => {
+    isPlaying = !isPlaying;
+    btnPlay.querySelector('.i-play').style.display = isPlaying ? 'none' : '';
+    btnPlay.querySelector('.i-pause').style.display = isPlaying ? '' : 'none';
+    wfEl.querySelectorAll('.lwf-b.pl').forEach(b => {
+      b.classList.toggle('pulse', isPlaying);
+    });
+  });
+
+  // Start as playing
+  btnPlay.querySelector('.i-play').style.display = 'none';
+  btnPlay.querySelector('.i-pause').style.display = '';
+
+  // ─── Record toggle ───
+  const btnRecord = document.getElementById('btn-record');
+  btnRecord.addEventListener('click', () => {
+    btnRecord.classList.toggle('recording');
+  });
+
+  // ─── Speed control ───
+  let speed = 80;
+  const speedVal = document.getElementById('speed-val');
+  document.getElementById('speed-down').addEventListener('click', () => {
+    speed = Math.max(50, speed - 5);
+    speedVal.textContent = (speed / 100).toFixed(1) + 'x';
+  });
+  document.getElementById('speed-up').addEventListener('click', () => {
+    speed = Math.min(100, speed + 5);
+    speedVal.textContent = (speed / 100).toFixed(1) + 'x';
+  });
+
+  // ─── Recordings list ───
+  const recList = document.getElementById('recordings-list');
+  const recordings = [
+    { label: 'Take 4', time: 'Just now', duration: '0:08', master: true },
+    { label: 'Take 3', time: '2 min ago', duration: '0:08', master: false },
+    { label: 'Take 2', time: '5 min ago', duration: '0:07', master: false },
+    { label: 'Take 1', time: '8 min ago', duration: '0:09', master: false },
+  ];
+
+  recordings.forEach(rec => {
+    const card = document.createElement('div');
+    card.className = 'recording-card' + (rec.master ? ' master' : '');
+
+    // Mini waveform
+    const miniRand = seededRand(Math.random() * 10000 | 0);
+    let miniWf = '';
+    for (let i = 0; i < 12; i++) {
+      const h = 15 + miniRand() * 85;
+      miniWf += `<div class="rec-wf-b" style="height:${h}%"></div>`;
+    }
+
+    card.innerHTML = `
+      <div class="rec-play">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" style="margin-left:1px;">
+          <polygon points="5,3 19,12 5,21"/>
+        </svg>
+      </div>
+      <div class="rec-info">
+        <div class="rec-label">${rec.label}${rec.master ? ' <span class="master-badge">Master</span>' : ''}</div>
+        <div class="rec-meta">${rec.time} · ${rec.duration}</div>
+      </div>
+      <div class="rec-mini-wf">${miniWf}</div>
+    `;
+    recList.appendChild(card);
+  });
+
+  // ─── Track toggle ───
+  document.querySelectorAll('.pt-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      btn.classList.toggle('active');
+    });
+  });
+</script>
+</body>
+</html>

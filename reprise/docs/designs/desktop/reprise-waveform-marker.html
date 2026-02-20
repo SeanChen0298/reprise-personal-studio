@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reprise — Waveform Markers</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #F9F9F9;
+    --surface: #FFFFFF;
+    --border: #E4E4E4;
+    --border-subtle: #EFEFEF;
+    --text-primary: #111111;
+    --text-secondary: #555555;
+    --text-muted: #999999;
+    --accent: #111111;
+    --accent-light: #F0F0F0;
+    --theme: #2563EB;
+    --theme-light: #EFF6FF;
+    --theme-text: #1D4ED8;
+    --radius: 12px;
+  }
+
+  html, body { height: 100%; overflow: hidden; }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text-primary);
+    display: flex;
+    height: 100vh;
+  }
+
+  /* ─── SIDEBAR ─── */
+  .sidebar {
+    width: 220px; height: 100vh;
+    background: var(--surface); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; flex-shrink: 0;
+  }
+  .sidebar-header { padding: 18px 18px 16px; border-bottom: 1px solid var(--border-subtle); }
+  .logo { font-family: 'DM Serif Display', serif; font-size: 18px; color: var(--text-primary); display: flex; align-items: center; gap: 7px; }
+  .logo-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--theme); display: inline-block; }
+  .sidebar-nav { padding: 12px 10px; display: flex; flex-direction: column; gap: 2px; flex: 1; }
+  .nav-item { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 7px; font-size: 13.5px; font-weight: 500; color: var(--text-secondary); cursor: pointer; text-decoration: none; transition: background 0.12s, color 0.12s; user-select: none; }
+  .nav-item:hover { background: var(--bg); color: var(--text-primary); }
+  .sidebar-footer { padding: 12px 10px; border-top: 1px solid var(--border-subtle); }
+  .user-row { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 7px; cursor: pointer; transition: background 0.12s; }
+  .user-row:hover { background: var(--bg); }
+  .avatar { width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 10.5px; font-weight: 600; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .user-info { flex: 1; min-width: 0; }
+  .user-name { font-size: 12.5px; font-weight: 500; }
+  .user-email { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* ─── MAIN ─── */
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+  .topbar {
+    height: 54px; padding: 0 28px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--surface); flex-shrink: 0;
+  }
+  .topbar-left { display: flex; align-items: center; gap: 10px; }
+  .topbar-right { display: flex; align-items: center; gap: 8px; }
+
+  .back-link {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 13px; color: var(--text-muted); text-decoration: none;
+    transition: color 0.15s; cursor: pointer;
+  }
+  .back-link svg { transition: transform 0.15s; }
+  .back-link:hover { color: var(--text-primary); }
+  .back-link:hover svg { transform: translateX(-2px); }
+
+  .version-badge {
+    font-size: 10px; font-weight: 600;
+    color: #7C3AED; background: #F5F3FF;
+    border: 1px solid #DDD6FE;
+    padding: 2px 8px; border-radius: 20px;
+    letter-spacing: 0.04em; text-transform: uppercase;
+  }
+
+  .btn-save {
+    padding: 7px 18px; border-radius: 7px; border: none;
+    background: var(--accent); color: #fff;
+    font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 500;
+    cursor: pointer; display: flex; align-items: center; gap: 5px;
+    transition: opacity 0.15s, transform 0.15s;
+  }
+  .btn-save:hover { opacity: 0.82; transform: translateY(-1px); }
+
+  .btn-outline {
+    padding: 7px 14px; border-radius: 7px;
+    border: 1.5px solid var(--border); background: transparent;
+    color: var(--text-secondary);
+    font-family: 'DM Sans', sans-serif; font-size: 12.5px; font-weight: 500;
+    cursor: pointer; display: flex; align-items: center; gap: 5px;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .btn-outline:hover { border-color: #888; color: var(--text-primary); }
+
+  /* ─── CONTENT ─── */
+  .content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* ─── ZOOM & TRANSPORT BAR ─── */
+  .toolbar {
+    padding: 10px 28px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    display: flex; align-items: center; justify-content: space-between;
+    flex-shrink: 0;
+  }
+
+  .tool-group { display: flex; align-items: center; gap: 8px; }
+
+  .tool-btn {
+    padding: 5px 10px; border-radius: 6px;
+    border: 1px solid var(--border); background: transparent;
+    color: var(--text-secondary);
+    font-family: 'DM Sans', sans-serif; font-size: 11.5px; font-weight: 500;
+    cursor: pointer; display: flex; align-items: center; gap: 4px;
+    transition: border-color 0.12s, color 0.12s, background 0.12s;
+  }
+  .tool-btn:hover { border-color: #888; color: var(--text-primary); background: var(--accent-light); }
+  .tool-btn.active { background: var(--theme-light); color: var(--theme-text); border-color: #BFDBFE; }
+
+  .tool-separator {
+    width: 1px; height: 20px; background: var(--border-subtle);
+  }
+
+  .time-display {
+    font-size: 14px; font-weight: 300;
+    font-variant-numeric: tabular-nums; letter-spacing: 0.02em;
+  }
+  .time-total { font-size: 12px; color: var(--text-muted); }
+
+  .zoom-control { display: flex; align-items: center; gap: 4px; }
+
+  .zoom-btn {
+    width: 24px; height: 24px; border-radius: 5px;
+    border: 1px solid var(--border); background: transparent;
+    color: var(--text-muted); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 600;
+    transition: border-color 0.12s, color 0.12s;
+  }
+  .zoom-btn:hover { border-color: #888; color: var(--text-primary); }
+
+  .zoom-level {
+    font-size: 11px; font-weight: 500; color: var(--text-secondary);
+    min-width: 36px; text-align: center;
+  }
+
+  /* ─── WAVEFORM EDITOR ─── */
+  .waveform-editor {
+    flex: 1;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0 28px;
+    position: relative;
+    background: var(--surface);
+  }
+
+  .waveform-canvas {
+    position: relative;
+    height: 100%;
+    min-width: 100%;
+    width: 1600px; /* Zoomed width */
+  }
+
+  /* Time ruler */
+  .time-ruler {
+    height: 24px;
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: flex-end;
+    position: relative;
+  }
+
+  .ruler-tick {
+    position: absolute;
+    bottom: 0;
+    font-size: 9px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    transform: translateX(-50%);
+  }
+
+  .ruler-tick::before {
+    content: '';
+    position: absolute;
+    bottom: -1px; left: 50%;
+    width: 1px; height: 6px;
+    background: var(--border);
+  }
+
+  /* Waveform area */
+  .wave-area {
+    position: relative;
+    height: calc(100% - 24px);
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Vocal waveform */
+  .wave-track {
+    flex: 1;
+    position: relative;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .wave-track:last-child { border-bottom: none; }
+
+  .wave-track-label {
+    position: absolute;
+    top: 8px; left: 8px;
+    font-size: 9.5px; font-weight: 600;
+    color: var(--text-muted);
+    background: var(--bg);
+    padding: 2px 7px; border-radius: 4px;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    z-index: 5;
+  }
+
+  .wave-bars {
+    position: absolute;
+    inset: 16px 0 8px;
+    display: flex;
+    align-items: center;
+    gap: 1px;
+  }
+
+  .wb {
+    flex: 1; min-width: 1px;
+    background: #E0E0E0;
+    border-radius: 1px;
+    transition: background 0.08s;
+  }
+
+  .wave-track.vocals .wb { background: #B3D4FC; }
+  .wave-track.instrumental .wb { background: #E0E0E0; }
+
+  /* Line regions overlay */
+  .line-regions {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+  }
+
+  .marker-region {
+    position: absolute;
+    top: 0; bottom: 0;
+    background: rgba(37,99,235,0.08);
+    border-left: 2px solid var(--theme);
+    border-right: 2px solid var(--theme);
+    transition: background 0.12s;
+    cursor: pointer;
+  }
+  .marker-region:hover {
+    background: rgba(37,99,235,0.14);
+  }
+  .marker-region.selected {
+    background: rgba(37,99,235,0.18);
+    border-color: var(--accent);
+  }
+
+  /* Drag handles */
+  .marker-handle {
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 8px;
+    cursor: col-resize;
+    z-index: 6;
+  }
+  .marker-handle.left { left: -4px; }
+  .marker-handle.right { right: -4px; }
+
+  .marker-handle::after {
+    content: '';
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 4px; height: 24px;
+    border-radius: 2px;
+    background: var(--theme);
+    opacity: 0;
+    transition: opacity 0.12s;
+  }
+  .marker-handle:hover::after,
+  .marker-region.selected .marker-handle::after { opacity: 1; }
+
+  /* Region label */
+  .region-label {
+    position: absolute;
+    top: 4px; left: 8px;
+    font-size: 9px; font-weight: 600;
+    color: var(--theme-text);
+    background: var(--theme-light);
+    padding: 1px 5px; border-radius: 3px;
+    pointer-events: none;
+    white-space: nowrap;
+    max-width: calc(100% - 16px);
+    overflow: hidden; text-overflow: ellipsis;
+  }
+
+  .region-time {
+    position: absolute;
+    bottom: 4px; left: 8px;
+    font-size: 8.5px; font-weight: 500;
+    color: var(--theme-text);
+    font-variant-numeric: tabular-nums;
+    pointer-events: none;
+    opacity: 0.7;
+  }
+
+  /* Playhead */
+  .editor-playhead {
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 2px;
+    background: #DC2626;
+    z-index: 10;
+    pointer-events: none;
+  }
+  .editor-playhead::before {
+    content: '';
+    position: absolute;
+    top: -3px; left: -5px;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 6px solid #DC2626;
+  }
+
+  /* ─── BOTTOM PANEL: SELECTED LINE ─── */
+  .detail-panel {
+    height: 120px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    padding: 14px 28px;
+    display: flex;
+    align-items: flex-start;
+    gap: 24px;
+    flex-shrink: 0;
+  }
+
+  .dp-line-info { flex: 1; }
+
+  .dp-line-num {
+    font-size: 10.5px; font-weight: 500;
+    color: var(--text-muted); letter-spacing: 0.06em;
+    text-transform: uppercase; margin-bottom: 4px;
+  }
+
+  .dp-line-text {
+    font-size: 16px; font-weight: 500;
+    letter-spacing: -0.2px; margin-bottom: 8px;
+  }
+
+  .dp-line-status {
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  .dp-status-tag {
+    font-size: 10.5px; font-weight: 500;
+    padding: 2px 9px; border-radius: 20px;
+  }
+  .dp-status-tag.learning { background: var(--theme-light); color: var(--theme-text); }
+
+  .dp-recordings {
+    font-size: 11px; color: var(--text-muted);
+    display: flex; align-items: center; gap: 4px;
+  }
+
+  /* Time inputs */
+  .dp-times { display: flex; flex-direction: column; gap: 8px; }
+
+  .dp-time-group { display: flex; align-items: center; gap: 6px; }
+
+  .dp-time-label {
+    font-size: 10.5px; font-weight: 500;
+    color: var(--text-muted); width: 36px;
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+
+  .dp-time-input {
+    width: 72px;
+    padding: 5px 9px;
+    border-radius: 5px;
+    border: 1.5px solid var(--border);
+    background: var(--bg);
+    color: var(--text-primary);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 12.5px;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .dp-time-input:focus { border-color: var(--theme); }
+
+  .dp-time-ms {
+    font-size: 10px; color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Actions */
+  .dp-actions { display: flex; flex-direction: column; gap: 6px; }
+
+  .dp-btn {
+    padding: 6px 14px; border-radius: 6px;
+    border: 1px solid var(--border); background: transparent;
+    color: var(--text-secondary);
+    font-family: 'DM Sans', sans-serif; font-size: 11.5px; font-weight: 500;
+    cursor: pointer; display: flex; align-items: center; gap: 4px;
+    transition: border-color 0.12s, color 0.12s, background 0.12s;
+    white-space: nowrap;
+  }
+  .dp-btn:hover { border-color: #888; color: var(--text-primary); background: var(--accent-light); }
+  .dp-btn.play { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .dp-btn.play:hover { opacity: 0.85; }
+</style>
+</head>
+<body>
+
+<!-- ─── SIDEBAR ─── -->
+<aside class="sidebar">
+  <div class="sidebar-header"><div class="logo">Reprise <span class="logo-dot"></span></div></div>
+  <nav class="sidebar-nav">
+    <a class="nav-item" href="reprise-home-library.html">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+      Library
+    </a>
+  </nav>
+  <div class="sidebar-footer">
+    <a class="nav-item" href="reprise-settings.html" style="margin-bottom:6px;">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+      Settings
+    </a>
+    <div class="user-row">
+      <div class="avatar">AY</div>
+      <div class="user-info"><div class="user-name">Akira Yamada</div><div class="user-email">akira@example.com</div></div>
+    </div>
+  </div>
+</aside>
+
+<!-- ─── MAIN ─── -->
+<div class="main">
+
+  <header class="topbar">
+    <div class="topbar-left">
+      <a class="back-link" href="reprise-song-detail.html">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        Song Detail
+      </a>
+      <span class="version-badge">v1.5</span>
+    </div>
+    <div class="topbar-right">
+      <button class="btn-outline" onclick="window.location.href='reprise-timestamp-mapping.html'">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        Tap-to-mark
+      </button>
+      <button class="btn-save">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+        Save markers
+      </button>
+    </div>
+  </header>
+
+  <div class="content">
+
+    <!-- ─── TOOLBAR ─── -->
+    <div class="toolbar">
+      <div class="tool-group">
+        <button class="tool-btn active">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 9l4 4L19 3"/></svg>
+          Select
+        </button>
+        <button class="tool-btn">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+          Split
+        </button>
+        <button class="tool-btn">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          Delete
+        </button>
+        <div class="tool-separator"></div>
+        <button class="tool-btn" title="Snap to grid">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>
+          Snap
+        </button>
+      </div>
+
+      <div class="tool-group">
+        <span class="time-display" id="toolbar-time">0:24</span>
+        <span class="time-total"> / 3:42</span>
+      </div>
+
+      <div class="tool-group">
+        <div class="zoom-control">
+          <button class="zoom-btn" id="zoom-out">−</button>
+          <span class="zoom-level" id="zoom-level">200%</span>
+          <button class="zoom-btn" id="zoom-in">+</button>
+        </div>
+        <div class="tool-separator"></div>
+        <button class="tool-btn">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/></svg>
+          Fit all
+        </button>
+      </div>
+    </div>
+
+    <!-- ─── WAVEFORM EDITOR ─── -->
+    <div class="waveform-editor">
+      <div class="waveform-canvas" id="waveform-canvas">
+        <!-- Time ruler -->
+        <div class="time-ruler" id="time-ruler"></div>
+
+        <!-- Wave area -->
+        <div class="wave-area">
+          <!-- Vocals track -->
+          <div class="wave-track vocals">
+            <span class="wave-track-label">Vocals</span>
+            <div class="wave-bars" id="vocal-bars"></div>
+          </div>
+
+          <!-- Instrumental track -->
+          <div class="wave-track instrumental">
+            <span class="wave-track-label">Instrumental</span>
+            <div class="wave-bars" id="inst-bars"></div>
+          </div>
+
+          <!-- Line regions -->
+          <div class="line-regions" id="line-regions"></div>
+
+          <!-- Playhead -->
+          <div class="editor-playhead" id="editor-playhead" style="left:11%"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── DETAIL PANEL ─── -->
+    <div class="detail-panel">
+      <div class="dp-line-info">
+        <div class="dp-line-num">Line 3 of 18</div>
+        <div class="dp-line-text">この声が届くなら遠くまで</div>
+        <div class="dp-line-status">
+          <span class="dp-status-tag learning">Learning</span>
+          <span class="dp-recordings">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/></svg>
+            5 recordings
+          </span>
+        </div>
+      </div>
+
+      <div class="dp-times">
+        <div class="dp-time-group">
+          <span class="dp-time-label">Start</span>
+          <input class="dp-time-input" type="text" value="0:24.0">
+          <span class="dp-time-ms">24000 ms</span>
+        </div>
+        <div class="dp-time-group">
+          <span class="dp-time-label">End</span>
+          <input class="dp-time-input" type="text" value="0:30.0">
+          <span class="dp-time-ms">30000 ms</span>
+        </div>
+      </div>
+
+      <div class="dp-actions">
+        <button class="dp-btn play">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Play region
+        </button>
+        <button class="dp-btn">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          Fine-tune
+        </button>
+        <button class="dp-btn">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg>
+          Loop
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ─── Seeded PRNG ───
+  function seededRand(seed) {
+    let s = seed | 0;
+    return () => { s = Math.imul(1664525, s) + 1013904223 | 0; return (s >>> 0) / 4294967295; };
+  }
+
+  // ─── Time ruler ───
+  const ruler = document.getElementById('time-ruler');
+  const totalSec = 222; // 3:42
+  const canvasWidth = 1600;
+
+  for (let sec = 0; sec <= totalSec; sec += 10) {
+    const pct = (sec / totalSec * 100).toFixed(2);
+    const tick = document.createElement('div');
+    tick.className = 'ruler-tick';
+    tick.style.left = pct + '%';
+    const m = Math.floor(sec / 60);
+    const s = (sec % 60).toString().padStart(2, '0');
+    tick.textContent = m + ':' + s;
+    ruler.appendChild(tick);
+  }
+
+  // ─── Waveform bars ───
+  const vocalBars = document.getElementById('vocal-bars');
+  const instBars = document.getElementById('inst-bars');
+  const vRand = seededRand(1337);
+  const iRand = seededRand(9876);
+  const barCount = 600;
+
+  for (let i = 0; i < barCount; i++) {
+    const vh = 10 + vRand() * 80;
+    const vb = document.createElement('div');
+    vb.className = 'wb';
+    vb.style.height = vh + '%';
+    vocalBars.appendChild(vb);
+
+    const ih = 10 + iRand() * 80;
+    const ib = document.createElement('div');
+    ib.className = 'wb';
+    ib.style.height = ih + '%';
+    instBars.appendChild(ib);
+  }
+
+  // ─── Line regions ───
+  const regionsEl = document.getElementById('line-regions');
+  const lineData = [
+    { num: 1, text: 'あなたの目に映る世界が', start: 12, end: 18 },
+    { num: 2, text: 'どうか美しいものでありますように', start: 18, end: 24 },
+    { num: 3, text: 'この声が届くなら遠くまで', start: 24, end: 30, selected: true },
+    { num: 4, text: 'きっと何かが変わるはず', start: 30, end: 36 },
+    { num: 5, text: 'Prema, prema, prema', start: 36, end: 44 },
+    { num: 6, text: '愛という名の光の中で', start: 44, end: 52 },
+    { num: 7, text: '僕らは踊り続ける', start: 52, end: 58 },
+    { num: 8, text: 'この夜が明けるまで', start: 58, end: 64 },
+    { num: 9, text: 'どんな言葉よりも', start: 64, end: 70 },
+    { num: 10, text: '強く響くメロディー', start: 70, end: 78 },
+  ];
+
+  lineData.forEach(line => {
+    const leftPct = (line.start / totalSec * 100).toFixed(2);
+    const widthPct = ((line.end - line.start) / totalSec * 100).toFixed(2);
+
+    const region = document.createElement('div');
+    region.className = 'marker-region' + (line.selected ? ' selected' : '');
+    region.style.left = leftPct + '%';
+    region.style.width = widthPct + '%';
+
+    const startM = Math.floor(line.start / 60);
+    const startS = (line.start % 60).toString().padStart(2, '0');
+    const endM = Math.floor(line.end / 60);
+    const endS = (line.end % 60).toString().padStart(2, '0');
+
+    region.innerHTML = `
+      <div class="marker-handle left"></div>
+      <div class="marker-handle right"></div>
+      <span class="region-label">${line.num}. ${line.text}</span>
+      <span class="region-time">${startM}:${startS} — ${endM}:${endS}</span>
+    `;
+
+    region.addEventListener('click', () => {
+      regionsEl.querySelectorAll('.marker-region').forEach(r => r.classList.remove('selected'));
+      region.classList.add('selected');
+    });
+
+    regionsEl.appendChild(region);
+  });
+
+  // ─── Zoom controls ───
+  let zoomLevel = 200;
+  const zoomLevelEl = document.getElementById('zoom-level');
+  const canvas = document.getElementById('waveform-canvas');
+
+  document.getElementById('zoom-in').addEventListener('click', () => {
+    zoomLevel = Math.min(400, zoomLevel + 50);
+    zoomLevelEl.textContent = zoomLevel + '%';
+    canvas.style.width = (800 * zoomLevel / 100) + 'px';
+  });
+
+  document.getElementById('zoom-out').addEventListener('click', () => {
+    zoomLevel = Math.max(100, zoomLevel - 50);
+    zoomLevelEl.textContent = zoomLevel + '%';
+    canvas.style.width = (800 * zoomLevel / 100) + 'px';
+  });
+</script>
+</body>
+</html>

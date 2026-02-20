@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reprise — Tap to Mark</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #F9F9F9;
+    --surface: #FFFFFF;
+    --border: #E4E4E4;
+    --border-subtle: #EFEFEF;
+    --text-primary: #111111;
+    --text-secondary: #555555;
+    --text-muted: #999999;
+    --accent: #111111;
+    --accent-light: #F0F0F0;
+    --theme: #2563EB;
+    --theme-light: #EFF6FF;
+    --theme-text: #1D4ED8;
+    --radius: 12px;
+  }
+
+  html, body { height: 100%; overflow: hidden; }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text-primary);
+    display: flex;
+    height: 100vh;
+  }
+
+  /* ─── SIDEBAR ─── */
+  .sidebar {
+    width: 220px; height: 100vh;
+    background: var(--surface); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; flex-shrink: 0;
+  }
+  .sidebar-header { padding: 18px 18px 16px; border-bottom: 1px solid var(--border-subtle); }
+  .logo { font-family: 'DM Serif Display', serif; font-size: 18px; color: var(--text-primary); display: flex; align-items: center; gap: 7px; }
+  .logo-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--theme); display: inline-block; }
+  .sidebar-nav { padding: 12px 10px; display: flex; flex-direction: column; gap: 2px; flex: 1; }
+  .nav-item { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 7px; font-size: 13.5px; font-weight: 500; color: var(--text-secondary); cursor: pointer; text-decoration: none; transition: background 0.12s, color 0.12s; user-select: none; }
+  .nav-item:hover { background: var(--bg); color: var(--text-primary); }
+  .sidebar-footer { padding: 12px 10px; border-top: 1px solid var(--border-subtle); }
+  .user-row { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 7px; cursor: pointer; transition: background 0.12s; }
+  .user-row:hover { background: var(--bg); }
+  .avatar { width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 10.5px; font-weight: 600; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .user-info { flex: 1; min-width: 0; }
+  .user-name { font-size: 12.5px; font-weight: 500; }
+  .user-email { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* ─── MAIN ─── */
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+  .topbar {
+    height: 54px; padding: 0 28px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--surface); flex-shrink: 0;
+  }
+  .topbar-left { display: flex; align-items: center; gap: 10px; }
+  .topbar-right { display: flex; align-items: center; gap: 8px; }
+
+  .back-link {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 13px; color: var(--text-muted); text-decoration: none;
+    transition: color 0.15s; cursor: pointer;
+  }
+  .back-link svg { transition: transform 0.15s; }
+  .back-link:hover { color: var(--text-primary); }
+  .back-link:hover svg { transform: translateX(-2px); }
+
+  .mode-badge {
+    font-size: 10.5px; font-weight: 600;
+    color: #D97706; background: #FFFBEB;
+    border: 1px solid #FDE68A;
+    padding: 3px 10px; border-radius: 20px;
+    letter-spacing: 0.04em; text-transform: uppercase;
+  }
+
+  .btn-save {
+    padding: 7px 18px; border-radius: 7px; border: none;
+    background: var(--accent); color: #fff;
+    font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 500;
+    cursor: pointer; display: flex; align-items: center; gap: 5px;
+    transition: opacity 0.15s, transform 0.15s;
+  }
+  .btn-save:hover { opacity: 0.82; transform: translateY(-1px); }
+
+  .btn-outline {
+    padding: 7px 14px; border-radius: 7px;
+    border: 1.5px solid var(--border); background: transparent;
+    color: var(--text-secondary);
+    font-family: 'DM Sans', sans-serif; font-size: 12.5px; font-weight: 500;
+    cursor: pointer; display: flex; align-items: center; gap: 5px;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .btn-outline:hover { border-color: #888; color: var(--text-primary); }
+
+  /* ─── LAYOUT: WAVEFORM TOP + LYRICS BOTTOM ─── */
+  .content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* ─── WAVEFORM SECTION ─── */
+  .waveform-section {
+    padding: 20px 28px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    flex-shrink: 0;
+  }
+
+  .wf-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 12px;
+  }
+
+  .wf-time-display {
+    font-size: 20px;
+    font-weight: 300;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+    color: var(--text-primary);
+  }
+
+  .wf-time-total {
+    font-size: 13px;
+    color: var(--text-muted);
+    font-weight: 400;
+  }
+
+  .wf-controls {
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  .wf-btn {
+    width: 32px; height: 32px; border-radius: 50%;
+    border: 1.5px solid var(--border); background: var(--surface);
+    color: var(--text-secondary); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: border-color 0.15s, color 0.15s, transform 0.12s;
+  }
+  .wf-btn:hover { border-color: #888; color: var(--text-primary); transform: scale(1.05); }
+  .wf-btn.play { background: var(--accent); color: #fff; border: none; width: 38px; height: 38px; }
+  .wf-btn.play:hover { opacity: 0.85; transform: scale(1.05); }
+
+  /* Full waveform */
+  .full-waveform-wrap { position: relative; }
+
+  .full-waveform {
+    display: flex;
+    align-items: flex-end;
+    gap: 1px;
+    height: 64px;
+    cursor: pointer;
+    position: relative;
+  }
+
+  .fwf-b {
+    flex: 1; border-radius: 2px 2px 0 0;
+    background: #E8E8E8; min-width: 1px;
+    transition: background 0.08s;
+  }
+  .fwf-b.pl { background: var(--theme); }
+  .fwf-b.region { background: #BFDBFE; }
+
+  /* Playhead */
+  .playhead {
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 2px;
+    background: var(--accent);
+    z-index: 10;
+    pointer-events: none;
+    transition: left 0.1s linear;
+  }
+
+  .playhead::after {
+    content: '';
+    position: absolute;
+    top: -4px;
+    left: -4px;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  /* Line regions on waveform */
+  .wf-regions {
+    position: absolute; inset: 0;
+    pointer-events: none;
+  }
+
+  .wf-region {
+    position: absolute;
+    top: 0; bottom: 0;
+    border-left: 2px solid var(--theme);
+    background: rgba(37,99,235,0.06);
+    transition: background 0.15s;
+  }
+  .wf-region.current {
+    background: rgba(37,99,235,0.12);
+    border-left-color: var(--theme);
+  }
+
+  .wf-region-label {
+    position: absolute;
+    top: 2px; left: 6px;
+    font-size: 9px; font-weight: 600;
+    color: var(--theme-text);
+    background: var(--theme-light);
+    padding: 1px 5px; border-radius: 3px;
+    opacity: 0.8;
+  }
+
+  .wf-times {
+    display: flex; justify-content: space-between;
+    font-size: 10px; color: var(--text-muted);
+    font-variant-numeric: tabular-nums; margin-top: 4px;
+  }
+
+  /* ─── LYRICS / TAP SECTION ─── */
+  .tap-section {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .tap-instructions {
+    padding: 14px 28px;
+    background: #FFFBEB;
+    border-bottom: 1px solid #FDE68A;
+    display: flex; align-items: center; gap: 10px;
+    flex-shrink: 0;
+  }
+
+  .tap-instructions-icon { color: #D97706; flex-shrink: 0; }
+
+  .tap-instructions-text {
+    font-size: 12.5px; color: #92400E; line-height: 1.5;
+  }
+  .tap-instructions-text strong { font-weight: 600; }
+
+  .tap-kbd {
+    display: inline-flex; align-items: center;
+    padding: 1px 6px; border-radius: 4px;
+    background: #FEF3C7; border: 1px solid #FDE68A;
+    font-size: 11px; font-weight: 600; color: #92400E;
+    font-family: 'DM Sans', sans-serif;
+  }
+
+  /* Line list for tapping */
+  .tap-lines {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 28px;
+  }
+
+  .tap-line {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-radius: 9px;
+    margin-bottom: 4px;
+    transition: background 0.12s;
+  }
+  .tap-line.done {
+    background: var(--surface);
+    border: 1px solid var(--border-subtle);
+  }
+  .tap-line.current {
+    background: var(--theme-light);
+    border: 1.5px solid #BFDBFE;
+  }
+  .tap-line.pending {
+    opacity: 0.5;
+  }
+
+  .tap-num {
+    width: 22px; text-align: center;
+    font-size: 11px; font-weight: 500; color: var(--text-muted);
+    flex-shrink: 0; font-variant-numeric: tabular-nums;
+  }
+  .tap-line.current .tap-num { color: var(--theme-text); font-weight: 600; }
+
+  .tap-check {
+    width: 18px; height: 18px; border-radius: 50%;
+    flex-shrink: 0; display: flex;
+    align-items: center; justify-content: center;
+  }
+  .tap-check.done { background: #22C55E; color: #fff; }
+  .tap-check.current { background: var(--theme); color: #fff; animation: tapPulse 1.2s ease-in-out infinite; }
+  .tap-check.pending { border: 1.5px solid var(--border); }
+
+  @keyframes tapPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(37,99,235,0.3); }
+    50% { box-shadow: 0 0 0 8px rgba(37,99,235,0); }
+  }
+
+  .tap-text {
+    flex: 1; font-size: 14px; line-height: 1.5;
+    color: var(--text-primary); min-width: 0;
+  }
+  .tap-line.current .tap-text { font-weight: 500; color: var(--theme-text); }
+  .tap-line.pending .tap-text { color: var(--text-muted); }
+
+  .tap-timestamps {
+    font-size: 11px; color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0; min-width: 80px; text-align: right;
+  }
+  .tap-line.current .tap-timestamps { color: var(--theme-text); }
+
+  .tap-edit-btn {
+    width: 24px; height: 24px; border-radius: 5px;
+    border: none; background: transparent;
+    color: var(--text-muted); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: color 0.12s, background 0.12s;
+    flex-shrink: 0;
+  }
+  .tap-edit-btn:hover { color: var(--text-primary); background: var(--accent-light); }
+
+  /* ─── TAP BUTTON (bottom bar) ─── */
+  .tap-bar {
+    padding: 16px 28px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    flex-shrink: 0;
+  }
+
+  .tap-button {
+    padding: 14px 48px;
+    border-radius: 12px;
+    border: none;
+    background: var(--theme);
+    color: #fff;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 15px;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: opacity 0.15s, transform 0.1s;
+    user-select: none;
+  }
+  .tap-button:hover { opacity: 0.9; }
+  .tap-button:active { transform: scale(0.97); }
+
+  .tap-hint {
+    font-size: 12px; color: var(--text-muted);
+    display: flex; align-items: center; gap: 4px;
+  }
+
+  .undo-btn {
+    padding: 8px 14px; border-radius: 7px;
+    border: 1.5px solid var(--border); background: transparent;
+    color: var(--text-secondary);
+    font-family: 'DM Sans', sans-serif; font-size: 12px; font-weight: 500;
+    cursor: pointer; display: flex; align-items: center; gap: 4px;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .undo-btn:hover { border-color: #888; color: var(--text-primary); }
+</style>
+</head>
+<body>
+
+<!-- ─── SIDEBAR ─── -->
+<aside class="sidebar">
+  <div class="sidebar-header"><div class="logo">Reprise <span class="logo-dot"></span></div></div>
+  <nav class="sidebar-nav">
+    <a class="nav-item" href="reprise-home-library.html">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+      Library
+    </a>
+  </nav>
+  <div class="sidebar-footer">
+    <a class="nav-item" href="reprise-settings.html" style="margin-bottom:6px;">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+      Settings
+    </a>
+    <div class="user-row">
+      <div class="avatar">AY</div>
+      <div class="user-info"><div class="user-name">Akira Yamada</div><div class="user-email">akira@example.com</div></div>
+    </div>
+  </div>
+</aside>
+
+<!-- ─── MAIN ─── -->
+<div class="main">
+
+  <header class="topbar">
+    <div class="topbar-left">
+      <a class="back-link" href="reprise-song-detail.html">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        Song Detail
+      </a>
+      <span class="mode-badge">Tap-to-mark mode</span>
+    </div>
+    <div class="topbar-right">
+      <button class="btn-outline" onclick="window.location.href='reprise-waveform-marker.html'">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M9 12h12M3 18h18"/></svg>
+        Drag markers
+      </button>
+      <button class="btn-save">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+        Save timestamps
+      </button>
+    </div>
+  </header>
+
+  <div class="content">
+
+    <!-- ─── WAVEFORM ─── -->
+    <div class="waveform-section">
+      <div class="wf-header">
+        <div>
+          <span class="wf-time-display" id="current-time">0:24</span>
+          <span class="wf-time-total"> / 3:42</span>
+        </div>
+        <div class="wf-controls">
+          <button class="wf-btn" title="Rewind 5s">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg>
+          </button>
+          <button class="wf-btn play" id="wf-play">
+            <svg class="i-play" width="14" height="14" viewBox="0 0 24 24" fill="#fff" style="margin-left:2px;display:none;">
+              <polygon points="5,3 19,12 5,21"/>
+            </svg>
+            <svg class="i-pause" width="14" height="14" viewBox="0 0 24 24" fill="#fff">
+              <rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>
+            </svg>
+          </button>
+          <button class="wf-btn" title="Forward 5s">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="full-waveform-wrap">
+        <div class="full-waveform" id="full-wf"></div>
+        <div class="playhead" id="playhead" style="left:10.8%"></div>
+
+        <!-- Line regions already marked -->
+        <div class="wf-regions">
+          <div class="wf-region" style="left:5.4%;width:2.7%"><span class="wf-region-label">1</span></div>
+          <div class="wf-region" style="left:8.1%;width:2.7%"><span class="wf-region-label">2</span></div>
+          <div class="wf-region current" style="left:10.8%;width:2.7%"><span class="wf-region-label">3</span></div>
+        </div>
+      </div>
+
+      <div class="wf-times"><span>0:00</span><span>1:00</span><span>2:00</span><span>3:00</span><span>3:42</span></div>
+    </div>
+
+    <!-- ─── TAP SECTION ─── -->
+    <div class="tap-section">
+      <div class="tap-instructions">
+        <div class="tap-instructions-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        </div>
+        <div class="tap-instructions-text">
+          <strong>Play audio and tap</strong> the button (or press <span class="tap-kbd">Space</span>) each time a new line begins. The current playback time will be set as the line's start time.
+        </div>
+      </div>
+
+      <div class="tap-lines" id="tap-lines">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+
+    <!-- ─── TAP BAR ─── -->
+    <div class="tap-bar">
+      <button class="undo-btn" id="btn-undo">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
+        Undo
+      </button>
+      <button class="tap-button" id="tap-btn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <circle cx="12" cy="12" r="10"/>
+          <polyline points="12 6 12 12 16 14"/>
+        </svg>
+        Tap to mark line start
+      </button>
+      <div class="tap-hint">
+        <span class="tap-kbd">Space</span>
+        or click
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ─── Data ───
+  const lines = [
+    'あなたの目に映る世界が',
+    'どうか美しいものでありますように',
+    'この声が届くなら遠くまで',
+    'きっと何かが変わるはず',
+    'Prema, prema, prema',
+    '愛という名の光の中で',
+    '僕らは踊り続ける',
+    'この夜が明けるまで',
+    'どんな言葉よりも',
+    '強く響くメロディー',
+    'あの日の約束を胸に',
+    '歩き出す　一歩ずつ',
+    '風に吹かれて消えてゆく',
+    'その声が聞こえたら',
+    'Prema, prema',
+    '永遠に続くこの歌を',
+    'あなたに届けたい',
+    'ずっと、ずっと...',
+  ];
+
+  // First 3 lines already have timestamps
+  const timestamps = [
+    { start: '0:12', end: '0:18' },
+    { start: '0:18', end: '0:24' },
+    { start: '0:24', end: '0:30' },
+  ];
+
+  let currentIdx = 3; // Next line to mark
+
+  const tapLinesEl = document.getElementById('tap-lines');
+
+  function render() {
+    tapLinesEl.innerHTML = '';
+    lines.forEach((text, i) => {
+      const state = i < currentIdx ? 'done' : i === currentIdx ? 'current' : 'pending';
+      const ts = timestamps[i];
+
+      const row = document.createElement('div');
+      row.className = `tap-line ${state}`;
+      row.innerHTML = `
+        <span class="tap-num">${i + 1}</span>
+        <div class="tap-check ${state}">
+          ${state === 'done' ? '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>' :
+            state === 'current' ? '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>' : ''}
+        </div>
+        <span class="tap-text">${text}</span>
+        <span class="tap-timestamps">${ts ? ts.start + ' — ' + ts.end : state === 'current' ? 'Waiting...' : '—'}</span>
+        ${state === 'done' ? '<button class="tap-edit-btn" title="Edit timestamp"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></button>' : ''}
+      `;
+      tapLinesEl.appendChild(row);
+    });
+
+    // Scroll current into view
+    const currentEl = tapLinesEl.querySelector('.tap-line.current');
+    if (currentEl) currentEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+
+  render();
+
+  // ─── Tap button ───
+  const tapBtn = document.getElementById('tap-btn');
+  const currentTime = document.getElementById('current-time');
+  let fakeTime = 30; // seconds
+
+  tapBtn.addEventListener('click', doTap);
+
+  document.addEventListener('keydown', e => {
+    if (e.code === 'Space') { e.preventDefault(); doTap(); }
+  });
+
+  function doTap() {
+    if (currentIdx >= lines.length) return;
+
+    fakeTime += 6;
+    const mins = Math.floor(fakeTime / 60);
+    const secs = (fakeTime % 60).toString().padStart(2, '0');
+    const endTime = fakeTime + 6;
+    const endMins = Math.floor(endTime / 60);
+    const endSecs = (endTime % 60).toString().padStart(2, '0');
+
+    timestamps[currentIdx] = {
+      start: `${mins}:${secs}`,
+      end: `${endMins}:${endSecs}`
+    };
+
+    currentIdx++;
+    currentTime.textContent = `${mins}:${secs}`;
+    render();
+
+    // Flash tap button
+    tapBtn.style.transform = 'scale(0.95)';
+    setTimeout(() => tapBtn.style.transform = '', 100);
+  }
+
+  // ─── Undo ───
+  document.getElementById('btn-undo').addEventListener('click', () => {
+    if (currentIdx <= 3) return; // Don't undo pre-set timestamps
+    currentIdx--;
+    timestamps.splice(currentIdx, 1);
+    fakeTime -= 6;
+    render();
+  });
+
+  // ─── Full waveform ───
+  function seededRand(seed) {
+    let s = seed | 0;
+    return () => { s = Math.imul(1664525, s) + 1013904223 | 0; return (s >>> 0) / 4294967295; };
+  }
+
+  const fullWf = document.getElementById('full-wf');
+  const rand = seededRand(1337);
+  const barCount = 200;
+  const playedPct = 0.108;
+  const playedBars = Math.round(barCount * playedPct);
+
+  for (let i = 0; i < barCount; i++) {
+    const h = 8 + rand() * 92;
+    const bar = document.createElement('div');
+    bar.className = 'fwf-b' + (i < playedBars ? ' pl' : '');
+    bar.style.height = h + '%';
+    fullWf.appendChild(bar);
+  }
+
+  // ─── Play/Pause toggle ───
+  const wfPlay = document.getElementById('wf-play');
+  wfPlay.addEventListener('click', () => {
+    const play = wfPlay.querySelector('.i-play');
+    const pause = wfPlay.querySelector('.i-pause');
+    if (play.style.display === 'none') {
+      play.style.display = '';
+      pause.style.display = 'none';
+    } else {
+      play.style.display = 'none';
+      pause.style.display = '';
+    }
+  });
+</script>
+</body>
+</html>
