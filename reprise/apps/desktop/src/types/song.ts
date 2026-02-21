@@ -17,12 +17,27 @@ export interface Song {
   user_id?: string;
 }
 
+export type LineStatus = "not_started" | "learning" | "mastered";
+
+export interface Line {
+  id: string;
+  song_id: string;
+  text: string;
+  start_ms?: number;
+  end_ms?: number;
+  status: LineStatus;
+  order: number;
+  updated_at: string;
+}
+
 export interface YouTubeMetadata {
   video_id: string;
   youtube_url: string;
   title: string;
   author: string;
   thumbnail_url: string;
+  /** Raw lyrics text returned by yt-dlp sidecar (optional) */
+  lyrics?: string;
 }
 
 export interface ImportDraft {
@@ -33,4 +48,6 @@ export interface ImportDraft {
   language: string;
   tags: string[];
   notes: string;
+  /** Raw lyrics text to pre-populate the lyrics page */
+  lyrics?: string;
 }

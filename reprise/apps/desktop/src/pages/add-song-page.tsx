@@ -63,7 +63,7 @@ export function AddSongPage() {
     if (!draft || !title.trim()) return;
     setSaving(true);
 
-    addSong({
+    const song = addSong({
       title: title.trim(),
       artist: artist.trim(),
       youtube_url: draft.metadata.youtube_url,
@@ -75,12 +75,10 @@ export function AddSongPage() {
       user_id: undefined,
     });
 
-    // Clear the draft
-    setImportDraft(null);
-
+    // Keep the draft so the lyrics page can read its lyrics field
     setSaving(false);
     setSaved(true);
-    setTimeout(() => navigate("/library"), 1200);
+    setTimeout(() => navigate(`/lyrics/${song.id}`), 800);
   }
 
   function handleDiscard() {

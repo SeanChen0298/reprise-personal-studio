@@ -9,6 +9,7 @@ import { ForgotPasswordPage } from "./pages/forgot-password-page";
 import { LibraryPage } from "./pages/library-page";
 import { ImportUrlPage } from "./pages/import-url-page";
 import { AddSongPage } from "./pages/add-song-page";
+import { LyricsPage } from "./pages/lyrics-page";
 
 export function App() {
   const initialize = useAuthStore((s) => s.initialize);
@@ -56,6 +57,14 @@ export function App() {
           element={
             <ProtectedRoute>
               <AddSongPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/lyrics/:songId"
+          element={
+            <ProtectedRoute>
+              <LyricsPage />
             </ProtectedRoute>
           }
         />
