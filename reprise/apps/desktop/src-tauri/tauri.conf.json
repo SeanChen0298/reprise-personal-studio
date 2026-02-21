@@ -23,5 +23,8 @@
     "security": {
       "csp": null
     }
+  },
+  "bundle": {
+    "resources": ["sidecars/map_song.py"]
   }
 }

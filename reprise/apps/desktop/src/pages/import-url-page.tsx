@@ -42,7 +42,6 @@ export function ImportUrlPage() {
 
   function handleContinue() {
     if (!metadata) return;
-    // Pre-populate the draft with fetched metadata
     setImportDraft({
       metadata,
       title: metadata.title,
@@ -51,6 +50,7 @@ export function ImportUrlPage() {
       language: "",
       tags: [],
       notes: "",
+      lyrics: metadata.lyrics,
     });
     navigate("/add-song");
   }

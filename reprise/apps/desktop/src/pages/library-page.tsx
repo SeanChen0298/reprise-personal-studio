@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Sidebar } from "../components/sidebar";
 import { useSongStore } from "../stores/song-store";
@@ -162,7 +163,14 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
 export function LibraryPage() {
   const navigate = useNavigate();
   const songs = useSongStore((s) => s.songs);
+  const loading = useSongStore((s) => s.loading);
+  const loadSongs = useSongStore((s) => s.loadSongs);
   const togglePin = useSongStore((s) => s.togglePin);
+
+  // Load from SQLite on mount (no-op in browser dev mode)
+  useEffect(() => {
+    loadSongs();
+  }, [loadSongs]);
 
   const pinned = songs.filter((s) => s.pinned);
   const rest = songs.filter((s) => !s.pinned);
@@ -196,7 +204,11 @@ export function LibraryPage() {
 
         {/* Content */}
         <main className="flex-1 overflow-y-auto px-7 py-7">
-          {ordered.length === 0 ? (
+          {loading ? (
+            <div className="flex items-center justify-center flex-1 py-24">
+              <div className="w-8 h-8 border-[3px] border-[var(--border-subtle)] border-t-[var(--theme)] rounded-full animate-spin" />
+            </div>
+          ) : ordered.length === 0 ? (
             <EmptyState onAdd={() => navigate("/import")} />
           ) : (
             <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
