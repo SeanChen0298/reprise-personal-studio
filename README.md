@@ -1,7 +1,12 @@
 # Reprise
-> Personal practice studio for mastering songs, line by line. Demo URL: https://desktop-weld.vercel.app/
+> Personal practice studio for mastering songs, line by line. 
 
 ---
+
+## Demo
+
+Designs: https://desktop-weld.vercel.app/
+Desktop: https://reprise-personal-studio-desktop.vercel.app/
 
 ## Vision
 
