@@ -23,14 +23,19 @@ export const useAuthStore = create<AuthStore>((set) => ({
   error: null,
 
   initialize: async () => {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    set({
-      session,
-      user: session?.user ?? null,
-      loading: false,
-    });
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      set({
+        session,
+        user: session?.user ?? null,
+        loading: false,
+      });
+    } catch (err) {
+      console.error("Failed to initialize auth:", err);
+      set({ loading: false });
+    }
 
     supabase.auth.onAuthStateChange((_event, session) => {
       set({
