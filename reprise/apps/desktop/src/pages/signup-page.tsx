@@ -62,11 +62,14 @@ const FEATURE_LIST = [
 export function SignupPage() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
+  const error = useAuthStore((s) => s.error);
   const signUpWithEmail = useAuthStore((s) => s.signUpWithEmail);
   const signInWithGoogle = useAuthStore((s) => s.signInWithGoogle);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [confirmationSent, setConfirmationSent] = useState(false);
 
   useEffect(() => {
     if (user) navigate("/home", { replace: true });
@@ -76,10 +79,17 @@ export function SignupPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setIsLoading(true);
     try {
-      await signUpWithEmail(email, password);
+      const { needsConfirmation } = await signUpWithEmail(email, password);
+      if (needsConfirmation) {
+        setConfirmationSent(true);
+      }
+      // if no confirmation needed, onAuthStateChange fires and useEffect navigates
     } catch {
       /* error is in store */
+    } finally {
+      setIsLoading(false);
     }
   }
 
@@ -107,6 +117,28 @@ export function SignupPage() {
     </>
   );
 
+  if (confirmationSent) {
+    return (
+      <AuthLayout leftContent={leftContent}>
+        <div className="font-serif text-[27px] tracking-[-0.5px] mb-1">
+          Check your email
+        </div>
+        <div className="text-[13.5px] text-[var(--text-muted)] mb-7 font-light">
+          We sent a confirmation link to <strong className="text-[var(--text-primary)]">{email}</strong>. Open it to activate your account.
+        </div>
+        <div className="text-center mt-[22px] text-[13px] text-[var(--text-muted)]">
+          Wrong address?{" "}
+          <button
+            onClick={() => setConfirmationSent(false)}
+            className="text-[var(--text-primary)] font-medium bg-none border-none border-b border-[var(--border)] hover:border-[var(--text-primary)] transition-colors cursor-pointer p-0"
+          >
+            Go back
+          </button>
+        </div>
+      </AuthLayout>
+    );
+  }
+
   return (
     <AuthLayout leftContent={leftContent}>
       <div className="font-serif text-[27px] tracking-[-0.5px] mb-1">
@@ -129,6 +161,12 @@ export function SignupPage() {
         <span className="text-xs text-[var(--text-muted)]">or</span>
         <div className="flex-1 h-px bg-[var(--border-subtle)]" />
       </div>
+
+      {error && (
+        <div className="mb-4 px-3 py-2.5 rounded-[7px] bg-red-50 border border-red-200 text-[13px] text-red-600">
+          {error}
+        </div>
+      )}
 
       <form onSubmit={handleSubmit}>
         <div className="mb-3">
@@ -182,9 +220,10 @@ export function SignupPage() {
 
         <button
           type="submit"
-          className="w-full py-[11px] rounded-[9px] bg-[var(--accent)] text-white font-sans text-[13.5px] font-medium cursor-pointer mt-1.5 hover:opacity-[0.82] hover:-translate-y-px transition-all"
+          disabled={isLoading}
+          className="w-full py-[11px] rounded-[9px] bg-[var(--accent)] text-white font-sans text-[13.5px] font-medium cursor-pointer mt-1.5 hover:opacity-[0.82] hover:-translate-y-px transition-all disabled:opacity-60 disabled:cursor-not-allowed disabled:translate-y-0"
         >
-          Create account
+          {isLoading ? "Creating account…" : "Create account"}
         </button>
       </form>
 

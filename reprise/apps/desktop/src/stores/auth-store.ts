@@ -9,7 +9,7 @@ interface AuthStore {
   error: string | null;
   initialize: () => Promise<void>;
   signInWithEmail: (email: string, password: string) => Promise<void>;
-  signUpWithEmail: (email: string, password: string) => Promise<void>;
+  signUpWithEmail: (email: string, password: string) => Promise<{ needsConfirmation: boolean }>;
   signInWithGoogle: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -59,11 +59,13 @@ export const useAuthStore = create<AuthStore>((set) => ({
 
   signUpWithEmail: async (email, password) => {
     set({ error: null });
-    const { error } = await supabase.auth.signUp({ email, password });
+    const { data, error } = await supabase.auth.signUp({ email, password });
     if (error) {
       set({ error: error.message });
       throw error;
     }
+    // session is null when email confirmation is required
+    return { needsConfirmation: !data.session };
   },
 
   signInWithGoogle: async () => {
