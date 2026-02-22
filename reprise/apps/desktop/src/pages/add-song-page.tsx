@@ -59,11 +59,13 @@ export function AddSongPage() {
     }
   }
 
+  const downloadSongAudio = useSongStore((s) => s.downloadSongAudio);
+
   async function handleSave() {
     if (!draft || !title.trim()) return;
     setSaving(true);
 
-    addSong({
+    const song = addSong({
       title: title.trim(),
       artist: artist.trim(),
       youtube_url: draft.metadata.youtube_url,
@@ -77,6 +79,9 @@ export function AddSongPage() {
 
     // Clear the draft
     setImportDraft(null);
+
+    // Trigger audio download in the background
+    downloadSongAudio(song.id);
 
     setSaving(false);
     setSaved(true);

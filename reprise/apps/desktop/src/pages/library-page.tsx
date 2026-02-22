@@ -36,9 +36,46 @@ function MasteryRing({ value }: { value: number }) {
   );
 }
 
-function SongCard({ song, onPin }: { song: Song; onPin: (id: string) => void }) {
+function DownloadBadge({ status }: { status?: string }) {
+  if (status === "downloading") {
+    return (
+      <div className="absolute bottom-2 left-2 flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/60 text-white text-[10px] font-medium">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin">
+          <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+        </svg>
+        Downloading
+      </div>
+    );
+  }
+  if (status === "done") {
+    return (
+      <div className="absolute bottom-2 left-2 flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/60 text-[#22C55E] text-[10px] font-medium">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+        Ready
+      </div>
+    );
+  }
+  if (status === "error") {
+    return (
+      <div className="absolute bottom-2 left-2 flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/60 text-red-400 text-[10px] font-medium">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" />
+        </svg>
+        Error
+      </div>
+    );
+  }
+  return null;
+}
+
+function SongCard({ song, onPin, onClick }: { song: Song; onPin: (id: string) => void; onClick: () => void }) {
   return (
-    <div className="group bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)] overflow-hidden hover:shadow-md transition-shadow cursor-pointer">
+    <div
+      onClick={onClick}
+      className="group bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)] overflow-hidden hover:shadow-md transition-shadow cursor-pointer"
+    >
       {/* Thumbnail */}
       <div className="relative w-full aspect-video bg-gradient-to-br from-[#1a1a2e] via-[#16213e] to-[#0f3460] overflow-hidden">
         {song.thumbnail_url ? (
@@ -81,6 +118,7 @@ function SongCard({ song, onPin }: { song: Song; onPin: (id: string) => void }) 
             <path d="M16 3L8 3L8 13L5 16L12 16L12 21L12 16L19 16L16 13L16 3Z" />
           </svg>
         </button>
+        <DownloadBadge status={song.download_status} />
       </div>
 
       {/* Info */}
@@ -201,7 +239,12 @@ export function LibraryPage() {
           ) : (
             <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
               {ordered.map((song) => (
-                <SongCard key={song.id} song={song} onPin={togglePin} />
+                <SongCard
+                  key={song.id}
+                  song={song}
+                  onPin={togglePin}
+                  onClick={() => navigate(`/song/${song.id}`)}
+                />
               ))}
             </div>
           )}

@@ -1,3 +1,6 @@
+export type DownloadStatus = "idle" | "downloading" | "done" | "error";
+export type LineStatus = "not_started" | "learning" | "mastered";
+
 export interface Song {
   id: string;
   title: string;
@@ -12,9 +15,25 @@ export interface Song {
   notes?: string;
   pinned: boolean;
   mastery: number; // 0–100
+  audio_path?: string;
+  audio_folder?: string; // e.g. "C:/Reprise/Prema - Fujii Kaze"
+  download_status?: DownloadStatus;
+  download_error?: string;
   created_at: string;
   updated_at: string;
   user_id?: string;
+}
+
+export interface Line {
+  id: string;
+  song_id: string;
+  text: string;
+  order: number;
+  start_ms?: number;
+  end_ms?: number;
+  status: LineStatus;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface YouTubeMetadata {

@@ -9,6 +9,9 @@ import { ForgotPasswordPage } from "./pages/forgot-password-page";
 import { LibraryPage } from "./pages/library-page";
 import { ImportUrlPage } from "./pages/import-url-page";
 import { AddSongPage } from "./pages/add-song-page";
+import { SongDetailPage } from "./pages/song-detail-page";
+import { SongSetupPage } from "./pages/song-setup-page";
+import { LyricsInputPage } from "./pages/lyrics-input-page";
 
 export function App() {
   const initialize = useAuthStore((s) => s.initialize);
@@ -56,6 +59,30 @@ export function App() {
           element={
             <ProtectedRoute>
               <AddSongPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/song/:id"
+          element={
+            <ProtectedRoute>
+              <SongDetailPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/song/:id/setup"
+          element={
+            <ProtectedRoute>
+              <SongSetupPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/song/:id/lyrics"
+          element={
+            <ProtectedRoute>
+              <LyricsInputPage />
             </ProtectedRoute>
           }
         />
