@@ -12,6 +12,7 @@ import { AddSongPage } from "./pages/add-song-page";
 import { SongDetailPage } from "./pages/song-detail-page";
 import { SongSetupPage } from "./pages/song-setup-page";
 import { LyricsInputPage } from "./pages/lyrics-input-page";
+import { SettingsPage } from "./pages/settings-page";
 
 export function App() {
   const initialize = useAuthStore((s) => s.initialize);
@@ -83,6 +84,14 @@ export function App() {
           element={
             <ProtectedRoute>
               <LyricsInputPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <ProtectedRoute>
+              <SettingsPage />
             </ProtectedRoute>
           }
         />

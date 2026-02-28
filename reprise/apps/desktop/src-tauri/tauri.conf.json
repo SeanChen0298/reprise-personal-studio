@@ -45,14 +45,7 @@
   },
   "plugins": {
     "shell": {
-      "open": true,
-      "scope": [
-        {
-          "name": "yt-dlp",
-          "cmd": "yt-dlp",
-          "args": true
-        }
-      ]
+      "open": true
     }
   }
 }
