@@ -24,7 +24,7 @@ export function LyricsInputPage() {
   const [saved, setSaved] = useState(false);
 
   // Language fetch state
-  const [lyricsLang, setLyricsLang] = useState(
+  const [lyricsLang, setLyricsLang] = useState<string>(
     song?.language
       ? SUBTITLE_LANGUAGES.find(
           (l) => l.label.toLowerCase() === song.language?.toLowerCase()
