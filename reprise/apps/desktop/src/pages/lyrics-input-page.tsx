@@ -15,7 +15,7 @@ export function LyricsInputPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const song = useSongStore((s) => s.songs.find((s) => s.id === id));
-  const storedLines = useSongStore((s) => (id ? s.lines[id] ?? [] : []));
+  const storedLines = useSongStore((s) => (id ? s.lines[id] : undefined)) ?? [];
   const setLines = useSongStore((s) => s.setLines);
 
   const [mode, setMode] = useState<Mode>("lines");

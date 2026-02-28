@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Sidebar } from "../components/sidebar";
 import { AudioPlayer } from "../components/audio-player";
@@ -21,7 +22,11 @@ export function SongDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const song = useSongStore((s) => s.songs.find((s) => s.id === id));
-  const lines = useSongStore((s) => (id ? (s.lines[id] ?? []).sort((a, b) => a.order - b.order) : []));
+  const rawLines = useSongStore((s) => (id ? s.lines[id] : undefined));
+  const lines = useMemo(
+    () => (rawLines ? [...rawLines].sort((a, b) => a.order - b.order) : []),
+    [rawLines]
+  );
   if (!song) {
     return (
       <div className="flex h-screen items-center justify-center bg-[var(--bg)]">
