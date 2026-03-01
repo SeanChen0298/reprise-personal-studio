@@ -4,6 +4,7 @@ import type { Song, ImportDraft, Line, LineStatus, Annotation } from "../types/s
 import {
   downloadAudio,
   buildSongFolder,
+  separateStems,
 } from "../lib/audio-download";
 
 interface SongStore {
@@ -19,8 +20,9 @@ interface SongStore {
   removeSong: (id: string) => void;
   togglePin: (id: string) => void;
 
-  // Audio download
+  // Audio download & stem separation
   downloadSongAudio: (id: string) => Promise<void>;
+  separateSongStems: (id: string) => Promise<void>;
 
   // Lines management
   setLines: (songId: string, lines: Line[]) => void;
@@ -146,6 +148,33 @@ export const useSongStore = create<SongStore>()(
             download_status: "error",
             download_error:
               err instanceof Error ? err.message : "Download failed",
+          });
+        }
+      },
+
+      separateSongStems: async (id) => {
+        const song = get().songs.find((s) => s.id === id);
+        if (!song?.audio_path || song.download_status !== "done") return;
+        if (!song.audio_folder) return;
+
+        get().updateSong(id, {
+          stem_status: "processing",
+          stem_error: undefined,
+        });
+
+        try {
+          const result = await separateStems(song.audio_path, song.audio_folder);
+
+          get().updateSong(id, {
+            stem_status: "done",
+            vocals_path: result.vocalsPath,
+            instrumental_path: result.instrumentalPath,
+          });
+        } catch (err) {
+          get().updateSong(id, {
+            stem_status: "error",
+            stem_error:
+              err instanceof Error ? err.message : "Stem separation failed",
           });
         }
       },

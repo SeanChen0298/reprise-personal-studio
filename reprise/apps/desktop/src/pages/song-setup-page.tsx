@@ -7,6 +7,7 @@ export function SongSetupPage() {
   const navigate = useNavigate();
   const song = useSongStore((s) => s.songs.find((s) => s.id === id));
   const downloadSongAudio = useSongStore((s) => s.downloadSongAudio);
+  const separateSongStems = useSongStore((s) => s.separateSongStems);
 
   if (!song) {
     return (
@@ -19,6 +20,10 @@ export function SongSetupPage() {
   const isDownloaded = song.download_status === "done";
   const isDownloading = song.download_status === "downloading";
   const hasError = song.download_status === "error";
+
+  const stemsDone = song.stem_status === "done";
+  const stemsProcessing = song.stem_status === "processing";
+  const stemsError = song.stem_status === "error";
 
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--bg)]">
@@ -163,7 +168,7 @@ export function SongSetupPage() {
               )}
             </div>
 
-            {/* Separated Tracks Section (Coming Soon) */}
+            {/* Separated Tracks Section (Demucs) */}
             <div className="mb-6">
               <div className="flex items-center gap-2 mb-3">
                 <span className="text-[10.5px] font-medium uppercase tracking-[0.09em] text-[var(--text-muted)] flex-shrink-0">
@@ -172,40 +177,105 @@ export function SongSetupPage() {
                 <div className="flex-1 h-px bg-[var(--border-subtle)]" />
               </div>
 
-              {/* Vocals - coming soon */}
-              <div className="flex items-center gap-3.5 p-4 bg-[var(--bg)] border border-dashed border-[var(--border)] rounded-[var(--radius)] mb-2 opacity-60 relative">
-                <div className="w-10 h-10 rounded-[9px] bg-[#DCFCE7] text-[#15803D] flex items-center justify-center flex-shrink-0">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
-                    <path d="M19 10v2a7 7 0 01-14 0v-2" />
-                    <line x1="12" y1="19" x2="12" y2="23" />
-                    <line x1="8" y1="23" x2="16" y2="23" />
-                  </svg>
+              {stemsProcessing ? (
+                /* Processing state */
+                <div className="flex items-center gap-3.5 p-4 bg-[#FFFBEB] border border-[#FDE68A] rounded-[var(--radius)]">
+                  <div className="w-10 h-10 rounded-[9px] bg-[#FEF3C7] text-[#D97706] flex items-center justify-center flex-shrink-0">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="animate-spin">
+                      <circle cx="12" cy="12" r="10" />
+                      <polyline points="12 6 12 12 16 14" />
+                    </svg>
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-[13px] font-medium text-[#92400E] mb-[6px]">Separating tracks with Demucs...</div>
+                    <div className="h-1 bg-[#FDE68A] rounded-sm overflow-hidden">
+                      <div className="h-full w-[65%] bg-gradient-to-r from-[#F59E0B] to-[#D97706] rounded-sm animate-pulse" />
+                    </div>
+                    <div className="text-[11px] text-[#B45309] mt-1.5">This may take a minute. Processing locally on your machine.</div>
+                  </div>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[13.5px] font-medium text-[var(--text-muted)]">Vocals track</div>
-                  <div className="text-[11.5px] text-[var(--text-muted)]">Isolated vocal track via Demucs</div>
-                </div>
-                <span className="px-2.5 py-1 rounded-full bg-[#F0F0F0] text-[10px] font-medium text-[var(--text-muted)]">
-                  Coming soon
-                </span>
-              </div>
+              ) : stemsDone ? (
+                /* Done state - show both tracks */
+                <div className="flex flex-col gap-1.5">
+                  {/* Vocals */}
+                  <div className="flex items-center gap-3.5 p-4 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)] hover:shadow-[0_2px_12px_rgba(0,0,0,0.05)] transition-shadow">
+                    <div className="w-10 h-10 rounded-[9px] bg-[#DCFCE7] text-[#15803D] flex items-center justify-center flex-shrink-0">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
+                        <path d="M19 10v2a7 7 0 01-14 0v-2" />
+                      </svg>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[13.5px] font-medium flex items-center gap-[6px]">
+                        <span className="w-[6px] h-[6px] rounded-full bg-[#22C55E] flex-shrink-0" />
+                        vocals.wav
+                      </div>
+                      <div className="text-[11.5px] text-[var(--text-muted)]">Isolated vocal track</div>
+                    </div>
+                  </div>
 
-              {/* Instrumental - coming soon */}
-              <div className="flex items-center gap-3.5 p-4 bg-[var(--bg)] border border-dashed border-[var(--border)] rounded-[var(--radius)] mb-2 opacity-60">
-                <div className="w-10 h-10 rounded-[9px] bg-[#FFF7ED] text-[#C2410C] flex items-center justify-center flex-shrink-0">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
-                  </svg>
+                  {/* Instrumental */}
+                  <div className="flex items-center gap-3.5 p-4 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)] hover:shadow-[0_2px_12px_rgba(0,0,0,0.05)] transition-shadow">
+                    <div className="w-10 h-10 rounded-[9px] bg-[#FFF7ED] text-[#C2410C] flex items-center justify-center flex-shrink-0">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
+                      </svg>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[13.5px] font-medium flex items-center gap-[6px]">
+                        <span className="w-[6px] h-[6px] rounded-full bg-[#22C55E] flex-shrink-0" />
+                        no_vocals.wav
+                      </div>
+                      <div className="text-[11.5px] text-[var(--text-muted)]">Instrumental (no vocals)</div>
+                    </div>
+                  </div>
+
+                  {/* Re-separate button */}
+                  <button
+                    onClick={() => separateSongStems(song.id)}
+                    className="mt-1 self-start px-3 py-[5px] rounded-[6px] border-[1.5px] border-[var(--border)] bg-transparent text-[12px] font-medium text-[var(--text-secondary)] hover:border-[#888] hover:text-[var(--text-primary)] transition-all flex items-center gap-1"
+                  >
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="23 4 23 10 17 10" />
+                      <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
+                    </svg>
+                    Re-separate
+                  </button>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[13.5px] font-medium text-[var(--text-muted)]">Instrumental track</div>
-                  <div className="text-[11.5px] text-[var(--text-muted)]">Background music without vocals</div>
+              ) : (
+                /* Idle / error state */
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-center gap-3.5 p-4 bg-[var(--bg)] border border-dashed border-[var(--border)] rounded-[var(--radius)]">
+                    <div className="w-10 h-10 rounded-[9px] bg-[#DCFCE7] text-[#15803D] flex items-center justify-center flex-shrink-0">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
+                        <path d="M19 10v2a7 7 0 01-14 0v-2" />
+                      </svg>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[13.5px] font-medium text-[var(--text-muted)]">Vocals & Instrumental</div>
+                      <div className="text-[11.5px] text-[var(--text-muted)]">
+                        {stemsError ? (
+                          <span className="text-red-500">{song.stem_error}</span>
+                        ) : (
+                          "Separate audio into vocal and instrumental tracks"
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => separateSongStems(song.id)}
+                      disabled={!isDownloaded}
+                      className="px-3 py-[5px] rounded-[6px] bg-[var(--accent)] text-white border-[1.5px] border-[var(--accent)] text-[12px] font-medium hover:opacity-85 transition-opacity flex items-center gap-1 disabled:opacity-50 flex-shrink-0"
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="8" y1="12" x2="16" y2="12" />
+                      </svg>
+                      {stemsError ? "Retry" : "Separate"}
+                    </button>
+                  </div>
                 </div>
-                <span className="px-2.5 py-1 rounded-full bg-[#F0F0F0] text-[10px] font-medium text-[var(--text-muted)]">
-                  Coming soon
-                </span>
-              </div>
+              )}
             </div>
 
             {/* Additional Files Section (Coming Soon) */}
@@ -240,7 +310,7 @@ export function SongSetupPage() {
                 </svg>
               </div>
               <div className="text-[12.5px] text-[var(--theme-text)] leading-relaxed">
-                <strong className="font-semibold">Demucs separation</strong> will run locally on your machine in a future update. It will require the Demucs sidecar to be installed. GPU acceleration is recommended for faster processing.
+                <strong className="font-semibold">Demucs separation</strong> runs locally on your machine using Python. Requires Python 3.11, FFmpeg, and Demucs to be installed. Check Settings → Downloads for installation status.
               </div>
             </div>
           </div>

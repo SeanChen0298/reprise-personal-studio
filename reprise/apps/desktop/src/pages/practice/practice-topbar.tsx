@@ -5,9 +5,10 @@ interface Props {
   activeTrack: string;
   onTrackChange: (track: "vocals" | "instrumental" | "reference") => void;
   onClearRange?: () => void;
+  hasStemSeparation?: boolean;
 }
 
-export function PracticeTopbar({ player, activeTrack, onTrackChange, onClearRange }: Props) {
+export function PracticeTopbar({ player, activeTrack, onTrackChange, onClearRange, hasStemSeparation }: Props) {
   return (
     <div className="h-12 px-6 border-b border-[var(--border)] flex items-center justify-between bg-[var(--surface)] flex-shrink-0">
       <div className="flex items-center gap-3">
@@ -88,6 +89,7 @@ export function PracticeTopbar({ player, activeTrack, onTrackChange, onClearRang
           label="Vocals"
           active={activeTrack === "vocals"}
           onClick={() => onTrackChange("vocals")}
+          disabled={!hasStemSeparation}
           icon={
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
@@ -99,7 +101,7 @@ export function PracticeTopbar({ player, activeTrack, onTrackChange, onClearRang
           label="Instrumental"
           active={activeTrack === "instrumental"}
           onClick={() => onTrackChange("instrumental")}
-          disabled
+          disabled={!hasStemSeparation}
           icon={
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M9 18V5l12-2v13" />
@@ -141,7 +143,7 @@ function TrackButton({
     <button
       onClick={onClick}
       disabled={disabled}
-      title={disabled ? "Coming soon" : undefined}
+      title={disabled ? "Separate tracks in Audio Setup first" : undefined}
       className={`py-[5px] px-3 rounded-[6px] border text-[11.5px] font-medium cursor-pointer flex items-center gap-1 transition-all ${
         active
           ? "bg-[var(--theme-light)] text-[var(--theme-text)] border-[#BFDBFE]"

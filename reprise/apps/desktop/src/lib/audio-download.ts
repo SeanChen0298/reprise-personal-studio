@@ -468,6 +468,54 @@ export async function fetchLyricsForLanguage(
   return lyrics;
 }
 
+/** Separate a song's audio into vocals and instrumental using Demucs.
+ *  Returns paths to the output WAV files. */
+export async function separateStems(
+  audioPath: string,
+  songFolder: string,
+): Promise<{ vocalsPath: string; instrumentalPath: string }> {
+  // Demucs outputs to <outputDir>/htdemucs/<stem-name>/vocals.wav
+  // We use the song folder as output dir so stems stay with the song
+  const command = Command.create("python", [
+    "-m", "demucs",
+    "-n", "htdemucs",
+    "--two-stems", "vocals",
+    "-o", songFolder,
+    audioPath,
+  ]);
+
+  const result = await spawnAndWait(command, "[demucs]");
+
+  if (result.code !== 0) {
+    // Check for common errors
+    if (result.stderr.includes("No module named 'demucs'")) {
+      throw new Error("Demucs is not installed. Run: pip install demucs soundfile");
+    }
+    if (result.stderr.includes("FFmpeg is not installed")) {
+      throw new Error("FFmpeg is not installed. Run: winget install Gyan.FFmpeg");
+    }
+    throw new Error(result.stderr.split("\n").filter(Boolean).pop() || "Demucs separation failed");
+  }
+
+  // Demucs names the output folder after the input filename (without extension)
+  const audioFileName = audioPath.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "audio";
+  const stemDir = `${songFolder}/htdemucs/${audioFileName}`;
+  const vocalsPath = `${stemDir}/vocals.wav`;
+  const instrumentalPath = `${stemDir}/no_vocals.wav`;
+
+  // Verify output files exist
+  const [vocalsExist, instExist] = await Promise.all([
+    exists(vocalsPath),
+    exists(instrumentalPath),
+  ]);
+
+  if (!vocalsExist || !instExist) {
+    throw new Error("Demucs completed but output files were not found");
+  }
+
+  return { vocalsPath, instrumentalPath };
+}
+
 /** Check if yt-dlp is available on the system. Returns version string or null. */
 export async function checkYtDlpInstalled(): Promise<string | null> {
   try {

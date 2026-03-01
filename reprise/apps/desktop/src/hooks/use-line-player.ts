@@ -95,6 +95,33 @@ export function useLinePlayer(opts: Options): UseLinePlayerReturn {
     setLoopCount(1);
   }, [currentLineIndex, lineStartSec, hasTimestamps, loopEnabled]);
 
+  // Handle audio source changes (e.g. track switching between vocals/instrumental/reference)
+  const prevAudioPathRef = useRef(audioPath);
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || audioPath === prevAudioPathRef.current) {
+      prevAudioPathRef.current = audioPath;
+      return;
+    }
+    const wasPlaying = stateRef.current.isPlaying;
+    const time = audio.currentTime;
+    prevAudioPathRef.current = audioPath;
+
+    // Explicitly load the new source — React updating src alone isn't reliable
+    audio.load();
+
+    const handleLoaded = () => {
+      audio.currentTime = time;
+      audio.playbackRate = speed;
+      if (wasPlaying) {
+        audio.play().then(() => setIsPlaying(true)).catch(() => {});
+      }
+      audio.removeEventListener("canplay", handleLoaded);
+    };
+    audio.addEventListener("canplay", handleLoaded);
+    return () => audio.removeEventListener("canplay", handleLoaded);
+  }, [audioPath, speed]);
+
   // Apply speed changes
   useEffect(() => {
     const audio = audioRef.current;

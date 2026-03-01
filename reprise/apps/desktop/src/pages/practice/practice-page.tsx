@@ -17,10 +17,24 @@ export function PracticePage() {
     [rawLines]
   );
 
-  const [activeTrack, setActiveTrack] = useState<"vocals" | "instrumental" | "reference">("vocals");
+  const [activeTrack, setActiveTrack] = useState<"vocals" | "instrumental" | "reference">("reference");
+
+  // Derive audio path from active track
+  const audioPath = useMemo(() => {
+    if (!song) return "";
+    switch (activeTrack) {
+      case "vocals":
+        return song.vocals_path ?? song.audio_path ?? "";
+      case "instrumental":
+        return song.instrumental_path ?? "";
+      case "reference":
+      default:
+        return song.audio_path ?? "";
+    }
+  }, [activeTrack, song]);
 
   const player = useLinePlayer({
-    audioPath: song?.audio_path ?? "",
+    audioPath,
     lines,
     initialLineIndex: 0,
   });
@@ -129,6 +143,7 @@ export function PracticePage() {
           activeTrack={activeTrack}
           onTrackChange={setActiveTrack}
           onClearRange={handleClearRange}
+          hasStemSeparation={song.stem_status === "done"}
         />
         <PracticeCenter
           lines={lines}
