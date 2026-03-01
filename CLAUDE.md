@@ -55,6 +55,24 @@ yt-dlp is used to download audio and subtitles from YouTube. It requires:
 - **Non-UTF-8 output:** Tauri's shell plugin can't decode non-ASCII characters (e.g. Japanese) in yt-dlp's stderr. Folder names are sanitized to ASCII-only to reduce this. The `error` event is treated as non-fatal.
 - **Chrome cookie DB locked:** `--cookies-from-browser chrome` fails while Chrome is running. Use a cookies.txt file instead.
 
+## Demucs Setup (Stem Separation)
+Demucs splits audio into vocal and instrumental tracks. It requires:
+1. **Python 3.11** (Demucs is not compatible with Python 3.14+)
+2. **FFmpeg** (audio decoder — install via `winget install Gyan.FFmpeg`)
+3. **Demucs + torchcodec** (`pip install demucs torchcodec`)
+
+### Usage
+```
+python -m demucs -n htdemucs --two-stems vocals "C:/Reprise/<song-folder>/audio.m4a"
+```
+- `--two-stems vocals` outputs vocals + accompaniment (no-vocals) only
+- `-n htdemucs` uses the hybrid transformer model (best speed/quality tradeoff)
+- Output goes to `separated/htdemucs/<track>/vocals.wav` and `no_vocals.wav`
+- First run downloads the model (~80 MB) to `~/.cache/torch/hub/checkpoints/`
+
+### Tauri shell permissions
+`python` and `ffmpeg` commands are allowed in `src-tauri/capabilities/default.json` alongside `yt-dlp`.
+
 ## Current Roadmap
 - **MVP:** Manual lyrics, tap-to-mark timestamps, desktop playback/recording.
 - **v1.5:** Sidecar integration (Demucs/WhisperX), Mobile app sync.

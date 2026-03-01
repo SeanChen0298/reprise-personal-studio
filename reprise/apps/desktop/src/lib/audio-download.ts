@@ -478,3 +478,44 @@ export async function checkYtDlpInstalled(): Promise<string | null> {
     return null;
   }
 }
+
+/** Check if Python is available. Returns version string or null. */
+export async function checkPythonInstalled(): Promise<string | null> {
+  try {
+    const command = Command.create("python", ["--version"]);
+    const result = await command.execute();
+    if (result.code === 0) {
+      const match = result.stdout.trim().match(/Python\s+([\d.]+)/);
+      return match ? match[1] : result.stdout.trim();
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Check if FFmpeg is available. Returns version string or null. */
+export async function checkFfmpegInstalled(): Promise<string | null> {
+  try {
+    const command = Command.create("ffmpeg", ["-version"]);
+    const result = await command.execute();
+    if (result.code === 0) {
+      const match = result.stdout.match(/ffmpeg version\s+(\S+)/);
+      return match ? match[1] : "installed";
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Check if Demucs is installed via pip. Returns "installed" or null. */
+export async function checkDemucsInstalled(): Promise<string | null> {
+  try {
+    const command = Command.create("python", ["-c", "import demucs; print(demucs.__version__)"]);
+    const result = await command.execute();
+    return result.code === 0 ? result.stdout.trim() || "installed" : null;
+  } catch {
+    return null;
+  }
+}

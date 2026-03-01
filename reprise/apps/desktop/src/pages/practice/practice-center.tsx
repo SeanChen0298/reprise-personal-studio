@@ -1,7 +1,10 @@
-import type { Line } from "../../types/song";
+import { useCallback, useRef, useState } from "react";
+import type { Line, Annotation } from "../../types/song";
 import type { UseLinePlayerReturn } from "../../hooks/use-line-player";
 import { STATUS_CONFIG, formatMs, nextStatus } from "../../lib/status-config";
 import { useSongStore } from "../../stores/song-store";
+import { useHighlightStore } from "../../lib/highlight-config";
+import { AnnotatedText } from "../../components/annotated-text";
 
 interface Props {
   lines: Line[];
@@ -12,10 +15,77 @@ interface Props {
 
 export function PracticeCenter({ lines, activeLineIndex, player, songId }: Props) {
   const updateLineStatus = useSongStore((s) => s.updateLineStatus);
+  const updateLineCustomText = useSongStore((s) => s.updateLineCustomText);
+  const updateLineAnnotations = useSongStore((s) => s.updateLineAnnotations);
+  const highlights = useHighlightStore((s) => s.highlights);
+
   const currentLine = lines[activeLineIndex];
   const prevLine = lines[activeLineIndex - 1];
-  const nextLine = lines[activeLineIndex + 1];
+  const nextLineData = lines[activeLineIndex + 1];
   const hasTimestamps = currentLine?.start_ms != null && currentLine?.end_ms != null;
+
+  const [editMode, setEditMode] = useState(false);
+  const [editText, setEditText] = useState("");
+  const [editAnnotations, setEditAnnotations] = useState<Annotation[]>([]);
+  const editableRef = useRef<HTMLDivElement>(null);
+
+  const enterEditMode = useCallback(() => {
+    if (!currentLine) return;
+    player.pause();
+    setEditText(currentLine.custom_text ?? currentLine.text);
+    setEditAnnotations(currentLine.annotations ?? []);
+    setEditMode(true);
+  }, [currentLine, player]);
+
+  const exitEditMode = useCallback(() => {
+    if (!currentLine) return;
+    // Save custom text and annotations
+    updateLineCustomText(songId, currentLine.id, editText);
+    updateLineAnnotations(songId, currentLine.id, editAnnotations);
+    setEditMode(false);
+  }, [currentLine, songId, editText, editAnnotations, updateLineCustomText, updateLineAnnotations]);
+
+  const handleApplyHighlight = useCallback(
+    (typeId: string) => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !editableRef.current) return;
+
+      // Get selection offsets relative to the text content
+      const range = sel.getRangeAt(0);
+      const preRange = document.createRange();
+      preRange.selectNodeContents(editableRef.current);
+      preRange.setEnd(range.startContainer, range.startOffset);
+      const start = preRange.toString().length;
+      const end = start + range.toString().length;
+
+      if (start === end || start < 0 || end > editText.length) return;
+
+      // Remove any overlapping annotations
+      const filtered = editAnnotations.filter(
+        (a) => a.end <= start || a.start >= end
+      );
+
+      // Add new annotation
+      const newAnnotation: Annotation = { start, end, type: typeId };
+      const updated = [...filtered, newAnnotation].sort((a, b) => a.start - b.start);
+      setEditAnnotations(updated);
+      sel.removeAllRanges();
+    },
+    [editText, editAnnotations]
+  );
+
+  const handleRemoveAnnotation = useCallback(
+    (annotationIndex: number) => {
+      setEditAnnotations((prev) => prev.filter((_, i) => i !== annotationIndex));
+    },
+    []
+  );
+
+  const handleEditTextChange = useCallback((newText: string) => {
+    setEditText(newText);
+    // Clear annotations when text changes since char indices become invalid
+    setEditAnnotations([]);
+  }, []);
 
   const handleStatusClick = () => {
     if (!currentLine) return;
@@ -32,7 +102,79 @@ export function PracticeCenter({ lines, activeLineIndex, player, songId }: Props
   }
 
   const cfg = STATUS_CONFIG[currentLine.status];
+  const displayText = currentLine.custom_text ?? currentLine.text;
+  const hasCustomText = currentLine.custom_text != null && currentLine.custom_text !== currentLine.text;
 
+  if (editMode) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center px-12 py-8 relative overflow-hidden">
+        {/* Highlight toolbar */}
+        <div className="flex items-center gap-2 mb-6 flex-wrap justify-center">
+          {highlights.map((hl) => (
+            <button
+              key={hl.id}
+              onClick={() => handleApplyHighlight(hl.id)}
+              className="text-[11.5px] font-medium px-3 py-[5px] rounded-[6px] border cursor-pointer flex items-center gap-[6px] transition-all hover:scale-105"
+              style={{
+                backgroundColor: hl.bg,
+                color: hl.color,
+                borderColor: hl.color + "40",
+              }}
+            >
+              <span
+                className="w-[8px] h-[8px] rounded-full flex-shrink-0"
+                style={{ backgroundColor: hl.color }}
+              />
+              {hl.name}
+            </button>
+          ))}
+        </div>
+
+        {/* Editable custom text */}
+        <div className="w-full max-w-[640px] mb-4">
+          {/* Original line label */}
+          <div className="text-[11px] text-[var(--text-muted)] opacity-50 text-center mb-3">
+            Original: {currentLine.text}
+          </div>
+
+          {/* Text input for editing notation */}
+          <input
+            type="text"
+            value={editText}
+            onChange={(e) => handleEditTextChange(e.target.value)}
+            className="w-full px-4 py-3 text-[18px] font-serif rounded-[8px] border-2 border-[var(--theme)] bg-[var(--surface)] text-[var(--text-primary)] outline-none shadow-[0_0_0_3px_rgba(37,99,235,0.1)] transition-colors text-center"
+            placeholder="Edit lyrics notation..."
+          />
+
+          {/* Annotated preview (select text here to highlight) */}
+          <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] opacity-60 mt-4 mb-1 text-center">
+            Preview — select text below, then click a highlight
+          </div>
+          <div
+            ref={editableRef}
+            className="font-serif text-[26px] tracking-[-0.5px] leading-[1.4] text-[var(--text-secondary)] text-center p-3 rounded-[8px] border border-[var(--border-subtle)] bg-[var(--bg)] min-h-[50px] select-text cursor-text"
+          >
+            <AnnotatedText
+              text={editText}
+              annotations={editAnnotations}
+              highlights={highlights}
+              onClickAnnotation={handleRemoveAnnotation}
+            />
+          </div>
+        </div>
+
+        {/* Done button */}
+        <button
+          onClick={exitEditMode}
+          className="px-5 py-[7px] rounded-[7px] bg-[var(--accent)] text-white text-[13px] font-medium hover:opacity-85 transition-opacity border-none cursor-pointer"
+        >
+          Done editing
+        </button>
+      </div>
+    );
+  }
+
+  // Playback mode
   return (
     <div className="flex-1 flex flex-col items-center justify-center px-12 py-8 relative overflow-hidden">
       {/* Previous context line */}
@@ -42,8 +184,18 @@ export function PracticeCenter({ lines, activeLineIndex, player, songId }: Props
 
       {/* Current line hero */}
       <div key={activeLineIndex} className="text-center my-5 animate-fade-up">
+        {/* Show original text above if custom_text differs */}
+        {hasCustomText && (
+          <div className="text-[14px] text-[var(--text-muted)] mb-2 opacity-50">
+            {currentLine.text}
+          </div>
+        )}
         <div className="font-serif text-[32px] tracking-[-0.5px] leading-[1.35] text-[var(--text-primary)] max-w-[640px]">
-          {currentLine.text}
+          <AnnotatedText
+            text={displayText}
+            annotations={currentLine.annotations}
+            highlights={highlights}
+          />
         </div>
         <div className="flex items-center justify-center gap-3 mt-[10px]">
           {hasTimestamps && (
@@ -65,12 +217,23 @@ export function PracticeCenter({ lines, activeLineIndex, player, songId }: Props
           >
             {cfg.label}
           </button>
+          {/* Edit button */}
+          <button
+            onClick={enterEditMode}
+            className="w-6 h-6 rounded-[5px] border border-[var(--border)] bg-transparent text-[var(--text-muted)] cursor-pointer flex items-center justify-center hover:border-[#888] hover:text-[var(--text-primary)] transition-all"
+            title="Edit annotations"
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+              <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+            </svg>
+          </button>
         </div>
       </div>
 
       {/* Next context line */}
       <div className="text-[15px] text-[var(--text-muted)] font-light text-center max-w-[600px] leading-relaxed opacity-50 my-[6px]">
-        {nextLine?.text ?? "\u00A0"}
+        {nextLineData?.text ?? "\u00A0"}
       </div>
 
       {/* Progress bar (waveform placeholder) */}

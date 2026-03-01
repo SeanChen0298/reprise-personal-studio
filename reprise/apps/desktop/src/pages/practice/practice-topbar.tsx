@@ -4,9 +4,10 @@ interface Props {
   player: UseLinePlayerReturn;
   activeTrack: string;
   onTrackChange: (track: "vocals" | "instrumental" | "reference") => void;
+  onClearRange?: () => void;
 }
 
-export function PracticeTopbar({ player, activeTrack, onTrackChange }: Props) {
+export function PracticeTopbar({ player, activeTrack, onTrackChange, onClearRange }: Props) {
   return (
     <div className="h-12 px-6 border-b border-[var(--border)] flex items-center justify-between bg-[var(--surface)] flex-shrink-0">
       <div className="flex items-center gap-3">
@@ -25,8 +26,23 @@ export function PracticeTopbar({ player, activeTrack, onTrackChange }: Props) {
             <polyline points="7 23 3 19 7 15" />
             <path d="M21 13v2a4 4 0 01-4 4H3" />
           </svg>
-          {player.loopEnabled ? `Loop ${player.loopCount}/${player.maxLoops}` : "Loop off"}
+          {player.loopEnabled
+            ? player.loopRange
+              ? `Lines ${player.loopRange[0] + 1}–${player.loopRange[1] + 1} ${player.loopCount}/${player.maxLoops}`
+              : `Loop ${player.loopCount}/${player.maxLoops}`
+            : "Loop off"}
         </button>
+
+        {/* Clear range button */}
+        {player.loopRange && (
+          <button
+            onClick={onClearRange}
+            className="text-[10px] font-medium px-[8px] py-[2px] rounded-[12px] border border-[var(--border)] bg-transparent text-[var(--text-muted)] cursor-pointer hover:border-[#888] hover:text-[var(--text-primary)] transition-all"
+            title="Clear line selection"
+          >
+            ✕
+          </button>
+        )}
 
         {/* Max loops adjuster (only when loop enabled) */}
         {player.loopEnabled && (

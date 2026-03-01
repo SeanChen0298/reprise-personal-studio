@@ -24,10 +24,18 @@ export interface Song {
   user_id?: string;
 }
 
+export interface Annotation {
+  start: number; // char index in custom_text (inclusive)
+  end: number; // char index in custom_text (exclusive)
+  type: string; // highlight type id, e.g. "falsetto"
+}
+
 export interface Line {
   id: string;
   song_id: string;
   text: string;
+  custom_text?: string;
+  annotations?: Annotation[];
   order: number;
   start_ms?: number;
   end_ms?: number;

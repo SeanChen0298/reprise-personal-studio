@@ -7,10 +7,12 @@ interface Props {
   song: Song;
   lines: Line[];
   activeLineIndex: number;
+  loopRange: [number, number] | null;
   onLineClick: (index: number) => void;
+  onShiftClick: (index: number) => void;
 }
 
-export function LineNavigator({ song, lines, activeLineIndex, onLineClick }: Props) {
+export function LineNavigator({ song, lines, activeLineIndex, loopRange, onLineClick, onShiftClick }: Props) {
   const navigate = useNavigate();
   const listRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef<HTMLDivElement>(null);
@@ -44,14 +46,25 @@ export function LineNavigator({ song, lines, activeLineIndex, onLineClick }: Pro
       <div ref={listRef} className="flex-1 overflow-y-auto p-2">
         {lines.map((line, i) => {
           const isActive = i === activeLineIndex;
+          const inRange = loopRange != null && i >= loopRange[0] && i <= loopRange[1];
           const cfg = STATUS_CONFIG[line.status];
           return (
             <div
               key={line.id}
               ref={isActive ? activeRef : undefined}
-              onClick={() => onLineClick(i)}
+              onClick={(e) => {
+                if (e.shiftKey) {
+                  onShiftClick(i);
+                } else {
+                  onLineClick(i);
+                }
+              }}
               className={`flex items-center gap-2 px-[10px] py-2 rounded-[7px] cursor-pointer mb-[2px] transition-colors ${
-                isActive ? "bg-[var(--theme-light)]" : "hover:bg-[var(--bg)]"
+                isActive
+                  ? "bg-[var(--theme-light)]"
+                  : inRange
+                    ? "bg-[var(--theme-light)] opacity-60"
+                    : "hover:bg-[var(--bg)]"
               }`}
             >
               <span

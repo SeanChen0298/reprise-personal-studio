@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { Song, ImportDraft, Line, LineStatus } from "../types/song";
+import type { Song, ImportDraft, Line, LineStatus, Annotation } from "../types/song";
 import {
   downloadAudio,
   buildSongFolder,
@@ -31,6 +31,16 @@ interface SongStore {
     songId: string,
     lineId: string,
     status: LineStatus
+  ) => void;
+  updateLineCustomText: (
+    songId: string,
+    lineId: string,
+    customText: string
+  ) => void;
+  updateLineAnnotations: (
+    songId: string,
+    lineId: string,
+    annotations: Annotation[]
   ) => void;
   getLinesForSong: (songId: string) => Line[];
 }
@@ -191,6 +201,30 @@ export const useSongStore = create<SongStore>()(
             [songId]: (s.lines[songId] ?? []).map((line) =>
               line.id === lineId
                 ? { ...line, status, updated_at: new Date().toISOString() }
+                : line
+            ),
+          },
+        })),
+
+      updateLineCustomText: (songId, lineId, customText) =>
+        set((s) => ({
+          lines: {
+            ...s.lines,
+            [songId]: (s.lines[songId] ?? []).map((line) =>
+              line.id === lineId
+                ? { ...line, custom_text: customText, updated_at: new Date().toISOString() }
+                : line
+            ),
+          },
+        })),
+
+      updateLineAnnotations: (songId, lineId, annotations) =>
+        set((s) => ({
+          lines: {
+            ...s.lines,
+            [songId]: (s.lines[songId] ?? []).map((line) =>
+              line.id === lineId
+                ? { ...line, annotations, updated_at: new Date().toISOString() }
                 : line
             ),
           },

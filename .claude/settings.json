@@ -4,7 +4,20 @@
       "Bash(yt-dlp --list-plugins)",
       "Bash(pip install bgutil-ytdlp-pot-provider)",
       "Bash(yt-dlp --no-playlist --js-runtimes node --remote-components ejs:github --skip-download --print title \"https://www.youtube.com/watch?v=keOnleW2eak\")",
-      "Bash(yt-dlp --no-playlist --js-runtimes node --remote-components ejs:github --cookies-from-browser chrome --skip-download --print title \"https://www.youtube.com/watch?v=IxW-ok1ekSY\")"
+      "Bash(yt-dlp --no-playlist --js-runtimes node --remote-components ejs:github --cookies-from-browser chrome --skip-download --print title \"https://www.youtube.com/watch?v=IxW-ok1ekSY\")",
+      "Bash(demucs --help)",
+      "Bash(python -m demucs --help)",
+      "Bash(pip show demucs)",
+      "Bash(python -m demucs -n htdemucs --two-stems vocals \"C:/Reprise/Mrs. GREEN APPLElulu.Official Music Video - Mrs. GREEN APPLE/audio.m4a\")",
+      "Bash(pip install torchcodec)",
+      "Bash(where ffmpeg)",
+      "Read(//c/Program Files/FFmpeg/bin/**)",
+      "Read(//c/Users/cheny/AppData/Local/Microsoft/WinGet/Packages/Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe/ffmpeg-8.0.1-full_build/bin/**)",
+      "Bash(\"C:/Users/cheny/AppData/Local/Microsoft/WinGet/Links/ffmpeg.exe\" -version)",
+      "Bash(echo \"$PATH\")",
+      "Bash(ffmpeg -version)",
+      "Read(//c/Users/cheny/AppData/Local/Programs/Python/Python311/Lib/site-packages/torchcodec/**)",
+      "Bash(pip uninstall torchcodec -y)"
     ]
   }
 }

@@ -17,6 +17,10 @@ export interface UseLinePlayerReturn {
   maxLoops: number;
   setMaxLoops: (n: number) => void;
 
+  /** [startIdx, endIdx] inclusive range for multi-line looping, or null for single-line */
+  loopRange: [number, number] | null;
+  setLoopRange: (range: [number, number] | null) => void;
+
   speed: number;
   setSpeed: (s: number) => void;
   incrementSpeed: () => void;
@@ -51,6 +55,7 @@ export function useLinePlayer(opts: Options): UseLinePlayerReturn {
   const [loopEnabled, setLoopEnabled] = useState(false);
   const [loopCount, setLoopCount] = useState(1);
   const [maxLoops, setMaxLoops] = useState(opts.maxLoops ?? 3);
+  const [loopRange, setLoopRange] = useState<[number, number] | null>(null);
   const [speed, setSpeedState] = useState(opts.initialSpeed ?? 1.0);
 
   const currentLine = lines[currentLineIndex] as Line | undefined;
@@ -67,10 +72,11 @@ export function useLinePlayer(opts: Options): UseLinePlayerReturn {
     loopEnabled,
     loopCount,
     maxLoops,
+    loopRange,
     lines,
     onLineChange,
   });
-  stateRef.current = { currentLineIndex, isPlaying, loopEnabled, loopCount, maxLoops, lines, onLineChange };
+  stateRef.current = { currentLineIndex, isPlaying, loopEnabled, loopCount, maxLoops, loopRange, lines, onLineChange };
 
   const rafRef = useRef<number>(0);
 
@@ -108,20 +114,43 @@ export function useLinePlayer(opts: Options): UseLinePlayerReturn {
         const hasTs = line?.start_ms != null && line?.end_ms != null;
 
         if (st.loopEnabled) {
-          // Loop mode: replay line N times, then advance
+          // Loop mode: replay line(s) N times, then advance
           if (hasTs && t >= (line.end_ms! / 1000)) {
-            if (st.loopCount < st.maxLoops) {
-              audio.currentTime = line.start_ms! / 1000;
-              setLoopCount((c) => c + 1);
-            } else {
+            const range = st.loopRange;
+            const rangeStart = range ? range[0] : st.currentLineIndex;
+            const rangeEnd = range ? range[1] : st.currentLineIndex;
+
+            if (st.currentLineIndex < rangeEnd) {
+              // More lines in range — advance to next line in range
               const nextIdx = st.currentLineIndex + 1;
+              setCurrentLineIndex(nextIdx);
+              st.onLineChange?.(nextIdx);
+              const nextLine = st.lines[nextIdx];
+              if (nextLine?.start_ms != null) {
+                audio.currentTime = nextLine.start_ms / 1000;
+              }
+            } else if (st.loopCount < st.maxLoops) {
+              // Completed all lines in range, but more loops to go — restart range
+              setLoopCount((c) => c + 1);
+              setCurrentLineIndex(rangeStart);
+              st.onLineChange?.(rangeStart);
+              const startLine = st.lines[rangeStart];
+              if (startLine?.start_ms != null) {
+                audio.currentTime = startLine.start_ms / 1000;
+              }
+            } else {
+              // All loops done — advance past range
+              const nextIdx = rangeEnd + 1;
               if (nextIdx < st.lines.length) {
                 setCurrentLineIndex(nextIdx);
                 setLoopCount(1);
                 st.onLineChange?.(nextIdx);
+                // Clear range after completing it
+                setLoopRange(null);
               } else {
                 audio.pause();
                 setIsPlaying(false);
+                setLoopRange(null);
               }
             }
           }
@@ -230,6 +259,8 @@ export function useLinePlayer(opts: Options): UseLinePlayerReturn {
     loopCount,
     maxLoops,
     setMaxLoops,
+    loopRange,
+    setLoopRange,
     speed,
     setSpeed,
     incrementSpeed,

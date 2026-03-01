@@ -5,13 +5,31 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "shell:allow-open",
+    {
+      "identifier": "shell:allow-open",
+      "allow": [
+        { "url": "https?://.+" },
+        { "url": "file:///C:/Reprise" }
+      ]
+    },
     {
       "identifier": "shell:allow-execute",
       "allow": [
         {
           "name": "yt-dlp",
           "cmd": "yt-dlp",
+          "args": true,
+          "sidecar": false
+        },
+        {
+          "name": "python",
+          "cmd": "python",
+          "args": true,
+          "sidecar": false
+        },
+        {
+          "name": "ffmpeg",
+          "cmd": "ffmpeg",
           "args": true,
           "sidecar": false
         }
@@ -23,6 +41,18 @@
         {
           "name": "yt-dlp",
           "cmd": "yt-dlp",
+          "args": true,
+          "sidecar": false
+        },
+        {
+          "name": "python",
+          "cmd": "python",
+          "args": true,
+          "sidecar": false
+        },
+        {
+          "name": "ffmpeg",
+          "cmd": "ffmpeg",
           "args": true,
           "sidecar": false
         }

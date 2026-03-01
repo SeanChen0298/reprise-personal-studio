@@ -4,25 +4,10 @@ import { exists } from "@tauri-apps/plugin-fs";
 import { open } from "@tauri-apps/plugin-shell";
 import { Sidebar } from "../components/sidebar";
 import { useAuthStore } from "../stores/auth-store";
-import { checkYtDlpInstalled, COOKIES_PATH } from "../lib/audio-download";
+import { checkYtDlpInstalled, checkPythonInstalled, checkFfmpegInstalled, checkDemucsInstalled, COOKIES_PATH } from "../lib/audio-download";
+import { useHighlightStore } from "../lib/highlight-config";
 
 type Tab = "highlights" | "account" | "preferences" | "downloads";
-
-interface HighlightType {
-  id: string;
-  name: string;
-  description: string;
-  bg: string;
-  color: string;
-}
-
-const DEFAULT_HIGHLIGHTS: HighlightType[] = [
-  { id: "falsetto", name: "Falsetto", description: "Mark sections that use falsetto technique", bg: "#DBEAFE", color: "#1D4ED8" },
-  { id: "whisper", name: "Whisper", description: "Soft, breathy vocal sections", bg: "#DCFCE7", color: "#15803D" },
-  { id: "accent", name: "Accent", description: "Words or syllables to emphasize", bg: "#FEE2E2", color: "#B91C1C" },
-  { id: "vibrato", name: "Vibrato", description: "Sections with intentional vibrato", bg: "#F5F3FF", color: "#6D28D9" },
-  { id: "breath", name: "Breath mark", description: "Where to take breaths", bg: "#FFF7ED", color: "#C2410C" },
-];
 
 const THEME_OPTIONS = [
   { key: "blue", color: "#2563EB", label: "Blue", light: "#EFF6FF", text: "#1D4ED8" },
@@ -39,7 +24,9 @@ export function SettingsPage() {
   const initials = user?.email ? user.email.slice(0, 2).toUpperCase() : "??";
 
   const [activeTab, setActiveTab] = useState<Tab>("highlights");
-  const [highlights, setHighlights] = useState<HighlightType[]>(DEFAULT_HIGHLIGHTS);
+  const highlights = useHighlightStore((s) => s.highlights);
+  const addHighlight = useHighlightStore((s) => s.addHighlight);
+  const removeHighlight = useHighlightStore((s) => s.removeHighlight);
   const [newHighlightName, setNewHighlightName] = useState("");
   const [activeTheme, setActiveTheme] = useState("blue");
   const [speed, setSpeed] = useState(100);
@@ -53,20 +40,32 @@ export function SettingsPage() {
   // Downloads tab state
   const [ytdlpVersion, setYtdlpVersion] = useState<string | null | undefined>(undefined);
   const [cookieExists, setCookieExists] = useState<boolean | null>(null);
+  const [pythonVersion, setPythonVersion] = useState<string | null | undefined>(undefined);
+  const [ffmpegVersion, setFfmpegVersion] = useState<string | null | undefined>(undefined);
+  const [demucsStatus, setDemucsStatus] = useState<string | null | undefined>(undefined);
   const [checking, setChecking] = useState(false);
 
   const runChecks = useCallback(async () => {
     setChecking(true);
     try {
-      const [version, cookieOk] = await Promise.all([
+      const [version, cookieOk, python, ffmpeg, demucs] = await Promise.all([
         checkYtDlpInstalled(),
         exists(COOKIES_PATH),
+        checkPythonInstalled(),
+        checkFfmpegInstalled(),
+        checkDemucsInstalled(),
       ]);
       setYtdlpVersion(version);
       setCookieExists(cookieOk);
+      setPythonVersion(python);
+      setFfmpegVersion(ffmpeg);
+      setDemucsStatus(demucs);
     } catch {
       setYtdlpVersion(null);
       setCookieExists(false);
+      setPythonVersion(null);
+      setFfmpegVersion(null);
+      setDemucsStatus(null);
     } finally {
       setChecking(false);
     }
@@ -75,18 +74,12 @@ export function SettingsPage() {
   function handleAddHighlight() {
     const name = newHighlightName.trim();
     if (!name) return;
-    const colors = ["#FEF3C7", "#E0E7FF", "#FCE7F3", "#CCFBF1"];
-    const textColors = ["#92400E", "#3730A3", "#9D174D", "#0F766E"];
-    const idx = highlights.length % colors.length;
-    setHighlights([
-      ...highlights,
-      { id: crypto.randomUUID(), name, description: "", bg: colors[idx], color: textColors[idx] },
-    ]);
+    addHighlight(name);
     setNewHighlightName("");
   }
 
   function handleDeleteHighlight(id: string) {
-    setHighlights(highlights.filter((h) => h.id !== id));
+    removeHighlight(id);
   }
 
   function handleThemeChange(key: string) {
@@ -625,7 +618,7 @@ export function SettingsPage() {
                       {checking ? "Checking..." : "Check status"}
                     </button>
                     <button
-                      onClick={() => open("C:\\Reprise")}
+                      onClick={() => open("file:///C:/Reprise")}
                       className="flex items-center gap-[5px] px-4 py-2 rounded-[7px] border-[1.5px] border-[var(--border)] bg-transparent text-[var(--text-secondary)] text-[13px] font-medium cursor-pointer hover:border-[#888] hover:text-[var(--text-primary)] transition-all"
                     >
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -697,6 +690,116 @@ export function SettingsPage() {
                       <div className="text-[12px] text-[#92400E] leading-[1.6]">
                         Cookies expire periodically. If downloads start failing with "Sign in to confirm you're not a bot", re-export your cookies by repeating the steps above.
                       </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Demucs stem separation */}
+                <div className="mb-7">
+                  {sectionHeader("Stem separation (Demucs)")}
+
+                  <p className="text-[13px] text-[var(--text-secondary)] leading-[1.7] mb-4">
+                    Demucs separates audio into vocal and instrumental tracks. All three dependencies below are required.
+                  </p>
+
+                  <div className="flex flex-col gap-1.5">
+                    {/* Python */}
+                    <div className="flex items-center justify-between px-4 py-3.5 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)]">
+                      <div className="flex-1">
+                        <div className="text-[13px] font-medium mb-0.5">Python 3.11</div>
+                        <div className="text-[11.5px] text-[var(--text-muted)] leading-[1.5]">
+                          Required runtime for Demucs
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {pythonVersion === undefined ? (
+                          <span className="text-[12px] text-[var(--text-muted)]">Not checked</span>
+                        ) : pythonVersion ? (
+                          <span className="flex items-center gap-1.5 text-[12px] font-medium text-[#15803D]">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                            v{pythonVersion}
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1.5 text-[12px] font-medium text-[#DC2626]">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <line x1="18" y1="6" x2="6" y2="18" />
+                              <line x1="6" y1="6" x2="18" y2="18" />
+                            </svg>
+                            Not found
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* FFmpeg */}
+                    <div className="flex items-center justify-between px-4 py-3.5 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)]">
+                      <div className="flex-1">
+                        <div className="text-[13px] font-medium mb-0.5">FFmpeg</div>
+                        <div className="text-[11.5px] text-[var(--text-muted)] leading-[1.5]">
+                          Audio decoder for reading song files
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {ffmpegVersion === undefined ? (
+                          <span className="text-[12px] text-[var(--text-muted)]">Not checked</span>
+                        ) : ffmpegVersion ? (
+                          <span className="flex items-center gap-1.5 text-[12px] font-medium text-[#15803D]">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                            {ffmpegVersion}
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1.5 text-[12px] font-medium text-[#DC2626]">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <line x1="18" y1="6" x2="6" y2="18" />
+                              <line x1="6" y1="6" x2="18" y2="18" />
+                            </svg>
+                            Not found
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Demucs */}
+                    <div className="flex items-center justify-between px-4 py-3.5 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)]">
+                      <div className="flex-1">
+                        <div className="text-[13px] font-medium mb-0.5">Demucs</div>
+                        <div className="text-[11.5px] text-[var(--text-muted)] leading-[1.5]">
+                          AI model for vocal/instrumental separation
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {demucsStatus === undefined ? (
+                          <span className="text-[12px] text-[var(--text-muted)]">Not checked</span>
+                        ) : demucsStatus ? (
+                          <span className="flex items-center gap-1.5 text-[12px] font-medium text-[#15803D]">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                            {demucsStatus}
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1.5 text-[12px] font-medium text-[#DC2626]">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <line x1="18" y1="6" x2="6" y2="18" />
+                              <line x1="6" y1="6" x2="18" y2="18" />
+                            </svg>
+                            Not found
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Install instructions */}
+                  <div className="mt-4 p-3.5 rounded-[var(--radius)] bg-[var(--surface)] border border-[var(--border)]">
+                    <div className="text-[12.5px] font-medium mb-2">Installation commands</div>
+                    <div className="flex flex-col gap-1.5 font-mono text-[12px] text-[var(--text-secondary)]">
+                      <div className="px-3 py-1.5 bg-[var(--bg)] rounded">winget install Gyan.FFmpeg</div>
+                      <div className="px-3 py-1.5 bg-[var(--bg)] rounded">pip install demucs torchcodec</div>
                     </div>
                   </div>
                 </div>

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useSongStore } from "../../stores/song-store";
 import { useLinePlayer } from "../../hooks/use-line-player";
@@ -24,6 +24,32 @@ export function PracticePage() {
     lines,
     initialLineIndex: 0,
   });
+
+  const handleShiftClick = useCallback(
+    (index: number) => {
+      // Create a range from current line to shift-clicked line
+      const current = player.currentLineIndex;
+      const start = Math.min(current, index);
+      const end = Math.max(current, index);
+      if (start === end) {
+        // Same line — clear range
+        player.setLoopRange(null);
+        return;
+      }
+      player.setLoopRange([start, end]);
+      // Auto-enable loop mode when selecting a range
+      if (!player.loopEnabled) {
+        player.toggleLoop();
+      }
+      // Seek to range start
+      player.goToLine(start);
+    },
+    [player]
+  );
+
+  const handleClearRange = useCallback(() => {
+    player.setLoopRange(null);
+  }, [player]);
 
   if (!song) {
     return (
@@ -93,13 +119,16 @@ export function PracticePage() {
         song={song}
         lines={lines}
         activeLineIndex={player.currentLineIndex}
+        loopRange={player.loopRange}
         onLineClick={(i) => player.goToLine(i)}
+        onShiftClick={handleShiftClick}
       />
       <div className="flex flex-col flex-1 min-w-0">
         <PracticeTopbar
           player={player}
           activeTrack={activeTrack}
           onTrackChange={setActiveTrack}
+          onClearRange={handleClearRange}
         />
         <PracticeCenter
           lines={lines}
