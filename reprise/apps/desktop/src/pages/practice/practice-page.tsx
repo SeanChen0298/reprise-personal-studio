@@ -1,7 +1,9 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import type { Section } from "../../types/song";
 import { useSongStore } from "../../stores/song-store";
 import { useLinePlayer } from "../../hooks/use-line-player";
+import { useAudioDevices } from "../../hooks/use-audio-devices";
 import { LineNavigator } from "./line-navigator";
 import { PracticeTopbar } from "./practice-topbar";
 import { PracticeCenter } from "./practice-center";
@@ -19,6 +21,16 @@ export function PracticePage() {
 
   const [activeTrack, setActiveTrack] = useState<"vocals" | "instrumental" | "reference">("reference");
   const [isEditing, setIsEditing] = useState(false);
+  const [recordingSection, setRecordingSection] = useState<Section | null>(null);
+  const audioDevices = useAudioDevices();
+  const rawSections = useSongStore((s) => (id ? s.sections[id] : undefined));
+  const sections = useMemo(() => rawSections ?? [], [rawSections]);
+
+  const handleRecordSection = useCallback((section: Section) => {
+    setRecordingSection(section);
+    // Reset after setting so PracticeCenter can pick it up via useEffect
+    setTimeout(() => setRecordingSection(null), 100);
+  }, []);
 
   // Derive audio path from active track
   const audioPath = useMemo(() => {
@@ -65,6 +77,17 @@ export function PracticePage() {
   const handleClearRange = useCallback(() => {
     player.setLoopRange(null);
   }, [player]);
+
+  // Apply output device to audio element
+  useEffect(() => {
+    const audio = player.audioRef.current;
+    if (!audio || !audioDevices.selectedOutputId) return;
+    if ("setSinkId" in audio) {
+      (audio as HTMLAudioElement & { setSinkId: (id: string) => Promise<void> })
+        .setSinkId(audioDevices.selectedOutputId)
+        .catch(() => {});
+    }
+  }, [audioDevices.selectedOutputId, player.audioRef]);
 
   if (!song) {
     return (
@@ -135,8 +158,10 @@ export function PracticePage() {
         lines={lines}
         activeLineIndex={player.currentLineIndex}
         loopRange={player.loopRange}
+        sections={sections}
         onLineClick={(i) => player.goToLine(i, !isEditing)}
         onShiftClick={handleShiftClick}
+        onRecordSection={handleRecordSection}
       />
       <div className="flex flex-col flex-1 min-w-0">
         <PracticeTopbar
@@ -145,15 +170,30 @@ export function PracticePage() {
           onTrackChange={setActiveTrack}
           onClearRange={handleClearRange}
           hasStemSeparation={song.stem_status === "done"}
+          inputDevices={audioDevices.inputDevices}
+          outputDevices={audioDevices.outputDevices}
+          selectedInputId={audioDevices.selectedInputId}
+          selectedOutputId={audioDevices.selectedOutputId}
+          onInputChange={audioDevices.setSelectedInputId}
+          onOutputChange={audioDevices.setSelectedOutputId}
         />
         <PracticeCenter
           lines={lines}
           activeLineIndex={player.currentLineIndex}
           player={player}
           songId={id!}
+          songFolder={song.audio_folder ?? ""}
+          bpm={song.bpm}
+          inputDeviceId={audioDevices.selectedInputId}
+          recordingSection={recordingSection}
           onEditModeChange={setIsEditing}
         />
-        <RecordingsBar />
+        <RecordingsBar
+          songId={id!}
+          activeLineId={lines[player.currentLineIndex]?.id}
+          activeLineOrder={lines[player.currentLineIndex]?.order}
+          sections={sections}
+        />
       </div>
     </div>
   );

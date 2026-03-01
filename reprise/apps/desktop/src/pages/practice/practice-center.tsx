@@ -1,26 +1,36 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Line, Annotation } from "../../types/song";
+import type { Line, Annotation, Section } from "../../types/song";
 import type { UseLinePlayerReturn } from "../../hooks/use-line-player";
 import { STATUS_CONFIG, formatMs, nextStatus } from "../../lib/status-config";
 import { useSongStore } from "../../stores/song-store";
 import { useHighlightStore } from "../../lib/highlight-config";
 import { useSymbolStore } from "../../lib/symbol-config";
 import { AnnotatedText } from "../../components/annotated-text";
+import { useRecorder } from "../../hooks/use-recorder";
 
 interface Props {
   lines: Line[];
   activeLineIndex: number;
   player: UseLinePlayerReturn;
   songId: string;
+  songFolder: string;
+  bpm?: number;
+  inputDeviceId?: string;
+  recordingSection?: Section | null;
   onEditModeChange?: (editing: boolean) => void;
 }
 
-export function PracticeCenter({ lines, activeLineIndex, player, songId, onEditModeChange }: Props) {
+export function PracticeCenter({
+  lines, activeLineIndex, player, songId, songFolder, bpm, inputDeviceId,
+  recordingSection, onEditModeChange,
+}: Props) {
   const updateLineStatus = useSongStore((s) => s.updateLineStatus);
   const updateLineCustomText = useSongStore((s) => s.updateLineCustomText);
   const updateLineAnnotations = useSongStore((s) => s.updateLineAnnotations);
+  const addRecording = useSongStore((s) => s.addRecording);
   const highlights = useHighlightStore((s) => s.highlights);
   const symbols = useSymbolStore((s) => s.symbols);
+  const recorder = useRecorder();
 
   const currentLine = lines[activeLineIndex];
   const prevLine = lines[activeLineIndex - 1];
@@ -28,6 +38,16 @@ export function PracticeCenter({ lines, activeLineIndex, player, songId, onEditM
   const hasTimestamps = currentLine?.start_ms != null && currentLine?.end_ms != null;
 
   const [editMode, setEditMode] = useState(false);
+  const [playBacking, setPlayBacking] = useState(true);
+  const recordingLineIdRef = useRef<string | null>(null);
+  const recordingSectionRef = useRef<Section | null>(null);
+  const recordingEndLineIdx = useRef<number>(-1);
+
+  // Countdown state
+  const [countdownActive, setCountdownActive] = useState(false);
+  const [countdownBeat, setCountdownBeat] = useState(0);
+  const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
   const [editText, setEditText] = useState("");
   const [editAnnotations, setEditAnnotations] = useState<Annotation[]>([]);
   const editableRef = useRef<HTMLDivElement>(null);
@@ -126,6 +146,151 @@ export function PracticeCenter({ lines, activeLineIndex, player, songId, onEditM
       input.setSelectionRange(pos, pos);
     });
   }, [editText, handleEditTextChange]);
+
+  // Metronome beep helper
+  const playTick = useCallback((accent: boolean) => {
+    if (!audioCtxRef.current) audioCtxRef.current = new AudioContext();
+    const ctx = audioCtxRef.current;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.value = accent ? 1000 : 800;
+    gain.gain.value = accent ? 0.3 : 0.15;
+    osc.start(ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
+    osc.stop(ctx.currentTime + 0.08);
+  }, []);
+
+  // Start countdown then record
+  const startCountdownThenRecord = useCallback((
+    lineId: string,
+    startLineIdx: number,
+    endLineIdx: number,
+    section?: Section,
+  ) => {
+    // Compute countdown beats and interval
+    const totalBeats = bpm ? 8 : 4; // 2 bars (4/4) or fixed 4 beats
+    const beatInterval = bpm ? 60000 / bpm : 1000;
+    let beat = 0;
+
+    setCountdownActive(true);
+    setCountdownBeat(totalBeats);
+
+    // Seek to start line (no play yet)
+    player.goToLine(startLineIdx, false);
+
+    playTick(true); // First tick immediately
+
+    countdownTimerRef.current = setInterval(() => {
+      beat++;
+      if (beat >= totalBeats) {
+        // Countdown done — start recording
+        clearInterval(countdownTimerRef.current!);
+        countdownTimerRef.current = null;
+        setCountdownActive(false);
+        setCountdownBeat(0);
+
+        recordingLineIdRef.current = lineId;
+        recordingSectionRef.current = section ?? null;
+        recordingEndLineIdx.current = endLineIdx;
+
+        recorder.startRecording(lineId, songFolder, inputDeviceId || undefined).then(() => {
+          if (playBacking) player.play();
+        });
+      } else {
+        const remaining = totalBeats - beat;
+        setCountdownBeat(remaining);
+        playTick(remaining % 4 === 0); // accent on beat 1 of each bar
+      }
+    }, beatInterval);
+  }, [bpm, player, playTick, recorder, songFolder, inputDeviceId, playBacking]);
+
+  // Cancel countdown
+  const cancelCountdown = useCallback(() => {
+    if (countdownTimerRef.current) {
+      clearInterval(countdownTimerRef.current);
+      countdownTimerRef.current = null;
+    }
+    setCountdownActive(false);
+    setCountdownBeat(0);
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+    };
+  }, []);
+
+  // Save recording helper
+  const saveRecording = useCallback(async (sectionId?: string) => {
+    const result = await recorder.stopRecording();
+    if (result) {
+      addRecording(songId, {
+        id: crypto.randomUUID(),
+        line_id: result.lineId,
+        song_id: songId,
+        file_path: result.filePath,
+        duration_ms: result.durationMs,
+        is_master_take: false,
+        section_id: sectionId,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+    }
+    recordingLineIdRef.current = null;
+    recordingSectionRef.current = null;
+    recordingEndLineIdx.current = -1;
+    player.pause();
+    return result;
+  }, [recorder, addRecording, songId, player]);
+
+  // Auto-stop recording when line/section ends — stop both recording + playback
+  useEffect(() => {
+    if (!recorder.isRecording || !recordingLineIdRef.current) return;
+
+    const endIdx = recordingEndLineIdx.current;
+    const isAtEnd = endIdx >= 0
+      ? (activeLineIndex > endIdx || (activeLineIndex === endIdx && player.lineProgress >= 1))
+      : player.lineProgress >= 1;
+
+    if (isAtEnd) {
+      saveRecording(recordingSectionRef.current?.id);
+    }
+  }, [recorder.isRecording, player.lineProgress, activeLineIndex, recorder, saveRecording]);
+
+  const handleRecord = useCallback(async () => {
+    // Cancel countdown if active
+    if (countdownActive) {
+      cancelCountdown();
+      return;
+    }
+
+    if (!currentLine || !hasTimestamps || !songFolder) return;
+
+    if (recorder.isRecording) {
+      // Manual stop
+      await saveRecording(recordingSectionRef.current?.id);
+      return;
+    }
+
+    // Start countdown → then record single line
+    startCountdownThenRecord(currentLine.id, activeLineIndex, activeLineIndex);
+  }, [countdownActive, cancelCountdown, currentLine, hasTimestamps, songFolder, recorder.isRecording, saveRecording, startCountdownThenRecord, activeLineIndex]);
+
+  // Handle section recording (called from LineNavigator)
+  useEffect(() => {
+    if (!recordingSection || recorder.isRecording || countdownActive) return;
+    const startIdx = lines.findIndex((l) => l.order >= recordingSection.start_line_order);
+    const endIdx = lines.findIndex((l) => l.order > recordingSection.end_line_order) - 1;
+    const actualEnd = endIdx < 0 ? lines.length - 1 : endIdx;
+    if (startIdx < 0 || !lines[startIdx]) return;
+    const startLine = lines[startIdx];
+    if (startLine.start_ms == null) return;
+
+    startCountdownThenRecord(startLine.id, startIdx, actualEnd, recordingSection);
+  }, [recordingSection, recorder.isRecording, countdownActive, lines, startCountdownThenRecord]);
 
   const handleStatusClick = () => {
     if (!currentLine) return;
@@ -233,6 +398,15 @@ export function PracticeCenter({ lines, activeLineIndex, player, songId, onEditM
   // Playback mode
   return (
     <div className="flex-1 flex flex-col items-center justify-center px-12 py-8 relative overflow-hidden">
+      {/* Countdown overlay */}
+      {countdownActive && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/30">
+          <div className="text-[72px] font-bold text-white tabular-nums animate-pulse">
+            {countdownBeat}
+          </div>
+        </div>
+      )}
+
       {/* Previous context line */}
       <div className="text-[15px] text-[var(--text-muted)] font-light text-center max-w-[600px] leading-relaxed opacity-35 my-[6px]">
         {prevLine?.text ?? "\u00A0"}
@@ -350,15 +524,50 @@ export function PracticeCenter({ lines, activeLineIndex, player, songId, onEditM
           )}
         </button>
 
-        {/* Record (disabled) */}
+        {/* Record */}
         <button
-          disabled
-          title="Recording coming soon"
-          className="w-14 h-14 rounded-full bg-[#DC2626] text-white flex items-center justify-center border-none opacity-50 cursor-not-allowed"
+          onClick={handleRecord}
+          disabled={!hasTimestamps || editMode}
+          title={countdownActive ? "Cancel countdown" : recorder.isRecording ? "Stop recording" : "Record this line"}
+          className={`w-14 h-14 rounded-full bg-[#DC2626] text-white flex items-center justify-center border-none transition-all ${
+            !hasTimestamps || editMode
+              ? "opacity-30 cursor-not-allowed"
+              : "cursor-pointer hover:opacity-85 hover:scale-105"
+          } ${recorder.isRecording ? "animate-pulse ring-2 ring-[#DC2626] ring-offset-2 ring-offset-[var(--bg)]" : ""} ${countdownActive ? "ring-2 ring-amber-400 ring-offset-2 ring-offset-[var(--bg)]" : ""}`}
         >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="12" cy="12" r="6" fill="#fff" stroke="none" />
-          </svg>
+          {recorder.isRecording ? (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="#fff">
+              <rect x="6" y="6" width="12" height="12" rx="2" />
+            </svg>
+          ) : countdownActive ? (
+            <span className="text-[16px] font-bold tabular-nums">{countdownBeat}</span>
+          ) : (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="6" fill="#fff" stroke="none" />
+            </svg>
+          )}
+        </button>
+
+        {/* Backing track toggle */}
+        <button
+          onClick={() => setPlayBacking((v) => !v)}
+          title={playBacking ? "Backing track: ON" : "Backing track: OFF"}
+          className={`w-8 h-8 rounded-full border border-[var(--border)] flex items-center justify-center cursor-pointer transition-all hover:border-[#888] ${
+            playBacking ? "bg-[var(--theme-light)] text-[var(--theme)]" : "bg-[var(--surface)] text-[var(--text-muted)]"
+          }`}
+        >
+          {playBacking ? (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+              <path d="M15.54 8.46a5 5 0 010 7.07" />
+            </svg>
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+              <line x1="23" y1="9" x2="17" y2="15" />
+              <line x1="17" y1="9" x2="23" y2="15" />
+            </svg>
+          )}
         </button>
 
         {/* Next */}

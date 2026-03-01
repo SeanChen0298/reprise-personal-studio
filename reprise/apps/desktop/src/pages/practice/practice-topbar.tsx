@@ -1,4 +1,5 @@
 import type { UseLinePlayerReturn } from "../../hooks/use-line-player";
+import type { AudioDevice } from "../../hooks/use-audio-devices";
 
 interface Props {
   player: UseLinePlayerReturn;
@@ -6,9 +7,18 @@ interface Props {
   onTrackChange: (track: "vocals" | "instrumental" | "reference") => void;
   onClearRange?: () => void;
   hasStemSeparation?: boolean;
+  inputDevices?: AudioDevice[];
+  outputDevices?: AudioDevice[];
+  selectedInputId?: string;
+  selectedOutputId?: string;
+  onInputChange?: (id: string) => void;
+  onOutputChange?: (id: string) => void;
 }
 
-export function PracticeTopbar({ player, activeTrack, onTrackChange, onClearRange, hasStemSeparation }: Props) {
+export function PracticeTopbar({
+  player, activeTrack, onTrackChange, onClearRange, hasStemSeparation,
+  inputDevices, outputDevices, selectedInputId, selectedOutputId, onInputChange, onOutputChange,
+}: Props) {
   return (
     <div className="h-12 px-6 border-b border-[var(--border)] flex items-center justify-between bg-[var(--surface)] flex-shrink-0">
       <div className="flex items-center gap-3">
@@ -81,6 +91,55 @@ export function PracticeTopbar({ player, activeTrack, onTrackChange, onClearRang
             +
           </button>
         </div>
+      </div>
+
+      {/* Audio device selectors */}
+      <div className="flex items-center gap-3">
+        {/* Input (mic) */}
+        {inputDevices && inputDevices.length > 0 && (
+          <div className="flex items-center gap-[5px]">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-[var(--text-muted)] flex-shrink-0">
+              <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
+              <path d="M19 10v2a7 7 0 01-14 0v-2" />
+            </svg>
+            <select
+              value={selectedInputId ?? ""}
+              onChange={(e) => onInputChange?.(e.target.value)}
+              className="text-[11px] bg-[var(--bg)] text-[var(--text-secondary)] border border-[var(--border)] rounded-[5px] px-[6px] py-[3px] outline-none cursor-pointer max-w-[140px] truncate"
+              title="Input device (microphone)"
+            >
+              <option value="">Default mic</option>
+              {inputDevices.map((d) => (
+                <option key={d.deviceId} value={d.deviceId}>
+                  {d.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* Output (speaker) */}
+        {outputDevices && outputDevices.length > 0 && (
+          <div className="flex items-center gap-[5px]">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-[var(--text-muted)] flex-shrink-0">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+              <path d="M15.54 8.46a5 5 0 010 7.07" />
+            </svg>
+            <select
+              value={selectedOutputId ?? ""}
+              onChange={(e) => onOutputChange?.(e.target.value)}
+              className="text-[11px] bg-[var(--bg)] text-[var(--text-secondary)] border border-[var(--border)] rounded-[5px] px-[6px] py-[3px] outline-none cursor-pointer max-w-[140px] truncate"
+              title="Output device (speaker)"
+            >
+              <option value="">Default speaker</option>
+              {outputDevices.map((d) => (
+                <option key={d.deviceId} value={d.deviceId}>
+                  {d.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Track toggles */}

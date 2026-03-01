@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { Song, ImportDraft, Line, LineStatus, Annotation } from "../types/song";
+import type { Song, ImportDraft, Line, LineStatus, Annotation, Recording, Section } from "../types/song";
 import {
   downloadAudio,
   buildSongFolder,
@@ -10,6 +10,8 @@ import {
 interface SongStore {
   songs: Song[];
   lines: Record<string, Line[]>; // songId -> lines
+  recordings: Record<string, Recording[]>; // songId -> recordings
+  sections: Record<string, Section[]>; // songId -> sections
   importDraft: ImportDraft | null;
 
   setImportDraft: (draft: ImportDraft | null) => void;
@@ -45,6 +47,18 @@ interface SongStore {
     annotations: Annotation[]
   ) => void;
   getLinesForSong: (songId: string) => Line[];
+
+  // Recordings management
+  addRecording: (songId: string, recording: Recording) => void;
+  removeRecording: (songId: string, recordingId: string) => void;
+  toggleMasterTake: (songId: string, recordingId: string) => void;
+  getRecordingsForLine: (songId: string, lineId: string) => Recording[];
+
+  // Sections management
+  addSection: (songId: string, section: Section) => void;
+  updateSection: (songId: string, sectionId: string, data: Partial<Section>) => void;
+  removeSection: (songId: string, sectionId: string) => void;
+  getSectionsForSong: (songId: string) => Section[];
 }
 
 export const useSongStore = create<SongStore>()(
@@ -52,6 +66,8 @@ export const useSongStore = create<SongStore>()(
     (set, get) => ({
       songs: [],
       lines: {},
+      recordings: {},
+      sections: {},
       importDraft: null,
 
       setImportDraft: (draft) => set({ importDraft: draft }),
@@ -83,10 +99,14 @@ export const useSongStore = create<SongStore>()(
 
       removeSong: (id) =>
         set((s) => {
-          const { [id]: _removed, ...restLines } = s.lines;
+          const { [id]: _removedLines, ...restLines } = s.lines;
+          const { [id]: _removedRecs, ...restRecordings } = s.recordings;
+          const { [id]: _removedSections, ...restSections } = s.sections;
           return {
             songs: s.songs.filter((song) => song.id !== id),
             lines: restLines,
+            recordings: restRecordings,
+            sections: restSections,
           };
         }),
 
@@ -261,6 +281,88 @@ export const useSongStore = create<SongStore>()(
 
       getLinesForSong: (songId) => {
         return (get().lines[songId] ?? []).sort((a, b) => a.order - b.order);
+      },
+
+      addRecording: (songId, recording) =>
+        set((s) => ({
+          recordings: {
+            ...s.recordings,
+            [songId]: [...(s.recordings[songId] ?? []), recording],
+          },
+        })),
+
+      removeRecording: (songId, recordingId) =>
+        set((s) => ({
+          recordings: {
+            ...s.recordings,
+            [songId]: (s.recordings[songId] ?? []).filter(
+              (r) => r.id !== recordingId
+            ),
+          },
+        })),
+
+      toggleMasterTake: (songId, recordingId) =>
+        set((s) => {
+          const recs = s.recordings[songId] ?? [];
+          const target = recs.find((r) => r.id === recordingId);
+          if (!target) return s;
+          const lineId = target.line_id;
+          return {
+            recordings: {
+              ...s.recordings,
+              [songId]: recs.map((r) =>
+                r.line_id === lineId
+                  ? {
+                      ...r,
+                      is_master_take: r.id === recordingId ? !r.is_master_take : false,
+                      updated_at: new Date().toISOString(),
+                    }
+                  : r
+              ),
+            },
+          };
+        }),
+
+      getRecordingsForLine: (songId, lineId) => {
+        return (get().recordings[songId] ?? []).filter(
+          (r) => r.line_id === lineId
+        );
+      },
+
+      addSection: (songId, section) =>
+        set((s) => ({
+          sections: {
+            ...s.sections,
+            [songId]: [...(s.sections[songId] ?? []), section],
+          },
+        })),
+
+      updateSection: (songId, sectionId, data) =>
+        set((s) => ({
+          sections: {
+            ...s.sections,
+            [songId]: (s.sections[songId] ?? []).map((sec) =>
+              sec.id === sectionId
+                ? { ...sec, ...data, updated_at: new Date().toISOString() }
+                : sec
+            ),
+          },
+        })),
+
+      removeSection: (songId, sectionId) =>
+        set((s) => ({
+          sections: {
+            ...s.sections,
+            [songId]: (s.sections[songId] ?? []).filter(
+              (sec) => sec.id !== sectionId
+            ),
+          },
+        })),
+
+      getSectionsForSong: (songId) => {
+        return (get().sections[songId] ?? []).sort(
+          (a, b) => a.start_line_order - b.start_line_order
+        );
       },
     }),
     { name: "reprise-songs" }

@@ -66,3 +66,25 @@ export interface ImportDraft {
   tags: string[];
   notes: string;
 }
+
+export interface Recording {
+  id: string;
+  line_id: string;
+  song_id: string;
+  file_path: string;
+  duration_ms: number;
+  is_master_take: boolean;
+  section_id?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Section {
+  id: string;
+  song_id: string;
+  name: string;
+  start_line_order: number;
+  end_line_order: number;
+  created_at: string;
+  updated_at: string;
+}
