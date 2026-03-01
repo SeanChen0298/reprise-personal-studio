@@ -17,7 +17,12 @@
       "Bash(echo \"$PATH\")",
       "Bash(ffmpeg -version)",
       "Read(//c/Users/cheny/AppData/Local/Programs/Python/Python311/Lib/site-packages/torchcodec/**)",
-      "Bash(pip uninstall torchcodec -y)"
+      "Bash(pip uninstall torchcodec -y)",
+      "Bash(pip install torchaudio==2.5.1)",
+      "Bash(pip install soundfile)"
+    ],
+    "additionalDirectories": [
+      "C:\\Repo\\reprise-personal-studio\\separated"
     ]
   }
 }

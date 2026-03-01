@@ -799,7 +799,7 @@ export function SettingsPage() {
                     <div className="text-[12.5px] font-medium mb-2">Installation commands</div>
                     <div className="flex flex-col gap-1.5 font-mono text-[12px] text-[var(--text-secondary)]">
                       <div className="px-3 py-1.5 bg-[var(--bg)] rounded">winget install Gyan.FFmpeg</div>
-                      <div className="px-3 py-1.5 bg-[var(--bg)] rounded">pip install demucs torchcodec</div>
+                      <div className="px-3 py-1.5 bg-[var(--bg)] rounded">pip install demucs soundfile</div>
                     </div>
                   </div>
                 </div>

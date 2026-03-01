@@ -59,7 +59,9 @@ yt-dlp is used to download audio and subtitles from YouTube. It requires:
 Demucs splits audio into vocal and instrumental tracks. It requires:
 1. **Python 3.11** (Demucs is not compatible with Python 3.14+)
 2. **FFmpeg** (audio decoder — install via `winget install Gyan.FFmpeg`)
-3. **Demucs + torchcodec** (`pip install demucs torchcodec`)
+3. **Demucs + soundfile** (`pip install demucs soundfile`)
+   - Do NOT install `torchcodec` — it conflicts with torchaudio on Windows
+   - `torch` and `torchaudio` 2.5.1 are pinned (newer versions break saving)
 
 ### Usage
 ```
