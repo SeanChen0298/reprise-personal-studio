@@ -25,7 +25,8 @@
       "Bash(pip show yt-dlp)",
       "Bash(pip3 show yt-dlp)",
       "Bash(pip install yt-dlp)",
-      "Bash(xargs grep -l \"annotation\\\\|Annotation\")"
+      "Bash(xargs grep -l \"annotation\\\\|Annotation\")",
+      "Bash(pnpm --filter desktop exec tsc --noEmit)"
     ],
     "additionalDirectories": [
       "C:\\Repo\\reprise-personal-studio\\separated"

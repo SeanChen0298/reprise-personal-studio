@@ -82,11 +82,18 @@ export function useLinePlayer(opts: Options): UseLinePlayerReturn {
 
   // Track whether the line change was user-initiated (click/prev/next) vs auto-advance
   const userNavigatedRef = useRef(false);
+  // Track whether to skip seeking (auto-advance within a loop range)
+  const skipSeekRef = useRef(false);
 
   // Seek to line start when line changes (only in loop mode or user-initiated)
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !hasTimestamps) return;
+    // Skip seek for auto-advance within a loop range (let audio continue naturally)
+    if (skipSeekRef.current) {
+      skipSeekRef.current = false;
+      return;
+    }
     // In follow-along mode, only seek if user clicked a specific line
     if (!loopEnabled && !userNavigatedRef.current) return;
     userNavigatedRef.current = false;
@@ -149,13 +156,11 @@ export function useLinePlayer(opts: Options): UseLinePlayerReturn {
 
             if (st.currentLineIndex < rangeEnd) {
               // More lines in range — advance to next line in range
+              // Don't seek — let audio continue naturally for smooth transitions
+              skipSeekRef.current = true;
               const nextIdx = st.currentLineIndex + 1;
               setCurrentLineIndex(nextIdx);
               st.onLineChange?.(nextIdx);
-              const nextLine = st.lines[nextIdx];
-              if (nextLine?.start_ms != null) {
-                audio.currentTime = nextLine.start_ms / 1000;
-              }
             } else if (st.loopCount < st.maxLoops) {
               // Completed all lines in range, but more loops to go — restart range
               setLoopCount((c) => c + 1);

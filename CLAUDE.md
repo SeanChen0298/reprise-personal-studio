@@ -75,6 +75,24 @@ python -m demucs -n htdemucs --two-stems vocals "C:/Reprise/<song-folder>/audio.
 ### Tauri shell permissions
 `python` and `ffmpeg` commands are allowed in `src-tauri/capabilities/default.json` alongside `yt-dlp`.
 
+## torchcrepe Setup (Pitch Analysis)
+torchcrepe analyzes vocal pitch for pitch curve visualization in the practice view. It requires:
+1. **Python 3.11** (same as Demucs)
+2. **PyTorch** (already installed with Demucs)
+3. **torchcrepe** (`pip install torchcrepe`)
+
+### Usage
+```
+python -m torchcrepe --audio_files vocals.wav --output_files pitch.csv --model full --hop_length 160 --decoder viterbi
+```
+- Runs on the **vocals stem** (after Demucs separation)
+- `--hop_length 160` → 10ms resolution at 16kHz sample rate
+- `--decoder viterbi` → smoothest pitch tracking (temporal smoothing)
+- `--model full` → best accuracy (vs `tiny` for speed)
+- Output: CSV with pitch (Hz) per 10ms frame
+- First run downloads the CREPE model (~80 MB)
+- Uses the same `python` Tauri shell permission as Demucs
+
 ## Current Roadmap
 - **MVP:** Manual lyrics, tap-to-mark timestamps, desktop playback/recording.
 - **v1.5:** Sidecar integration (Demucs/WhisperX), Mobile app sync.

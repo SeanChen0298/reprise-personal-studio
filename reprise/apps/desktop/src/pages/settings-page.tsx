@@ -5,6 +5,7 @@ import { open } from "@tauri-apps/plugin-shell";
 import { Sidebar } from "../components/sidebar";
 import { useAuthStore } from "../stores/auth-store";
 import { checkYtDlpInstalled, checkPythonInstalled, checkFfmpegInstalled, checkDemucsInstalled, COOKIES_PATH } from "../lib/audio-download";
+import { checkTorchcrepeInstalled } from "../lib/audio-analysis";
 import { useHighlightStore } from "../lib/highlight-config";
 
 type Tab = "highlights" | "account" | "preferences" | "downloads";
@@ -43,23 +44,26 @@ export function SettingsPage() {
   const [pythonVersion, setPythonVersion] = useState<string | null | undefined>(undefined);
   const [ffmpegVersion, setFfmpegVersion] = useState<string | null | undefined>(undefined);
   const [demucsStatus, setDemucsStatus] = useState<string | null | undefined>(undefined);
+  const [torchcrepeStatus, setTorchcrepeStatus] = useState<string | null | undefined>(undefined);
   const [checking, setChecking] = useState(false);
 
   const runChecks = useCallback(async () => {
     setChecking(true);
     try {
-      const [version, cookieOk, python, ffmpeg, demucs] = await Promise.all([
+      const [version, cookieOk, python, ffmpeg, demucs, torchcrepe] = await Promise.all([
         checkYtDlpInstalled(),
         exists(COOKIES_PATH),
         checkPythonInstalled(),
         checkFfmpegInstalled(),
         checkDemucsInstalled(),
+        checkTorchcrepeInstalled(),
       ]);
       setYtdlpVersion(version);
       setCookieExists(cookieOk);
       setPythonVersion(python);
       setFfmpegVersion(ffmpeg);
       setDemucsStatus(demucs);
+      setTorchcrepeStatus(torchcrepe);
     } catch {
       setYtdlpVersion(null);
       setCookieExists(false);
@@ -792,6 +796,36 @@ export function SettingsPage() {
                         )}
                       </div>
                     </div>
+
+                    {/* torchcrepe */}
+                    <div className="flex items-center justify-between px-4 py-3.5 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)]">
+                      <div className="flex-1">
+                        <div className="text-[13px] font-medium mb-0.5">torchcrepe</div>
+                        <div className="text-[11.5px] text-[var(--text-muted)] leading-[1.5]">
+                          Neural pitch tracker for pitch curve visualization
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {torchcrepeStatus === undefined ? (
+                          <span className="text-[12px] text-[var(--text-muted)]">Not checked</span>
+                        ) : torchcrepeStatus ? (
+                          <span className="flex items-center gap-1.5 text-[12px] font-medium text-[#15803D]">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                            {torchcrepeStatus}
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1.5 text-[12px] font-medium text-[#DC2626]">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <line x1="18" y1="6" x2="6" y2="18" />
+                              <line x1="6" y1="6" x2="18" y2="18" />
+                            </svg>
+                            Not found
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
 
                   {/* Install instructions */}
@@ -800,6 +834,7 @@ export function SettingsPage() {
                     <div className="flex flex-col gap-1.5 font-mono text-[12px] text-[var(--text-secondary)]">
                       <div className="px-3 py-1.5 bg-[var(--bg)] rounded">winget install Gyan.FFmpeg</div>
                       <div className="px-3 py-1.5 bg-[var(--bg)] rounded">pip install demucs soundfile</div>
+                      <div className="px-3 py-1.5 bg-[var(--bg)] rounded">pip install torchcrepe</div>
                     </div>
                   </div>
                 </div>

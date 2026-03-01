@@ -1,5 +1,6 @@
 export type DownloadStatus = "idle" | "downloading" | "done" | "error";
 export type StemStatus = "idle" | "processing" | "done" | "error";
+export type PitchStatus = "idle" | "processing" | "done" | "error";
 export type LineStatus = "not_started" | "learning" | "mastered";
 
 export interface Song {
@@ -24,6 +25,9 @@ export interface Song {
   instrumental_path?: string;
   stem_status?: StemStatus;
   stem_error?: string;
+  pitch_data_path?: string;
+  pitch_status?: PitchStatus;
+  pitch_error?: string;
   created_at: string;
   updated_at: string;
   user_id?: string;

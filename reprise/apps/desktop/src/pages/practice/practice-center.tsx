@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Line, Annotation, Section } from "../../types/song";
 import type { UseLinePlayerReturn } from "../../hooks/use-line-player";
 import { STATUS_CONFIG, formatMs, nextStatus } from "../../lib/status-config";
@@ -6,6 +6,8 @@ import { useSongStore } from "../../stores/song-store";
 import { useHighlightStore } from "../../lib/highlight-config";
 import { useSymbolStore } from "../../lib/symbol-config";
 import { AnnotatedText } from "../../components/annotated-text";
+import { PitchCurve } from "../../components/pitch-curve";
+import { usePitchData } from "../../hooks/use-pitch-data";
 import { useRecorder } from "../../hooks/use-recorder";
 
 interface Props {
@@ -16,18 +18,22 @@ interface Props {
   songFolder: string;
   bpm?: number;
   inputDeviceId?: string;
+  pitchDataPath?: string;
+  canAnalyzePitch?: boolean;
+  activeSection?: Section | null;
   recordingSection?: Section | null;
   onEditModeChange?: (editing: boolean) => void;
 }
 
 export function PracticeCenter({
   lines, activeLineIndex, player, songId, songFolder, bpm, inputDeviceId,
-  recordingSection, onEditModeChange,
+  pitchDataPath, canAnalyzePitch, activeSection, recordingSection, onEditModeChange,
 }: Props) {
   const updateLineStatus = useSongStore((s) => s.updateLineStatus);
   const updateLineCustomText = useSongStore((s) => s.updateLineCustomText);
   const updateLineAnnotations = useSongStore((s) => s.updateLineAnnotations);
   const addRecording = useSongStore((s) => s.addRecording);
+  const analyzeSongPitch = useSongStore((s) => s.analyzeSongPitch);
   const highlights = useHighlightStore((s) => s.highlights);
   const symbols = useSymbolStore((s) => s.symbols);
   const recorder = useRecorder();
@@ -35,7 +41,16 @@ export function PracticeCenter({
   const currentLine = lines[activeLineIndex];
   const prevLine = lines[activeLineIndex - 1];
   const nextLineData = lines[activeLineIndex + 1];
+
+  // Lines within the active section
+  const sectionLines = useMemo(() => {
+    if (!activeSection) return null;
+    return lines.filter(
+      (l) => l.order >= activeSection.start_line_order && l.order <= activeSection.end_line_order
+    );
+  }, [activeSection, lines]);
   const hasTimestamps = currentLine?.start_ms != null && currentLine?.end_ms != null;
+  const pitchData = usePitchData(pitchDataPath, currentLine?.start_ms, currentLine?.end_ms);
 
   const [editMode, setEditMode] = useState(false);
   const [playBacking, setPlayBacking] = useState(true);
@@ -407,87 +422,163 @@ export function PracticeCenter({
         </div>
       )}
 
-      {/* Previous context line */}
-      <div className="text-[15px] text-[var(--text-muted)] font-light text-center max-w-[600px] leading-relaxed opacity-35 my-[6px]">
-        {prevLine?.text ?? "\u00A0"}
-      </div>
-
-      {/* Current line hero */}
-      <div key={activeLineIndex} className="text-center my-5 animate-fade-up">
-        {/* Show original text above if custom_text differs */}
-        {hasCustomText && (
-          <div className="text-[14px] text-[var(--text-muted)] mb-2 opacity-50">
-            {currentLine.text}
+      {sectionLines ? (
+        /* Section view: show all lines, highlight the active one */
+        <div className="text-center my-5 max-w-[640px] w-full">
+          <div className="text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--theme-text)] mb-4">
+            {activeSection!.name}
           </div>
-        )}
-        <div className="font-serif text-[32px] tracking-[-0.5px] leading-[1.35] text-[var(--text-primary)] max-w-[640px]">
-          <AnnotatedText
-            text={displayText}
-            annotations={currentLine.annotations}
-            highlights={highlights}
-          />
-        </div>
-        <div className="flex items-center justify-center gap-3 mt-[10px]">
-          {hasTimestamps && (
-            <span className="text-[11.5px] text-[var(--text-muted)] flex items-center gap-1 tabular-nums">
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="10" />
-                <polyline points="12 6 12 12 16 14" />
-              </svg>
-              {formatMs(currentLine.start_ms!)} — {formatMs(currentLine.end_ms!)}
+          <div className="flex flex-col gap-[6px]">
+            {sectionLines.map((line) => {
+              const isActive = line.id === currentLine?.id;
+              const lineDisplay = line.custom_text ?? line.text;
+              return (
+                <div
+                  key={line.id}
+                  className={`font-serif tracking-[-0.3px] leading-[1.4] transition-all duration-200 ${
+                    isActive
+                      ? "text-[28px] text-[var(--text-primary)]"
+                      : "text-[20px] text-[var(--text-muted)] opacity-40"
+                  }`}
+                >
+                  <AnnotatedText
+                    text={lineDisplay}
+                    annotations={line.annotations}
+                    highlights={highlights}
+                  />
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex items-center justify-center gap-3 mt-[10px]">
+            {hasTimestamps && (
+              <span className="text-[11.5px] text-[var(--text-muted)] flex items-center gap-1 tabular-nums">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" />
+                  <polyline points="12 6 12 12 16 14" />
+                </svg>
+                {formatMs(currentLine.start_ms!)} — {formatMs(currentLine.end_ms!)}
+              </span>
+            )}
+            <span className="text-[11.5px] text-[var(--text-muted)] tabular-nums">
+              Line {activeLineIndex + 1} of {lines.length}
             </span>
-          )}
-          <span className="text-[11.5px] text-[var(--text-muted)] tabular-nums">
-            Line {activeLineIndex + 1} of {lines.length}
-          </span>
-          <button
-            onClick={handleStatusClick}
-            className="text-[10.5px] font-medium px-[9px] py-[2px] rounded-[20px] cursor-pointer border-none transition-colors"
-            style={{ background: cfg.tagBg, color: cfg.tagColor }}
-          >
-            {cfg.label}
-          </button>
-          {/* Edit button */}
-          <button
-            onClick={enterEditMode}
-            className="w-6 h-6 rounded-[5px] border border-[var(--border)] bg-transparent text-[var(--text-muted)] cursor-pointer flex items-center justify-center hover:border-[#888] hover:text-[var(--text-primary)] transition-all"
-            title="Edit annotations"
-          >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
-              <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-            </svg>
-          </button>
+            <button
+              onClick={handleStatusClick}
+              className="text-[10.5px] font-medium px-[9px] py-[2px] rounded-[20px] cursor-pointer border-none transition-colors"
+              style={{ background: cfg.tagBg, color: cfg.tagColor }}
+            >
+              {cfg.label}
+            </button>
+            <button
+              onClick={enterEditMode}
+              className="w-6 h-6 rounded-[5px] border border-[var(--border)] bg-transparent text-[var(--text-muted)] cursor-pointer flex items-center justify-center hover:border-[#888] hover:text-[var(--text-primary)] transition-all"
+              title="Edit annotations"
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+              </svg>
+            </button>
+          </div>
         </div>
-      </div>
+      ) : (
+        /* Single-line view: prev / current / next */
+        <>
+          {/* Previous context line */}
+          <div className="font-serif text-[20px] tracking-[-0.3px] text-[var(--text-muted)] text-center max-w-[600px] leading-relaxed opacity-35 my-[6px]">
+            {prevLine ? (
+              <AnnotatedText
+                text={prevLine.custom_text ?? prevLine.text}
+                annotations={prevLine.annotations}
+                highlights={highlights}
+              />
+            ) : "\u00A0"}
+          </div>
 
-      {/* Next context line */}
-      <div className="text-[15px] text-[var(--text-muted)] font-light text-center max-w-[600px] leading-relaxed opacity-50 my-[6px]">
-        {nextLineData?.text ?? "\u00A0"}
-      </div>
+          {/* Current line hero */}
+          <div key={activeLineIndex} className="text-center my-5 animate-fade-up">
+            {hasCustomText && (
+              <div className="text-[14px] text-[var(--text-muted)] mb-2 opacity-50">
+                {currentLine.text}
+              </div>
+            )}
+            <div className="font-serif text-[32px] tracking-[-0.5px] leading-[1.35] text-[var(--text-primary)] max-w-[640px]">
+              <AnnotatedText
+                text={displayText}
+                annotations={currentLine.annotations}
+                highlights={highlights}
+              />
+            </div>
+            <div className="flex items-center justify-center gap-3 mt-[10px]">
+              {hasTimestamps && (
+                <span className="text-[11.5px] text-[var(--text-muted)] flex items-center gap-1 tabular-nums">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10" />
+                    <polyline points="12 6 12 12 16 14" />
+                  </svg>
+                  {formatMs(currentLine.start_ms!)} — {formatMs(currentLine.end_ms!)}
+                </span>
+              )}
+              <span className="text-[11.5px] text-[var(--text-muted)] tabular-nums">
+                Line {activeLineIndex + 1} of {lines.length}
+              </span>
+              <button
+                onClick={handleStatusClick}
+                className="text-[10.5px] font-medium px-[9px] py-[2px] rounded-[20px] cursor-pointer border-none transition-colors"
+                style={{ background: cfg.tagBg, color: cfg.tagColor }}
+              >
+                {cfg.label}
+              </button>
+              <button
+                onClick={enterEditMode}
+                className="w-6 h-6 rounded-[5px] border border-[var(--border)] bg-transparent text-[var(--text-muted)] cursor-pointer flex items-center justify-center hover:border-[#888] hover:text-[var(--text-primary)] transition-all"
+                title="Edit annotations"
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                  <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                </svg>
+              </button>
+            </div>
+          </div>
 
-      {/* Progress bar (waveform placeholder) */}
+          {/* Next context line */}
+          <div className="font-serif text-[20px] tracking-[-0.3px] text-[var(--text-muted)] text-center max-w-[600px] leading-relaxed opacity-50 my-[6px]">
+            {nextLineData ? (
+              <AnnotatedText
+                text={nextLineData.custom_text ?? nextLineData.text}
+                annotations={nextLineData.annotations}
+                highlights={highlights}
+              />
+            ) : "\u00A0"}
+          </div>
+        </>
+      )}
+
+      {/* Pitch curve / progress bar */}
       {hasTimestamps && (
         <div className="w-full max-w-[560px] mt-6">
-          <div
-            className="h-[56px] bg-[var(--border-subtle)] rounded-[4px] relative cursor-pointer overflow-hidden"
-            onClick={(e) => {
-              const rect = e.currentTarget.getBoundingClientRect();
-              const fraction = (e.clientX - rect.left) / rect.width;
-              player.seekWithinLine(fraction);
-            }}
-          >
-            <div
-              className="absolute inset-y-0 left-0 bg-[var(--theme)] opacity-20 transition-[width] duration-100"
-              style={{ width: `${player.lineProgress * 100}%` }}
-            />
-            <div
-              className="absolute top-0 bottom-0 w-[2px] bg-[var(--theme)] transition-[left] duration-100"
-              style={{ left: `${player.lineProgress * 100}%` }}
-            />
-          </div>
+          <PitchCurve
+            points={pitchData.points}
+            progress={player.lineProgress}
+            onSeek={player.seekWithinLine}
+            startMs={currentLine.start_ms!}
+            endMs={currentLine.end_ms!}
+          />
           <div className="flex justify-between text-[10px] text-[var(--text-muted)] tabular-nums mt-1">
             <span>{formatMs(currentLine.start_ms!)}</span>
+            {pitchData.points.length === 0 && canAnalyzePitch && (
+              <button
+                onClick={() => analyzeSongPitch(songId)}
+                className="text-[10px] text-[var(--theme)] hover:underline cursor-pointer bg-transparent border-none flex items-center gap-1"
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                </svg>
+                Analyze pitch
+              </button>
+            )}
             <span>{formatMs(currentLine.end_ms!)}</span>
           </div>
         </div>

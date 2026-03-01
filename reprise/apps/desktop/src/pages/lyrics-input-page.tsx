@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Sidebar } from "../components/sidebar";
 import { useSongStore } from "../stores/song-store";
@@ -7,7 +7,7 @@ import {
   SUBTITLE_LANGUAGES,
   buildSongFolder,
 } from "../lib/audio-download";
-import type { Line } from "../types/song";
+import type { Line, Section } from "../types/song";
 
 type Mode = "lines" | "bulk";
 
@@ -17,11 +17,21 @@ export function LyricsInputPage() {
   const song = useSongStore((s) => s.songs.find((s) => s.id === id));
   const storedLines = useSongStore((s) => (id ? s.lines[id] : undefined)) ?? [];
   const setLines = useSongStore((s) => s.setLines);
+  const sections = useSongStore((s) => (id ? s.sections[id] : undefined)) ?? [];
+  const addSection = useSongStore((s) => s.addSection);
+  const updateSection = useSongStore((s) => s.updateSection);
+  const removeSection = useSongStore((s) => s.removeSection);
 
   const [mode, setMode] = useState<Mode>("lines");
   const [editLines, setEditLines] = useState<{ id: string; text: string; start_ms?: number; end_ms?: number }[]>([]);
   const [bulkText, setBulkText] = useState("");
   const [saved, setSaved] = useState(false);
+
+  // Section management state
+  const [selectedRange, setSelectedRange] = useState<[number, number] | null>(null);
+  const [newSectionName, setNewSectionName] = useState("");
+  const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
+  const [editSectionName, setEditSectionName] = useState("");
 
   // Language fetch state
   const [lyricsLang, setLyricsLang] = useState<string>(
@@ -33,6 +43,39 @@ export function LyricsInputPage() {
   );
   const [fetching, setFetching] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
+
+  // Map stored line ID -> stored order for section display
+  const storedOrderById = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const sl of storedLines) map.set(sl.id, sl.order);
+    return map;
+  }, [storedLines]);
+
+  // Map editLine index -> section that starts at that line
+  const sectionByEditIndex = useMemo(() => {
+    const map = new Map<number, Section>();
+    for (const sec of sections) {
+      const idx = editLines.findIndex((l) => storedOrderById.get(l.id) === sec.start_line_order);
+      if (idx >= 0) map.set(idx, sec);
+    }
+    return map;
+  }, [sections, editLines, storedOrderById]);
+
+  // Set of editLine indices that are inside any section
+  const indicesInSection = useMemo(() => {
+    const set = new Set<number>();
+    for (const sec of sections) {
+      let inSection = false;
+      for (let i = 0; i < editLines.length; i++) {
+        const order = storedOrderById.get(editLines[i].id);
+        if (order != null && order >= sec.start_line_order && order <= sec.end_line_order) {
+          set.add(i);
+          inSection = true;
+        } else if (inSection) break;
+      }
+    }
+    return set;
+  }, [sections, editLines, storedOrderById]);
 
   // Initialize from stored lines
   useEffect(() => {
@@ -81,10 +124,70 @@ export function LyricsInputPage() {
     });
   }
 
+  function handleMergeWithNext(index: number) {
+    setEditLines((prev) => {
+      if (index >= prev.length - 1) return prev;
+      const current = prev[index];
+      const next = prev[index + 1];
+      const mergedText = `${current.text.trimEnd()} ${next.text.trimStart()}`.trim();
+      const merged = {
+        id: current.id,
+        text: mergedText,
+        start_ms: current.start_ms ?? next.start_ms,
+        end_ms: next.end_ms ?? current.end_ms,
+      };
+      const result = [...prev];
+      result[index] = merged;
+      result.splice(index + 1, 1);
+      return result;
+    });
+  }
+
   function handleLineChange(index: number, text: string) {
     setEditLines((prev) =>
       prev.map((line, i) => (i === index ? { ...line, text } : line))
     );
+  }
+
+  function handleLineClick(index: number, shiftKey: boolean) {
+    if (!shiftKey) {
+      setSelectedRange((prev) => prev ? null : [index, index]);
+      return;
+    }
+    setSelectedRange((prev) => {
+      if (!prev) return [index, index];
+      const start = Math.min(prev[0], index);
+      const end = Math.max(prev[0], index);
+      return [start, end];
+    });
+  }
+
+  function handleCreateSection() {
+    if (!newSectionName.trim() || !selectedRange || !id) return;
+    // Map editLine indices to stored line orders
+    const startLine = storedLines.find((sl) => sl.id === editLines[selectedRange[0]]?.id);
+    const endLine = storedLines.find((sl) => sl.id === editLines[selectedRange[1]]?.id);
+    if (!startLine || !endLine) return;
+
+    const now = new Date().toISOString();
+    addSection(id, {
+      id: crypto.randomUUID(),
+      song_id: id,
+      name: newSectionName.trim(),
+      start_line_order: startLine.order,
+      end_line_order: endLine.order,
+      created_at: now,
+      updated_at: now,
+    });
+    setNewSectionName("");
+    setSelectedRange(null);
+  }
+
+  function handleRenameSection(sectionId: string) {
+    if (!editSectionName.trim() || !id) return;
+    updateSection(id, sectionId, { name: editSectionName.trim() });
+    setEditingSectionId(null);
+    setEditSectionName("");
   }
 
   function handleApplyBulk() {
@@ -143,6 +246,31 @@ export function LyricsInputPage() {
       });
 
     setLines(id!, newLines);
+
+    // Remap section boundaries to new line orders
+    const newOrderById = new Map<string, number>();
+    for (const nl of newLines) newOrderById.set(nl.id, nl.order);
+
+    for (const sec of sections) {
+      // Find the stored lines at section boundaries
+      const startLine = storedLines.find((sl) => sl.order === sec.start_line_order);
+      const endLine = storedLines.find((sl) => sl.order === sec.end_line_order);
+      if (!startLine || !endLine) {
+        removeSection(id!, sec.id);
+        continue;
+      }
+      const newStart = newOrderById.get(startLine.id);
+      const newEnd = newOrderById.get(endLine.id);
+      if (newStart == null || newEnd == null) {
+        // Boundary line was deleted
+        removeSection(id!, sec.id);
+        continue;
+      }
+      if (newStart !== sec.start_line_order || newEnd !== sec.end_line_order) {
+        updateSection(id!, sec.id, { start_line_order: newStart, end_line_order: newEnd });
+      }
+    }
+
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   }
@@ -291,56 +419,169 @@ export function LyricsInputPage() {
             {/* Line by line mode */}
             {mode === "lines" && (
               <div>
+                {/* Section note */}
+                {!selectedRange && storedLines.length > 1 && sections.length === 0 && (
+                  <div className="flex items-center gap-2 px-3 py-2 mb-2 rounded-[8px] bg-[var(--surface)] border border-[var(--border-subtle)]">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-[var(--text-muted)] flex-shrink-0">
+                      <circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" />
+                    </svg>
+                    <span className="text-[11.5px] text-[var(--text-muted)]">
+                      Shift+click two lines to select a range, then name it to create a section (e.g. Verse, Chorus).
+                    </span>
+                  </div>
+                )}
+
                 <div className="flex flex-col gap-1">
-                  {editLines.map((line, i) => (
-                    <div
-                      key={line.id}
-                      className="flex items-center gap-2 px-3 py-2 bg-[var(--surface)] border border-[var(--border)] rounded-[9px] focus-within:border-[var(--theme)] focus-within:shadow-[0_0_0_3px_rgba(37,99,235,0.09)] transition-all"
-                    >
-                      <div className="text-[var(--text-muted)] cursor-grab flex-shrink-0 flex items-center">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <circle cx="9" cy="5" r="1" /><circle cx="9" cy="12" r="1" /><circle cx="9" cy="19" r="1" />
-                          <circle cx="15" cy="5" r="1" /><circle cx="15" cy="12" r="1" /><circle cx="15" cy="19" r="1" />
-                        </svg>
-                      </div>
-                      <span className="w-[22px] text-center text-[11px] font-medium text-[var(--text-muted)] flex-shrink-0 tabular-nums">
-                        {i + 1}
-                      </span>
-                      <input
-                        type="text"
-                        value={line.text}
-                        onChange={(e) => handleLineChange(i, e.target.value)}
-                        placeholder="Enter lyric line..."
-                        className="flex-1 border-none outline-none bg-transparent font-sans text-[14px] text-[var(--text-primary)] min-w-0 placeholder:text-[var(--text-muted)]"
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            handleInsertAfter(i);
-                          }
-                        }}
-                      />
-                      <div className="flex items-center gap-0.5 flex-shrink-0">
-                        <button
-                          onClick={() => handleInsertAfter(i)}
-                          title="Insert line below"
-                          className="w-[26px] h-[26px] rounded-[5px] border-none bg-transparent text-[var(--text-muted)] cursor-pointer flex items-center justify-center hover:text-[var(--text-primary)] hover:bg-[var(--accent-light)] transition-all"
+                  {editLines.map((line, i) => {
+                    const section = sectionByEditIndex.get(i);
+                    const inRange = selectedRange != null && i >= selectedRange[0] && i <= selectedRange[1];
+                    const inSection = indicesInSection.has(i);
+                    const isRangeStart = selectedRange != null && i === selectedRange[0];
+
+                    return (
+                      <div key={line.id}>
+                        {/* Inline section creation bar — appears above the first selected line */}
+                        {isRangeStart && (
+                          <div className="flex items-center gap-2 p-2.5 mb-1 bg-[var(--theme-light)] border border-[var(--theme)] rounded-[9px]">
+                            <span className="text-[11.5px] text-[var(--theme-text)] flex-shrink-0">
+                              Lines {selectedRange[0] + 1}–{selectedRange[1] + 1}
+                            </span>
+                            <input
+                              type="text"
+                              value={newSectionName}
+                              onChange={(e) => setNewSectionName(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === "Enter") handleCreateSection(); if (e.key === "Escape") { setSelectedRange(null); setNewSectionName(""); } }}
+                              placeholder="Section name (e.g. Verse 1)..."
+                              autoFocus
+                              className="flex-1 text-[12px] px-2 py-[4px] rounded-[5px] border border-[var(--border)] bg-[var(--bg)] text-[var(--text-primary)] outline-none min-w-0"
+                            />
+                            <button
+                              onClick={handleCreateSection}
+                              disabled={!newSectionName.trim() || selectedRange[0] === selectedRange[1]}
+                              className="text-[11px] font-medium px-3 py-[4px] rounded-[5px] bg-[var(--accent)] text-white border-none cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
+                            >
+                              Create
+                            </button>
+                            <button
+                              onClick={() => { setSelectedRange(null); setNewSectionName(""); }}
+                              className="text-[11px] px-1.5 py-[4px] text-[var(--text-muted)] bg-transparent border-none cursor-pointer flex-shrink-0"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Section header */}
+                        {section && (
+                          <div className="flex items-center gap-1.5 px-3 py-[6px] mt-1 mb-[2px]">
+                            {editingSectionId === section.id ? (
+                              <input
+                                type="text"
+                                value={editSectionName}
+                                onChange={(e) => setEditSectionName(e.target.value)}
+                                onKeyDown={(e) => { if (e.key === "Enter") handleRenameSection(section.id); if (e.key === "Escape") setEditingSectionId(null); }}
+                                onBlur={() => handleRenameSection(section.id)}
+                                autoFocus
+                                className="flex-1 text-[11px] font-semibold px-1.5 py-0.5 rounded-[4px] border border-[var(--theme)] bg-[var(--bg)] text-[var(--text-primary)] outline-none uppercase tracking-[0.06em]"
+                              />
+                            ) : (
+                              <>
+                                <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--theme-text)] flex-1 truncate">
+                                  {section.name}
+                                </span>
+                                <button
+                                  onClick={() => { setEditingSectionId(section.id); setEditSectionName(section.name); }}
+                                  title="Rename section"
+                                  className="w-5 h-5 flex items-center justify-center text-[var(--text-muted)] bg-transparent border-none cursor-pointer hover:text-[var(--text-primary)] transition-opacity"
+                                >
+                                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                                    <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                                  </svg>
+                                </button>
+                                <button
+                                  onClick={() => id && removeSection(id, section.id)}
+                                  title="Delete section"
+                                  className="w-5 h-5 flex items-center justify-center text-[var(--text-muted)] bg-transparent border-none cursor-pointer hover:text-red-500 transition-all"
+                                >
+                                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                                  </svg>
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Line row */}
+                        <div
+                          onClick={(e) => { if (e.shiftKey) { e.preventDefault(); handleLineClick(i, true); } }}
+                          onMouseDown={(e) => { if (e.shiftKey) e.preventDefault(); }}
+                          className={`flex items-center gap-2 px-3 py-2 bg-[var(--surface)] border rounded-[9px] focus-within:border-[var(--theme)] focus-within:shadow-[0_0_0_3px_rgba(37,99,235,0.09)] transition-all ${
+                            inRange
+                              ? "border-[var(--theme)] bg-[var(--theme-light)]"
+                              : inSection
+                                ? "border-[var(--border)] border-l-[var(--theme)] border-l-2"
+                                : "border-[var(--border)]"
+                          }`}
                         >
-                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                            <path d="M12 5v14M5 12h14" />
-                          </svg>
-                        </button>
-                        <button
-                          onClick={() => handleDeleteLine(i)}
-                          title="Delete line"
-                          className="w-[26px] h-[26px] rounded-[5px] border-none bg-transparent text-[var(--text-muted)] cursor-pointer flex items-center justify-center hover:text-red-600 hover:bg-red-50 transition-all"
-                        >
-                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M18 6L6 18M6 6l12 12" />
-                          </svg>
-                        </button>
+                          <div className="text-[var(--text-muted)] cursor-grab flex-shrink-0 flex items-center">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <circle cx="9" cy="5" r="1" /><circle cx="9" cy="12" r="1" /><circle cx="9" cy="19" r="1" />
+                              <circle cx="15" cy="5" r="1" /><circle cx="15" cy="12" r="1" /><circle cx="15" cy="19" r="1" />
+                            </svg>
+                          </div>
+                          <span className="w-[22px] text-center text-[11px] font-medium text-[var(--text-muted)] flex-shrink-0 tabular-nums">
+                            {i + 1}
+                          </span>
+                          <input
+                            type="text"
+                            value={line.text}
+                            onChange={(e) => handleLineChange(i, e.target.value)}
+                            placeholder="Enter lyric line..."
+                            className="flex-1 border-none outline-none bg-transparent font-sans text-[14px] text-[var(--text-primary)] min-w-0 placeholder:text-[var(--text-muted)]"
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                handleInsertAfter(i);
+                              }
+                            }}
+                          />
+                          <div className="flex items-center gap-0.5 flex-shrink-0">
+                            {i < editLines.length - 1 && (
+                              <button
+                                onClick={() => handleMergeWithNext(i)}
+                                title="Merge with next line"
+                                className="w-[26px] h-[26px] rounded-[5px] border-none bg-transparent text-[var(--text-muted)] cursor-pointer flex items-center justify-center hover:text-[var(--theme)] hover:bg-[var(--theme-light)] transition-all"
+                              >
+                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                  <path d="M7 4v16M17 4v16M4 12h16" />
+                                </svg>
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleInsertAfter(i)}
+                              title="Insert line below"
+                              className="w-[26px] h-[26px] rounded-[5px] border-none bg-transparent text-[var(--text-muted)] cursor-pointer flex items-center justify-center hover:text-[var(--text-primary)] hover:bg-[var(--accent-light)] transition-all"
+                            >
+                              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                <path d="M12 5v14M5 12h14" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={() => handleDeleteLine(i)}
+                              title="Delete line"
+                              className="w-[26px] h-[26px] rounded-[5px] border-none bg-transparent text-[var(--text-muted)] cursor-pointer flex items-center justify-center hover:text-red-600 hover:bg-red-50 transition-all"
+                            >
+                              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M18 6L6 18M6 6l12 12" />
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 {/* Add line button */}

@@ -21,7 +21,9 @@ export function PracticePage() {
 
   const [activeTrack, setActiveTrack] = useState<"vocals" | "instrumental" | "reference">("reference");
   const [isEditing, setIsEditing] = useState(false);
+  const [autoPlayOnClick, setAutoPlayOnClick] = useState(true);
   const [recordingSection, setRecordingSection] = useState<Section | null>(null);
+  const [activeSection, setActiveSection] = useState<Section | null>(null);
   const audioDevices = useAudioDevices();
   const rawSections = useSongStore((s) => (id ? s.sections[id] : undefined));
   const sections = useMemo(() => rawSections ?? [], [rawSections]);
@@ -74,9 +76,34 @@ export function PracticePage() {
     [player]
   );
 
+  const handleSectionClick = useCallback((section: Section) => {
+    const startIdx = lines.findIndex((l) => l.order >= section.start_line_order);
+    let endIdx = lines.findIndex((l) => l.order > section.end_line_order) - 1;
+    if (endIdx < 0) endIdx = lines.length - 1;
+    if (startIdx < 0) return;
+
+    player.setLoopRange([startIdx, endIdx]);
+    if (!player.loopEnabled) {
+      player.toggleLoop();
+    }
+    player.goToLine(startIdx, autoPlayOnClick && !isEditing);
+    setActiveSection(section);
+  }, [lines, player, autoPlayOnClick, isEditing]);
+
   const handleClearRange = useCallback(() => {
     player.setLoopRange(null);
+    setActiveSection(null);
   }, [player]);
+
+  // Clear activeSection when player moves outside the section's lines
+  useEffect(() => {
+    if (!activeSection) return;
+    const currentOrder = lines[player.currentLineIndex]?.order;
+    if (currentOrder == null) return;
+    if (currentOrder < activeSection.start_line_order || currentOrder > activeSection.end_line_order) {
+      setActiveSection(null);
+    }
+  }, [activeSection, player.currentLineIndex, lines]);
 
   // Apply output device to audio element
   useEffect(() => {
@@ -159,8 +186,12 @@ export function PracticePage() {
         activeLineIndex={player.currentLineIndex}
         loopRange={player.loopRange}
         sections={sections}
-        onLineClick={(i) => player.goToLine(i, !isEditing)}
+        activeSection={activeSection}
+        autoPlayOnClick={autoPlayOnClick}
+        onAutoPlayToggle={() => setAutoPlayOnClick((v) => !v)}
+        onLineClick={(i) => player.goToLine(i, autoPlayOnClick && !isEditing)}
         onShiftClick={handleShiftClick}
+        onSectionClick={handleSectionClick}
         onRecordSection={handleRecordSection}
       />
       <div className="flex flex-col flex-1 min-w-0">
@@ -185,6 +216,9 @@ export function PracticePage() {
           songFolder={song.audio_folder ?? ""}
           bpm={song.bpm}
           inputDeviceId={audioDevices.selectedInputId}
+          pitchDataPath={song.pitch_data_path}
+          canAnalyzePitch={song.stem_status === "done" && song.pitch_status !== "processing"}
+          activeSection={activeSection}
           recordingSection={recordingSection}
           onEditModeChange={setIsEditing}
         />

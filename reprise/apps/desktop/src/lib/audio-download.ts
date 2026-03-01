@@ -25,7 +25,7 @@ interface SpawnResult {
 }
 
 /** Spawn a command and stream stdout/stderr to console in real-time */
-function spawnAndWait(
+export function spawnAndWait(
   command: ReturnType<typeof Command.create>,
   tag: string,
   onProgress?: (line: string) => void

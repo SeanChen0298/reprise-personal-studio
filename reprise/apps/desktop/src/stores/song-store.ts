@@ -6,6 +6,7 @@ import {
   buildSongFolder,
   separateStems,
 } from "../lib/audio-download";
+import { analyzePitch } from "../lib/audio-analysis";
 
 interface SongStore {
   songs: Song[];
@@ -22,9 +23,10 @@ interface SongStore {
   removeSong: (id: string) => void;
   togglePin: (id: string) => void;
 
-  // Audio download & stem separation
+  // Audio download, stem separation & pitch analysis
   downloadSongAudio: (id: string) => Promise<void>;
   separateSongStems: (id: string) => Promise<void>;
+  analyzeSongPitch: (id: string) => Promise<void>;
 
   // Lines management
   setLines: (songId: string, lines: Line[]) => void;
@@ -190,11 +192,40 @@ export const useSongStore = create<SongStore>()(
             vocals_path: result.vocalsPath,
             instrumental_path: result.instrumentalPath,
           });
+
+          // Auto-trigger pitch analysis after successful stem separation
+          get().analyzeSongPitch(id);
         } catch (err) {
           get().updateSong(id, {
             stem_status: "error",
             stem_error:
               err instanceof Error ? err.message : "Stem separation failed",
+          });
+        }
+      },
+
+      analyzeSongPitch: async (id) => {
+        const song = get().songs.find((s) => s.id === id);
+        if (!song?.vocals_path || song.stem_status !== "done") return;
+        if (!song.audio_folder) return;
+
+        get().updateSong(id, {
+          pitch_status: "processing",
+          pitch_error: undefined,
+        });
+
+        try {
+          const pitchDataPath = await analyzePitch(song.vocals_path, song.audio_folder);
+
+          get().updateSong(id, {
+            pitch_status: "done",
+            pitch_data_path: pitchDataPath,
+          });
+        } catch (err) {
+          get().updateSong(id, {
+            pitch_status: "error",
+            pitch_error:
+              err instanceof Error ? err.message : "Pitch analysis failed",
           });
         }
       },

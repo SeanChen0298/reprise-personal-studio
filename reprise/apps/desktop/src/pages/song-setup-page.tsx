@@ -1,6 +1,7 @@
 import { useNavigate, useParams } from "react-router-dom";
 import { Sidebar } from "../components/sidebar";
 import { useSongStore } from "../stores/song-store";
+import type { PitchStatus } from "../types/song";
 
 export function SongSetupPage() {
   const { id } = useParams<{ id: string }>();
@@ -8,6 +9,7 @@ export function SongSetupPage() {
   const song = useSongStore((s) => s.songs.find((s) => s.id === id));
   const downloadSongAudio = useSongStore((s) => s.downloadSongAudio);
   const separateSongStems = useSongStore((s) => s.separateSongStems);
+  const analyzeSongPitch = useSongStore((s) => s.analyzeSongPitch);
 
   if (!song) {
     return (
@@ -24,6 +26,11 @@ export function SongSetupPage() {
   const stemsDone = song.stem_status === "done";
   const stemsProcessing = song.stem_status === "processing";
   const stemsError = song.stem_status === "error";
+
+  const pitchStatus: PitchStatus = song.pitch_status ?? "idle";
+  const pitchDone = pitchStatus === "done";
+  const pitchProcessing = pitchStatus === "processing";
+  const pitchError = pitchStatus === "error";
 
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--bg)]">
@@ -277,6 +284,90 @@ export function SongSetupPage() {
                 </div>
               )}
             </div>
+
+            {/* Pitch Analysis Section (torchcrepe) */}
+            {stemsDone && (
+              <div className="mb-6">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-[10.5px] font-medium uppercase tracking-[0.09em] text-[var(--text-muted)] flex-shrink-0">
+                    Pitch analysis (torchcrepe)
+                  </span>
+                  <div className="flex-1 h-px bg-[var(--border-subtle)]" />
+                </div>
+
+                {pitchProcessing ? (
+                  <div className="flex items-center gap-3.5 p-4 bg-[#FFFBEB] border border-[#FDE68A] rounded-[var(--radius)]">
+                    <div className="w-10 h-10 rounded-[9px] bg-[#FEF3C7] text-[#D97706] flex items-center justify-center flex-shrink-0">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="animate-spin">
+                        <circle cx="12" cy="12" r="10" />
+                        <polyline points="12 6 12 12 16 14" />
+                      </svg>
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-[13px] font-medium text-[#92400E] mb-[6px]">Analyzing vocal pitch...</div>
+                      <div className="h-1 bg-[#FDE68A] rounded-sm overflow-hidden">
+                        <div className="h-full w-[65%] bg-gradient-to-r from-[#F59E0B] to-[#D97706] rounded-sm animate-pulse" />
+                      </div>
+                      <div className="text-[11px] text-[#B45309] mt-1.5">Running torchcrepe on the vocals track.</div>
+                    </div>
+                  </div>
+                ) : pitchDone ? (
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex items-center gap-3.5 p-4 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)] hover:shadow-[0_2px_12px_rgba(0,0,0,0.05)] transition-shadow">
+                      <div className="w-10 h-10 rounded-[9px] bg-[#EDE9FE] text-[#7C3AED] flex items-center justify-center flex-shrink-0">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                        </svg>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[13.5px] font-medium flex items-center gap-[6px]">
+                          <span className="w-[6px] h-[6px] rounded-full bg-[#22C55E] flex-shrink-0" />
+                          pitch.csv
+                        </div>
+                        <div className="text-[11.5px] text-[var(--text-muted)]">Vocal pitch data for practice visualization</div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => analyzeSongPitch(song.id)}
+                      className="mt-1 self-start px-3 py-[5px] rounded-[6px] border-[1.5px] border-[var(--border)] bg-transparent text-[12px] font-medium text-[var(--text-secondary)] hover:border-[#888] hover:text-[var(--text-primary)] transition-all flex items-center gap-1"
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="23 4 23 10 17 10" />
+                        <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
+                      </svg>
+                      Re-analyze
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3.5 p-4 bg-[var(--bg)] border border-dashed border-[var(--border)] rounded-[var(--radius)]">
+                    <div className="w-10 h-10 rounded-[9px] bg-[#EDE9FE] text-[#7C3AED] flex items-center justify-center flex-shrink-0">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                      </svg>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[13.5px] font-medium text-[var(--text-muted)]">Pitch Curve Data</div>
+                      <div className="text-[11.5px] text-[var(--text-muted)]">
+                        {pitchError ? (
+                          <span className="text-red-500">{song.pitch_error}</span>
+                        ) : (
+                          "Analyze vocals to show pitch curve in practice view"
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => analyzeSongPitch(song.id)}
+                      className="px-3 py-[5px] rounded-[6px] bg-[var(--accent)] text-white border-[1.5px] border-[var(--accent)] text-[12px] font-medium hover:opacity-85 transition-opacity flex items-center gap-1 flex-shrink-0"
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                      </svg>
+                      {pitchError ? "Retry" : "Analyze"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Additional Files Section (Coming Soon) */}
             <div className="mb-6">
