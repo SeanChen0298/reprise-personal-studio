@@ -29,7 +29,7 @@ export interface UseLinePlayerReturn {
   play: () => void;
   pause: () => void;
   togglePlay: () => void;
-  goToLine: (index: number) => void;
+  goToLine: (index: number, autoPlay?: boolean) => void;
   nextLine: () => void;
   prevLine: () => void;
   seekWithinLine: (fraction: number) => void;
@@ -226,18 +226,19 @@ export function useLinePlayer(opts: Options): UseLinePlayerReturn {
   }, [isPlaying, play, pause]);
 
   const goToLine = useCallback(
-    (index: number) => {
+    (index: number, autoPlay = true) => {
       if (index < 0 || index >= lines.length) return;
       userNavigatedRef.current = true;
       setCurrentLineIndex(index);
       setLoopCount(1);
       onLineChange?.(index);
-      // Seek to line start and always start playback
       const audio = audioRef.current;
       const line = lines[index];
       if (audio && line?.start_ms != null) {
         audio.currentTime = line.start_ms / 1000;
-        audio.play().then(() => setIsPlaying(true)).catch(() => {});
+        if (autoPlay) {
+          audio.play().then(() => setIsPlaying(true)).catch(() => {});
+        }
       }
     },
     [lines, onLineChange, isPlaying]

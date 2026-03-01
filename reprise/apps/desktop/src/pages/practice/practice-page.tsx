@@ -18,6 +18,7 @@ export function PracticePage() {
   );
 
   const [activeTrack, setActiveTrack] = useState<"vocals" | "instrumental" | "reference">("reference");
+  const [isEditing, setIsEditing] = useState(false);
 
   // Derive audio path from active track
   const audioPath = useMemo(() => {
@@ -134,7 +135,7 @@ export function PracticePage() {
         lines={lines}
         activeLineIndex={player.currentLineIndex}
         loopRange={player.loopRange}
-        onLineClick={(i) => player.goToLine(i)}
+        onLineClick={(i) => player.goToLine(i, !isEditing)}
         onShiftClick={handleShiftClick}
       />
       <div className="flex flex-col flex-1 min-w-0">
@@ -150,6 +151,7 @@ export function PracticePage() {
           activeLineIndex={player.currentLineIndex}
           player={player}
           songId={id!}
+          onEditModeChange={setIsEditing}
         />
         <RecordingsBar />
       </div>

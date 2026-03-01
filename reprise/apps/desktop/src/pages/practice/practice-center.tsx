@@ -1,9 +1,10 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Line, Annotation } from "../../types/song";
 import type { UseLinePlayerReturn } from "../../hooks/use-line-player";
 import { STATUS_CONFIG, formatMs, nextStatus } from "../../lib/status-config";
 import { useSongStore } from "../../stores/song-store";
 import { useHighlightStore } from "../../lib/highlight-config";
+import { useSymbolStore } from "../../lib/symbol-config";
 import { AnnotatedText } from "../../components/annotated-text";
 
 interface Props {
@@ -11,13 +12,15 @@ interface Props {
   activeLineIndex: number;
   player: UseLinePlayerReturn;
   songId: string;
+  onEditModeChange?: (editing: boolean) => void;
 }
 
-export function PracticeCenter({ lines, activeLineIndex, player, songId }: Props) {
+export function PracticeCenter({ lines, activeLineIndex, player, songId, onEditModeChange }: Props) {
   const updateLineStatus = useSongStore((s) => s.updateLineStatus);
   const updateLineCustomText = useSongStore((s) => s.updateLineCustomText);
   const updateLineAnnotations = useSongStore((s) => s.updateLineAnnotations);
   const highlights = useHighlightStore((s) => s.highlights);
+  const symbols = useSymbolStore((s) => s.symbols);
 
   const currentLine = lines[activeLineIndex];
   const prevLine = lines[activeLineIndex - 1];
@@ -28,6 +31,26 @@ export function PracticeCenter({ lines, activeLineIndex, player, songId }: Props
   const [editText, setEditText] = useState("");
   const [editAnnotations, setEditAnnotations] = useState<Annotation[]>([]);
   const editableRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // When active line changes during edit mode, save current edits and load new line
+  const prevLineIndexRef = useRef(activeLineIndex);
+  useEffect(() => {
+    if (prevLineIndexRef.current !== activeLineIndex && editMode) {
+      // Save edits for the previous line
+      const prevLine2 = lines[prevLineIndexRef.current];
+      if (prevLine2) {
+        updateLineCustomText(songId, prevLine2.id, editText);
+        updateLineAnnotations(songId, prevLine2.id, editAnnotations);
+      }
+      // Load the new line's data
+      if (currentLine) {
+        setEditText(currentLine.custom_text ?? currentLine.text);
+        setEditAnnotations(currentLine.annotations ?? []);
+      }
+    }
+    prevLineIndexRef.current = activeLineIndex;
+  }, [activeLineIndex, editMode, currentLine, lines, songId, editText, editAnnotations, updateLineCustomText, updateLineAnnotations]);
 
   const enterEditMode = useCallback(() => {
     if (!currentLine) return;
@@ -35,7 +58,8 @@ export function PracticeCenter({ lines, activeLineIndex, player, songId }: Props
     setEditText(currentLine.custom_text ?? currentLine.text);
     setEditAnnotations(currentLine.annotations ?? []);
     setEditMode(true);
-  }, [currentLine, player]);
+    onEditModeChange?.(true);
+  }, [currentLine, player, onEditModeChange]);
 
   const exitEditMode = useCallback(() => {
     if (!currentLine) return;
@@ -43,7 +67,8 @@ export function PracticeCenter({ lines, activeLineIndex, player, songId }: Props
     updateLineCustomText(songId, currentLine.id, editText);
     updateLineAnnotations(songId, currentLine.id, editAnnotations);
     setEditMode(false);
-  }, [currentLine, songId, editText, editAnnotations, updateLineCustomText, updateLineAnnotations]);
+    onEditModeChange?.(false);
+  }, [currentLine, songId, editText, editAnnotations, updateLineCustomText, updateLineAnnotations, onEditModeChange]);
 
   const handleApplyHighlight = useCallback(
     (typeId: string) => {
@@ -86,6 +111,21 @@ export function PracticeCenter({ lines, activeLineIndex, player, songId }: Props
     // Clear annotations when text changes since char indices become invalid
     setEditAnnotations([]);
   }, []);
+
+  const handleInsertSymbol = useCallback((char: string) => {
+    const input = inputRef.current;
+    if (!input) return;
+    const start = input.selectionStart ?? editText.length;
+    const end = input.selectionEnd ?? start;
+    const newText = editText.slice(0, start) + char + editText.slice(end);
+    handleEditTextChange(newText);
+    // Restore cursor position after the inserted char
+    requestAnimationFrame(() => {
+      input.focus();
+      const pos = start + char.length;
+      input.setSelectionRange(pos, pos);
+    });
+  }, [editText, handleEditTextChange]);
 
   const handleStatusClick = () => {
     if (!currentLine) return;
@@ -139,12 +179,28 @@ export function PracticeCenter({ lines, activeLineIndex, player, songId }: Props
 
           {/* Text input for editing notation */}
           <input
+            ref={inputRef}
             type="text"
             value={editText}
             onChange={(e) => handleEditTextChange(e.target.value)}
             className="w-full px-4 py-3 text-[18px] font-serif rounded-[8px] border-2 border-[var(--theme)] bg-[var(--surface)] text-[var(--text-primary)] outline-none shadow-[0_0_0_3px_rgba(37,99,235,0.1)] transition-colors text-center"
             placeholder="Edit lyrics notation..."
           />
+
+          {/* Symbol insert buttons */}
+          <div className="flex items-center gap-[6px] mt-2 justify-center">
+            <span className="text-[10px] text-[var(--text-muted)] opacity-60 mr-1">Insert:</span>
+            {symbols.map((sym) => (
+              <button
+                key={sym.id}
+                onClick={() => handleInsertSymbol(sym.char)}
+                title={sym.label}
+                className="text-[16px] w-8 h-8 rounded-[6px] border border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)] cursor-pointer flex items-center justify-center hover:border-[var(--theme)] hover:text-[var(--theme)] transition-all"
+              >
+                {sym.char}
+              </button>
+            ))}
+          </div>
 
           {/* Annotated preview (select text here to highlight) */}
           <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] opacity-60 mt-4 mb-1 text-center">

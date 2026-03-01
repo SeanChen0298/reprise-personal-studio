@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Sidebar } from "../components/sidebar";
 import { useSongStore } from "../stores/song-store";
-import { isValidYouTubeUrl, fetchYouTubeMetadata } from "../lib/youtube";
+import { isValidYouTubeUrl, fetchYouTubeMetadata, cleanYouTubeUrl } from "../lib/youtube";
 import type { YouTubeMetadata } from "../types/song";
 
 type FetchStatus = "idle" | "loading" | "done" | "error";
@@ -125,6 +125,12 @@ export function ImportUrlPage() {
                   value={url}
                   onChange={(e) => {
                     setUrl(e.target.value);
+                    if (errorMsg) setErrorMsg("");
+                  }}
+                  onPaste={(e) => {
+                    e.preventDefault();
+                    const pasted = e.clipboardData.getData("text").trim();
+                    setUrl(cleanYouTubeUrl(pasted));
                     if (errorMsg) setErrorMsg("");
                   }}
                   onKeyDown={(e) => e.key === "Enter" && handleFetch()}
