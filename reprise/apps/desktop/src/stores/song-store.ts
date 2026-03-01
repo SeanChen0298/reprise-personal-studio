@@ -117,11 +117,13 @@ export const useSongStore = create<SongStore>()(
             const existingLines = get().lines[id];
             if (!existingLines || existingLines.length === 0) {
               const now = new Date().toISOString();
-              const newLines: Line[] = result.lyrics.map((text, i) => ({
+              const newLines: Line[] = result.lyrics.map((tl, i) => ({
                 id: crypto.randomUUID(),
                 song_id: id,
-                text,
+                text: tl.text,
                 order: i,
+                start_ms: tl.start_ms,
+                end_ms: tl.end_ms,
                 status: "not_started" as const,
                 created_at: now,
                 updated_at: now,

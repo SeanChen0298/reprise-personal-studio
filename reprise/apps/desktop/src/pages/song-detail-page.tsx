@@ -3,20 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { Sidebar } from "../components/sidebar";
 import { AudioPlayer } from "../components/audio-player";
 import { useSongStore } from "../stores/song-store";
-import type { LineStatus } from "../types/song";
-
-const STATUS_CONFIG: Record<LineStatus, { dot: string; label: string; tagBg: string; tagColor: string }> = {
-  mastered: { dot: "#22C55E", label: "Mastered", tagBg: "#DCFCE7", tagColor: "#15803D" },
-  learning: { dot: "var(--theme)", label: "Learning", tagBg: "var(--theme-light)", tagColor: "var(--theme-text)" },
-  not_started: { dot: "var(--border)", label: "New", tagBg: "#F1F5F9", tagColor: "#64748B" },
-};
-
-function formatMs(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1000);
-  const m = Math.floor(totalSeconds / 60);
-  const s = totalSeconds % 60;
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
+import { STATUS_CONFIG, formatMs } from "../lib/status-config";
 
 export function SongDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -88,7 +75,8 @@ export function SongDetailPage() {
             </button>
             {hasAudio && (
               <button
-                className="flex items-center gap-[5px] px-3.5 py-[6px] rounded-[7px] bg-[var(--accent)] text-white text-[12.5px] font-medium hover:opacity-80 transition-opacity"
+                onClick={() => navigate(`/song/${id}/practice`)}
+                className="flex items-center gap-[5px] px-3.5 py-[6px] rounded-[7px] bg-[var(--accent)] text-white text-[12.5px] font-medium hover:opacity-80 transition-opacity cursor-pointer border-none"
               >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <polygon points="5 3 19 12 5 21 5 3" />

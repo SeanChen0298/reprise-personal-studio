@@ -1,9 +1,12 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
+import { exists } from "@tauri-apps/plugin-fs";
+import { open } from "@tauri-apps/plugin-shell";
 import { Sidebar } from "../components/sidebar";
 import { useAuthStore } from "../stores/auth-store";
+import { checkYtDlpInstalled, COOKIES_PATH } from "../lib/audio-download";
 
-type Tab = "highlights" | "account" | "preferences";
+type Tab = "highlights" | "account" | "preferences" | "downloads";
 
 interface HighlightType {
   id: string;
@@ -46,6 +49,28 @@ export function SettingsPage() {
   const [showWaveforms, setShowWaveforms] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState(true);
   const [autoSync, setAutoSync] = useState(true);
+
+  // Downloads tab state
+  const [ytdlpVersion, setYtdlpVersion] = useState<string | null | undefined>(undefined);
+  const [cookieExists, setCookieExists] = useState<boolean | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  const runChecks = useCallback(async () => {
+    setChecking(true);
+    try {
+      const [version, cookieOk] = await Promise.all([
+        checkYtDlpInstalled(),
+        exists(COOKIES_PATH),
+      ]);
+      setYtdlpVersion(version);
+      setCookieExists(cookieOk);
+    } catch {
+      setYtdlpVersion(null);
+      setCookieExists(false);
+    } finally {
+      setChecking(false);
+    }
+  }, []);
 
   function handleAddHighlight() {
     const name = newHighlightName.trim();
@@ -188,6 +213,15 @@ export function SettingsPage() {
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="12" cy="12" r="3" />
                   <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
+                </svg>,
+              )}
+              {tabDef(
+                "downloads",
+                "Downloads",
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
                 </svg>,
               )}
             </div>
@@ -504,6 +538,167 @@ export function SettingsPage() {
                     toggle(autoSync, setAutoSync),
                     true,
                   )}
+                </div>
+              </div>
+            )}
+
+            {/* ═══ DOWNLOADS TAB ═══ */}
+            {activeTab === "downloads" && (
+              <div>
+                {/* Status checks */}
+                <div className="mb-7">
+                  {sectionHeader("YouTube downloads")}
+
+                  <div className="flex flex-col gap-1.5">
+                    {/* yt-dlp status */}
+                    <div className="flex items-center justify-between px-4 py-3.5 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)]">
+                      <div className="flex-1">
+                        <div className="text-[13px] font-medium mb-0.5">yt-dlp</div>
+                        <div className="text-[11.5px] text-[var(--text-muted)] leading-[1.5]">
+                          Required for downloading audio from YouTube
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {ytdlpVersion === undefined ? (
+                          <span className="text-[12px] text-[var(--text-muted)]">Not checked</span>
+                        ) : ytdlpVersion ? (
+                          <span className="flex items-center gap-1.5 text-[12px] font-medium text-[#15803D]">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                            v{ytdlpVersion}
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1.5 text-[12px] font-medium text-[#DC2626]">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <line x1="18" y1="6" x2="6" y2="18" />
+                              <line x1="6" y1="6" x2="18" y2="18" />
+                            </svg>
+                            Not found
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Cookie file status */}
+                    <div className="flex items-center justify-between px-4 py-3.5 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)]">
+                      <div className="flex-1">
+                        <div className="text-[13px] font-medium mb-0.5">Cookie file</div>
+                        <div className="text-[11.5px] text-[var(--text-muted)] leading-[1.5] font-mono">
+                          {COOKIES_PATH}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {cookieExists === null ? (
+                          <span className="text-[12px] text-[var(--text-muted)]">Not checked</span>
+                        ) : cookieExists ? (
+                          <span className="flex items-center gap-1.5 text-[12px] font-medium text-[#15803D]">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                            Found
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1.5 text-[12px] font-medium text-[#DC2626]">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <line x1="18" y1="6" x2="6" y2="18" />
+                              <line x1="6" y1="6" x2="18" y2="18" />
+                            </svg>
+                            Missing
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Action buttons */}
+                  <div className="flex gap-2 mt-3.5">
+                    <button
+                      onClick={runChecks}
+                      disabled={checking}
+                      className="flex items-center gap-[5px] px-[18px] py-2 rounded-[7px] bg-[var(--accent)] text-white text-[13px] font-medium border-none cursor-pointer hover:opacity-80 hover:-translate-y-px transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:translate-y-0"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={checking ? "animate-spin" : ""}>
+                        <polyline points="23 4 23 10 17 10" />
+                        <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
+                      </svg>
+                      {checking ? "Checking..." : "Check status"}
+                    </button>
+                    <button
+                      onClick={() => open("C:\\Reprise")}
+                      className="flex items-center gap-[5px] px-4 py-2 rounded-[7px] border-[1.5px] border-[var(--border)] bg-transparent text-[var(--text-secondary)] text-[13px] font-medium cursor-pointer hover:border-[#888] hover:text-[var(--text-primary)] transition-all"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+                      </svg>
+                      Open folder
+                    </button>
+                  </div>
+                </div>
+
+                {/* Cookie setup guide */}
+                <div className="mb-7">
+                  {sectionHeader("Cookie setup guide")}
+
+                  <p className="text-[13px] text-[var(--text-secondary)] leading-[1.7] mb-4">
+                    YouTube requires authentication to avoid bot detection. You need to export your browser cookies so yt-dlp can use them for downloads.
+                  </p>
+
+                  <div className="flex flex-col gap-3">
+                    {[
+                      {
+                        step: 1,
+                        title: "Install a cookie export extension",
+                        desc: 'Install "Get cookies.txt LOCALLY" (or similar Netscape cookie exporter) in Chrome.',
+                      },
+                      {
+                        step: 2,
+                        title: "Export cookies from YouTube",
+                        desc: "Navigate to youtube.com while logged in, then click the extension to export cookies.",
+                      },
+                      {
+                        step: 3,
+                        title: "Save the file",
+                        desc: `Save the exported file as cookies.txt in the Reprise folder (${COOKIES_PATH}).`,
+                      },
+                      {
+                        step: 4,
+                        title: 'Click "Check status" above',
+                        desc: "Verify that the cookie file is detected. You're all set!",
+                      },
+                    ].map((item) => (
+                      <div
+                        key={item.step}
+                        className="flex gap-3.5 px-4 py-3.5 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)]"
+                      >
+                        <div
+                          className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-[12px] font-semibold mt-0.5"
+                          style={{ background: "var(--theme-light)", color: "var(--theme-text)" }}
+                        >
+                          {item.step}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[13px] font-medium mb-0.5">{item.title}</div>
+                          <div className="text-[12px] text-[var(--text-muted)] leading-[1.6]">
+                            {item.desc}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="mt-4 p-3.5 rounded-[var(--radius)] bg-[#FFFBEB] border border-[#FDE68A]">
+                    <div className="flex gap-2.5">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#B45309" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0 mt-0.5">
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="12" y1="8" x2="12" y2="12" />
+                        <line x1="12" y1="16" x2="12.01" y2="16" />
+                      </svg>
+                      <div className="text-[12px] text-[#92400E] leading-[1.6]">
+                        Cookies expire periodically. If downloads start failing with "Sign in to confirm you're not a bot", re-export your cookies by repeating the steps above.
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}

@@ -39,6 +39,22 @@ Personal practice studio for singers. Cross-platform (Tauri/React Native).
 - **Annotation:** JSON array: `[{ text: string, type: HighlightType }]`.
 - **Recording:** `line_id`, `file_path`, `is_master_take`.
 
+## yt-dlp Setup (YouTube Downloads)
+yt-dlp is used to download audio and subtitles from YouTube. It requires:
+1. **Node.js** in PATH (used as JS runtime for YouTube extraction via `--js-runtimes node`)
+2. **Cookies file** at `C:/Reprise/cookies.txt` (YouTube requires auth to avoid bot detection)
+3. **Remote challenge solver** enabled via `--remote-components ejs:github`
+
+### Exporting cookies (when downloads fail with "Sign in to confirm you're not a bot")
+1. Install a Netscape cookie export extension in Chrome (e.g. "Get cookies.txt LOCALLY")
+2. Navigate to `youtube.com` while logged in
+3. Export cookies and save to `C:/Reprise/cookies.txt`
+4. The cookies file may expire periodically — re-export if downloads start failing again
+
+### Known Tauri shell issues
+- **Non-UTF-8 output:** Tauri's shell plugin can't decode non-ASCII characters (e.g. Japanese) in yt-dlp's stderr. Folder names are sanitized to ASCII-only to reduce this. The `error` event is treated as non-fatal.
+- **Chrome cookie DB locked:** `--cookies-from-browser chrome` fails while Chrome is running. Use a cookies.txt file instead.
+
 ## Current Roadmap
 - **MVP:** Manual lyrics, tap-to-mark timestamps, desktop playback/recording.
 - **v1.5:** Sidecar integration (Demucs/WhisperX), Mobile app sync.

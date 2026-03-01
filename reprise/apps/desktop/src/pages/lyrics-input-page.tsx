@@ -19,7 +19,7 @@ export function LyricsInputPage() {
   const setLines = useSongStore((s) => s.setLines);
 
   const [mode, setMode] = useState<Mode>("lines");
-  const [editLines, setEditLines] = useState<{ id: string; text: string }[]>([]);
+  const [editLines, setEditLines] = useState<{ id: string; text: string; start_ms?: number; end_ms?: number }[]>([]);
   const [bulkText, setBulkText] = useState("");
   const [saved, setSaved] = useState(false);
 
@@ -104,13 +104,13 @@ export function LyricsInputPage() {
 
     try {
       const songFolder = song.audio_folder ?? buildSongFolder(song.title, song.artist);
-      const lyrics = await fetchLyricsForLanguage(
+      const timedLines = await fetchLyricsForLanguage(
         song.youtube_url,
         songFolder,
         lyricsLang
       );
       setEditLines(
-        lyrics.map((text) => ({ id: crypto.randomUUID(), text }))
+        timedLines.map((tl) => ({ id: crypto.randomUUID(), text: tl.text, start_ms: tl.start_ms, end_ms: tl.end_ms }))
       );
       setMode("lines");
     } catch (err) {
@@ -134,8 +134,8 @@ export function LyricsInputPage() {
           song_id: id!,
           text: l.text.trim(),
           order: i,
-          start_ms: existing?.start_ms,
-          end_ms: existing?.end_ms,
+          start_ms: l.start_ms ?? existing?.start_ms,
+          end_ms: l.end_ms ?? existing?.end_ms,
           status: existing?.status ?? ("not_started" as const),
           created_at: existing?.created_at ?? now,
           updated_at: now,
