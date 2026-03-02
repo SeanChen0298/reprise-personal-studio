@@ -12,6 +12,14 @@ import { usePitchData } from "../../hooks/use-pitch-data";
 import { useWaveformData } from "../../hooks/use-waveform-data";
 import { useRecorder } from "../../hooks/use-recorder";
 import { usePreferencesStore } from "../../stores/preferences-store";
+import { FloatingToolbar } from "../../components/floating-toolbar";
+
+interface RecordingScope {
+  lineId: string;
+  startIdx: number;
+  endIdx: number;
+  section?: Section;
+}
 
 interface Props {
   lines: Line[];
@@ -25,12 +33,17 @@ interface Props {
   canAnalyzePitch?: boolean;
   activeSection?: Section | null;
   recordingSection?: Section | null;
+  loopRange?: [number, number] | null;
+  skipCountdown?: boolean;
+  recordThrough?: boolean;
   onEditModeChange?: (editing: boolean) => void;
 }
 
 export function PracticeCenter({
   lines, activeLineIndex, player, songId, songFolder, bpm, inputDeviceId,
-  pitchDataPath, canAnalyzePitch, activeSection, recordingSection, onEditModeChange,
+  pitchDataPath, canAnalyzePitch, activeSection, recordingSection,
+  loopRange, skipCountdown, recordThrough,
+  onEditModeChange,
 }: Props) {
   const updateLineStatus = useSongStore((s) => s.updateLineStatus);
   const updateLineCustomText = useSongStore((s) => s.updateLineCustomText);
@@ -77,17 +90,34 @@ export function PracticeCenter({
   const editableRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Floating toolbar position for inline editing
+  const [toolbarPos, setToolbarPos] = useState<{ x: number; y: number } | null>(null);
+  const [hasSelectionOverAnnotation, setHasSelectionOverAnnotation] = useState(false);
+  const editWrapperRef = useRef<HTMLDivElement>(null);
+
+  // Retry: last recording scope
+  const [lastRecordingScope, setLastRecordingScope] = useState<RecordingScope | null>(null);
+
+  // Recording timer
+  const [recordingElapsed, setRecordingElapsed] = useState(0);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Input level meter
+  const [inputLevel, setInputLevel] = useState(0);
+  const levelRafRef = useRef<number>(0);
+
+  // Tail buffer timeout
+  const tailBufferRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // When active line changes during edit mode, save current edits and load new line
   const prevLineIndexRef = useRef(activeLineIndex);
   useEffect(() => {
     if (prevLineIndexRef.current !== activeLineIndex && editMode) {
-      // Save edits for the previous line
       const prevLine2 = lines[prevLineIndexRef.current];
       if (prevLine2) {
         updateLineCustomText(songId, prevLine2.id, editText);
         updateLineAnnotations(songId, prevLine2.id, editAnnotations);
       }
-      // Load the new line's data
       if (currentLine) {
         setEditText(currentLine.custom_text ?? currentLine.text);
         setEditAnnotations(currentLine.annotations ?? []);
@@ -96,21 +126,64 @@ export function PracticeCenter({
     prevLineIndexRef.current = activeLineIndex;
   }, [activeLineIndex, editMode, currentLine, lines, songId, editText, editAnnotations, updateLineCustomText, updateLineAnnotations]);
 
+  // Clear lastRecordingScope when user navigates to a different line
+  useEffect(() => {
+    if (lastRecordingScope && activeLineIndex !== lastRecordingScope.startIdx) {
+      setLastRecordingScope(null);
+    }
+  }, [activeLineIndex, lastRecordingScope]);
+
+  // Recording timer — count up while recording
+  useEffect(() => {
+    if (recorder.isRecording) {
+      setRecordingElapsed(0);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingElapsed((v) => v + 100);
+      }, 100);
+    } else {
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+      setRecordingElapsed(0);
+    }
+    return () => {
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    };
+  }, [recorder.isRecording]);
+
+  // Input level meter — RAF loop while recording
+  useEffect(() => {
+    if (recorder.isRecording) {
+      const tick = () => {
+        setInputLevel(recorder.getInputLevel());
+        levelRafRef.current = requestAnimationFrame(tick);
+      };
+      levelRafRef.current = requestAnimationFrame(tick);
+    } else {
+      cancelAnimationFrame(levelRafRef.current);
+      setInputLevel(0);
+    }
+    return () => cancelAnimationFrame(levelRafRef.current);
+  }, [recorder.isRecording, recorder.getInputLevel]);
+
   const enterEditMode = useCallback(() => {
     if (!currentLine) return;
-    player.pause();
     setEditText(currentLine.custom_text ?? currentLine.text);
     setEditAnnotations(currentLine.annotations ?? []);
+    setToolbarPos(null);
     setEditMode(true);
     onEditModeChange?.(true);
-  }, [currentLine, player, onEditModeChange]);
+    // Focus the input after render
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [currentLine, onEditModeChange]);
 
   const exitEditMode = useCallback(() => {
     if (!currentLine) return;
-    // Save custom text and annotations
     updateLineCustomText(songId, currentLine.id, editText);
     updateLineAnnotations(songId, currentLine.id, editAnnotations);
     setEditMode(false);
+    setToolbarPos(null);
     onEditModeChange?.(false);
   }, [currentLine, songId, editText, editAnnotations, updateLineCustomText, updateLineAnnotations, onEditModeChange]);
 
@@ -118,23 +191,16 @@ export function PracticeCenter({
     (typeId: string) => {
       const sel = window.getSelection();
       if (!sel || sel.isCollapsed || !editableRef.current) return;
-
-      // Get selection offsets relative to the text content
       const range = sel.getRangeAt(0);
       const preRange = document.createRange();
       preRange.selectNodeContents(editableRef.current);
       preRange.setEnd(range.startContainer, range.startOffset);
       const start = preRange.toString().length;
       const end = start + range.toString().length;
-
       if (start === end || start < 0 || end > editText.length) return;
-
-      // Remove any overlapping annotations
       const filtered = editAnnotations.filter(
         (a) => a.end <= start || a.start >= end
       );
-
-      // Add new annotation
       const newAnnotation: Annotation = { start, end, type: typeId };
       const updated = [...filtered, newAnnotation].sort((a, b) => a.start - b.start);
       setEditAnnotations(updated);
@@ -152,7 +218,6 @@ export function PracticeCenter({
 
   const handleEditTextChange = useCallback((newText: string) => {
     setEditText(newText);
-    // Clear annotations when text changes since char indices become invalid
     setEditAnnotations([]);
   }, []);
 
@@ -163,13 +228,97 @@ export function PracticeCenter({
     const end = input.selectionEnd ?? start;
     const newText = editText.slice(0, start) + char + editText.slice(end);
     handleEditTextChange(newText);
-    // Restore cursor position after the inserted char
     requestAnimationFrame(() => {
       input.focus();
       const pos = start + char.length;
       input.setSelectionRange(pos, pos);
     });
   }, [editText, handleEditTextChange]);
+
+  // Show floating toolbar when text is selected in the preview area
+  const handlePreviewMouseUp = useCallback(() => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !editableRef.current) {
+      setToolbarPos(null);
+      return;
+    }
+    // Check if selection is within our editable ref
+    if (!editableRef.current.contains(sel.anchorNode)) {
+      setToolbarPos(null);
+      return;
+    }
+    const range = sel.getRangeAt(0);
+    const rect = range.getBoundingClientRect();
+    setToolbarPos({ x: rect.left + rect.width / 2, y: rect.top });
+
+    // Check if selection overlaps an existing annotation
+    const preRange = document.createRange();
+    preRange.selectNodeContents(editableRef.current);
+    preRange.setEnd(range.startContainer, range.startOffset);
+    const start = preRange.toString().length;
+    const end = start + range.toString().length;
+    const overlaps = editAnnotations.some(
+      (a) => a.start < end && a.end > start
+    );
+    setHasSelectionOverAnnotation(overlaps);
+  }, [editAnnotations]);
+
+  // Remove annotations overlapping the current selection
+  const handleRemoveSelectedAnnotation = useCallback(() => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !editableRef.current) return;
+    const range = sel.getRangeAt(0);
+    const preRange = document.createRange();
+    preRange.selectNodeContents(editableRef.current);
+    preRange.setEnd(range.startContainer, range.startOffset);
+    const start = preRange.toString().length;
+    const end = start + range.toString().length;
+    setEditAnnotations((prev) =>
+      prev.filter((a) => a.end <= start || a.start >= end)
+    );
+    sel.removeAllRanges();
+    setToolbarPos(null);
+  }, []);
+
+  // Close toolbar and clear selection
+  const handleToolbarClose = useCallback(() => {
+    setToolbarPos(null);
+    window.getSelection()?.removeAllRanges();
+  }, []);
+
+  // Handle highlight from floating toolbar — apply and close
+  const handleToolbarHighlight = useCallback((typeId: string) => {
+    handleApplyHighlight(typeId);
+    setToolbarPos(null);
+  }, [handleApplyHighlight]);
+
+  // Handle symbol insert from floating toolbar
+  const handleToolbarSymbol = useCallback((char: string) => {
+    handleInsertSymbol(char);
+    setToolbarPos(null);
+  }, [handleInsertSymbol]);
+
+  // Click-outside to exit edit mode
+  useEffect(() => {
+    if (!editMode) return;
+    const handler = (e: MouseEvent) => {
+      if (editWrapperRef.current && !editWrapperRef.current.contains(e.target as Node)) {
+        exitEditMode();
+      }
+    };
+    const escHandler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") exitEditMode();
+    };
+    // Delay to avoid catching the double-click that opened edit mode
+    requestAnimationFrame(() => {
+      document.addEventListener("mousedown", handler);
+      document.addEventListener("keydown", escHandler);
+    });
+    return () => {
+      document.removeEventListener("mousedown", handler);
+      document.removeEventListener("keydown", escHandler);
+    };
+  }, [editMode, exitEditMode]);
 
   // Metronome beep helper
   const playTick = useCallback((accent: boolean) => {
@@ -186,6 +335,24 @@ export function PracticeCenter({
     osc.stop(ctx.currentTime + 0.08);
   }, []);
 
+  // Start recording immediately (no countdown)
+  const startRecordingImmediate = useCallback((
+    lineId: string,
+    startLineIdx: number,
+    endLineIdx: number,
+    section?: Section,
+  ) => {
+    player.goToLine(startLineIdx, false);
+    recordingLineIdRef.current = lineId;
+    recordingSectionRef.current = section ?? null;
+    recordingEndLineIdx.current = endLineIdx;
+    setLastRecordingScope({ lineId, startIdx: startLineIdx, endIdx: endLineIdx, section });
+
+    recorder.startRecording(lineId, songFolder, inputDeviceId || undefined).then(() => {
+      if (playBacking) player.play();
+    });
+  }, [player, recorder, songFolder, inputDeviceId, playBacking]);
+
   // Start countdown then record
   const startCountdownThenRecord = useCallback((
     lineId: string,
@@ -193,23 +360,23 @@ export function PracticeCenter({
     endLineIdx: number,
     section?: Section,
   ) => {
-    // Compute countdown beats and interval
-    const totalBeats = bpm ? 8 : 4; // 2 bars (4/4) or fixed 4 beats
+    if (skipCountdown) {
+      startRecordingImmediate(lineId, startLineIdx, endLineIdx, section);
+      return;
+    }
+
+    const totalBeats = bpm ? 8 : 4;
     const beatInterval = bpm ? 60000 / bpm : 1000;
     let beat = 0;
 
     setCountdownActive(true);
     setCountdownBeat(totalBeats);
-
-    // Seek to start line (no play yet)
     player.goToLine(startLineIdx, false);
-
-    playTick(true); // First tick immediately
+    playTick(true);
 
     countdownTimerRef.current = setInterval(() => {
       beat++;
       if (beat >= totalBeats) {
-        // Countdown done — start recording
         clearInterval(countdownTimerRef.current!);
         countdownTimerRef.current = null;
         setCountdownActive(false);
@@ -218,6 +385,7 @@ export function PracticeCenter({
         recordingLineIdRef.current = lineId;
         recordingSectionRef.current = section ?? null;
         recordingEndLineIdx.current = endLineIdx;
+        setLastRecordingScope({ lineId, startIdx: startLineIdx, endIdx: endLineIdx, section });
 
         recorder.startRecording(lineId, songFolder, inputDeviceId || undefined).then(() => {
           if (playBacking) player.play();
@@ -225,10 +393,10 @@ export function PracticeCenter({
       } else {
         const remaining = totalBeats - beat;
         setCountdownBeat(remaining);
-        playTick(remaining % 4 === 0); // accent on beat 1 of each bar
+        playTick(remaining % 4 === 0);
       }
     }, beatInterval);
-  }, [bpm, player, playTick, recorder, songFolder, inputDeviceId, playBacking]);
+  }, [bpm, player, playTick, recorder, songFolder, inputDeviceId, playBacking, skipCountdown, startRecordingImmediate]);
 
   // Cancel countdown
   const cancelCountdown = useCallback(() => {
@@ -244,11 +412,17 @@ export function PracticeCenter({
   useEffect(() => {
     return () => {
       if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+      if (tailBufferRef.current) clearTimeout(tailBufferRef.current);
     };
   }, []);
 
   // Save recording helper
   const saveRecording = useCallback(async (sectionId?: string) => {
+    if (tailBufferRef.current) {
+      clearTimeout(tailBufferRef.current);
+      tailBufferRef.current = null;
+    }
+
     const result = await recorder.stopRecording();
     if (result) {
       addRecording(songId, {
@@ -270,40 +444,75 @@ export function PracticeCenter({
     return result;
   }, [recorder, addRecording, songId, player]);
 
-  // Auto-stop recording when line/section ends — stop both recording + playback
+  // Auto-stop recording when line/section ends — with 500ms tail buffer
   useEffect(() => {
     if (!recorder.isRecording || !recordingLineIdRef.current) return;
+    if (recordThrough) return; // Record-through mode: never auto-stop
 
     const endIdx = recordingEndLineIdx.current;
     const isAtEnd = endIdx >= 0
       ? (activeLineIndex > endIdx || (activeLineIndex === endIdx && player.lineProgress >= 1))
       : player.lineProgress >= 1;
 
-    if (isAtEnd) {
-      saveRecording(recordingSectionRef.current?.id);
+    if (isAtEnd && !tailBufferRef.current) {
+      tailBufferRef.current = setTimeout(() => {
+        tailBufferRef.current = null;
+        saveRecording(recordingSectionRef.current?.id);
+      }, 500);
     }
-  }, [recorder.isRecording, player.lineProgress, activeLineIndex, recorder, saveRecording]);
+  }, [recorder.isRecording, player.lineProgress, activeLineIndex, saveRecording, recordThrough]);
 
-  const handleRecord = useCallback(async () => {
-    // Cancel countdown if active
+  // Compute effective recording scope based on loopRange
+  const getRecordingScope = useCallback((): RecordingScope | null => {
+    if (!currentLine || !hasTimestamps || !songFolder) return null;
+    if (loopRange) {
+      const startLine = lines[loopRange[0]];
+      if (!startLine || startLine.start_ms == null) return null;
+      return { lineId: startLine.id, startIdx: loopRange[0], endIdx: loopRange[1] };
+    }
+    return { lineId: currentLine.id, startIdx: activeLineIndex, endIdx: activeLineIndex };
+  }, [currentLine, hasTimestamps, songFolder, loopRange, lines, activeLineIndex]);
+
+  const handleRecord = useCallback(async (shiftHeld = false) => {
     if (countdownActive) {
       cancelCountdown();
       return;
     }
-
-    if (!currentLine || !hasTimestamps || !songFolder) return;
-
     if (recorder.isRecording) {
-      // Manual stop
       await saveRecording(recordingSectionRef.current?.id);
       return;
     }
 
-    // Start countdown → then record single line
-    startCountdownThenRecord(currentLine.id, activeLineIndex, activeLineIndex);
-  }, [countdownActive, cancelCountdown, currentLine, hasTimestamps, songFolder, recorder.isRecording, saveRecording, startCountdownThenRecord, activeLineIndex]);
+    const scope = getRecordingScope();
+    if (!scope) return;
 
-  // Handle section recording (called from LineNavigator)
+    if (shiftHeld || skipCountdown) {
+      startRecordingImmediate(scope.lineId, scope.startIdx, scope.endIdx, scope.section);
+    } else {
+      startCountdownThenRecord(scope.lineId, scope.startIdx, scope.endIdx, scope.section);
+    }
+  }, [countdownActive, cancelCountdown, recorder.isRecording, saveRecording, getRecordingScope, skipCountdown, startRecordingImmediate, startCountdownThenRecord]);
+
+  // Handle retry (re-record same scope)
+  const handleRetry = useCallback(() => {
+    if (!lastRecordingScope || recorder.isRecording || countdownActive) return;
+    const { lineId, startIdx, endIdx, section } = lastRecordingScope;
+    startCountdownThenRecord(lineId, startIdx, endIdx, section);
+  }, [lastRecordingScope, recorder.isRecording, countdownActive, startCountdownThenRecord]);
+
+  // Handle section recording from transport
+  const handleRecordSection = useCallback(() => {
+    if (!activeSection || recorder.isRecording || countdownActive) return;
+    const startIdx = lines.findIndex((l) => l.order >= activeSection.start_line_order);
+    const endIdx = lines.findIndex((l) => l.order > activeSection.end_line_order) - 1;
+    const actualEnd = endIdx < 0 ? lines.length - 1 : endIdx;
+    if (startIdx < 0 || !lines[startIdx]) return;
+    const startLine = lines[startIdx];
+    if (startLine.start_ms == null) return;
+    startCountdownThenRecord(startLine.id, startIdx, actualEnd, activeSection);
+  }, [activeSection, recorder.isRecording, countdownActive, lines, startCountdownThenRecord]);
+
+  // Handle section recording (called from LineNavigator via prop)
   useEffect(() => {
     if (!recordingSection || recorder.isRecording || countdownActive) return;
     const startIdx = lines.findIndex((l) => l.order >= recordingSection.start_line_order);
@@ -312,9 +521,30 @@ export function PracticeCenter({
     if (startIdx < 0 || !lines[startIdx]) return;
     const startLine = lines[startIdx];
     if (startLine.start_ms == null) return;
-
     startCountdownThenRecord(startLine.id, startIdx, actualEnd, recordingSection);
   }, [recordingSection, recorder.isRecording, countdownActive, lines, startCountdownThenRecord]);
+
+  // Keyboard shortcut: R to record
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (editMode) return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+
+      if (e.code === "KeyR") {
+        e.preventDefault();
+        if (recorder.isRecording) {
+          saveRecording(recordingSectionRef.current?.id).then(() => {
+            setTimeout(() => handleRetry(), 50);
+          });
+        } else {
+          handleRecord(e.shiftKey);
+        }
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [editMode, recorder.isRecording, saveRecording, handleRecord, handleRetry]);
 
   const handleStatusClick = () => {
     if (!currentLine) return;
@@ -333,93 +563,15 @@ export function PracticeCenter({
   const cfg = STATUS_CONFIG[currentLine.status];
   const displayText = currentLine.custom_text ?? currentLine.text;
   const hasCustomText = currentLine.custom_text != null && currentLine.custom_text !== currentLine.text;
+  const showRetry = lastRecordingScope && !recorder.isRecording && !countdownActive;
+  const showSectionRecord = activeSection && !recorder.isRecording && !countdownActive;
 
-  if (editMode) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center px-12 py-8 relative overflow-hidden">
-        {/* Highlight toolbar */}
-        <div className="flex items-center gap-2 mb-6 flex-wrap justify-center">
-          {highlights.map((hl) => (
-            <button
-              key={hl.id}
-              onClick={() => handleApplyHighlight(hl.id)}
-              className="text-[11.5px] font-medium px-3 py-[5px] rounded-[6px] border cursor-pointer flex items-center gap-[6px] transition-all hover:scale-105"
-              style={{
-                backgroundColor: hl.bg,
-                color: hl.color,
-                borderColor: hl.color + "40",
-              }}
-            >
-              <span
-                className="w-[8px] h-[8px] rounded-full flex-shrink-0"
-                style={{ backgroundColor: hl.color }}
-              />
-              {hl.name}
-            </button>
-          ))}
-        </div>
+  const elapsedSec = recordingElapsed / 1000;
+  const elapsedMin = Math.floor(elapsedSec / 60);
+  const elapsedSecStr = Math.floor(elapsedSec % 60).toString().padStart(2, "0");
+  const elapsedTenths = Math.floor((recordingElapsed % 1000) / 100);
 
-        {/* Editable custom text */}
-        <div className="w-full max-w-[640px] mb-4">
-          {/* Original line label */}
-          <div className="text-[11px] text-[var(--text-muted)] opacity-50 text-center mb-3">
-            Original: {currentLine.text}
-          </div>
-
-          {/* Text input for editing notation */}
-          <input
-            ref={inputRef}
-            type="text"
-            value={editText}
-            onChange={(e) => handleEditTextChange(e.target.value)}
-            className="w-full px-4 py-3 text-[18px] font-serif rounded-[8px] border-2 border-[var(--theme)] bg-[var(--surface)] text-[var(--text-primary)] outline-none shadow-[0_0_0_3px_rgba(37,99,235,0.1)] transition-colors text-center"
-            placeholder="Edit lyrics notation..."
-          />
-
-          {/* Symbol insert buttons */}
-          <div className="flex items-center gap-[6px] mt-2 justify-center">
-            <span className="text-[10px] text-[var(--text-muted)] opacity-60 mr-1">Insert:</span>
-            {symbols.map((sym) => (
-              <button
-                key={sym.id}
-                onClick={() => handleInsertSymbol(sym.char)}
-                title={sym.label}
-                className="text-[16px] w-8 h-8 rounded-[6px] border border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)] cursor-pointer flex items-center justify-center hover:border-[var(--theme)] hover:text-[var(--theme)] transition-all"
-              >
-                {sym.char}
-              </button>
-            ))}
-          </div>
-
-          {/* Annotated preview (select text here to highlight) */}
-          <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] opacity-60 mt-4 mb-1 text-center">
-            Preview — select text below, then click a highlight
-          </div>
-          <div
-            ref={editableRef}
-            className="font-serif text-[26px] tracking-[-0.5px] leading-[1.4] text-[var(--text-secondary)] text-center p-3 rounded-[8px] border border-[var(--border-subtle)] bg-[var(--bg)] min-h-[50px] select-text cursor-text"
-          >
-            <AnnotatedText
-              text={editText}
-              annotations={editAnnotations}
-              highlights={highlights}
-              onClickAnnotation={handleRemoveAnnotation}
-            />
-          </div>
-        </div>
-
-        {/* Done button */}
-        <button
-          onClick={exitEditMode}
-          className="px-5 py-[7px] rounded-[7px] bg-[var(--accent)] text-white text-[13px] font-medium hover:opacity-85 transition-opacity border-none cursor-pointer"
-        >
-          Done editing
-        </button>
-      </div>
-    );
-  }
-
-  // Playback mode
+  // Main view (playback + inline editing)
   return (
     <div className="flex-1 flex flex-col items-center justify-center px-12 py-8 relative overflow-hidden">
       {/* Countdown overlay */}
@@ -432,7 +584,6 @@ export function PracticeCenter({
       )}
 
       {sectionLines ? (
-        /* Section view: show all lines, highlight the active one */
         <div className="text-center my-5 max-w-[640px] w-full">
           <div className="text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--theme-text)] mb-4">
             {activeSection!.name}
@@ -441,14 +592,63 @@ export function PracticeCenter({
             {sectionLines.map((line) => {
               const isActive = line.id === currentLine?.id;
               const lineDisplay = line.custom_text ?? line.text;
+              const lineIdx = lines.findIndex((l) => l.id === line.id);
+
+              if (isActive && editMode) {
+                return (
+                  <div key={line.id} ref={editWrapperRef} className="mx-auto max-w-[600px] w-full">
+                    <input
+                      ref={inputRef}
+                      type="text"
+                      value={editText}
+                      onChange={(e) => handleEditTextChange(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") exitEditMode(); }}
+                      className="w-full px-3 py-1 text-[18px] font-serif rounded-[6px] border-2 border-[var(--theme)] bg-[var(--surface)] text-[var(--text-primary)] outline-none text-center"
+                    />
+                    <div
+                      ref={editableRef}
+                      onMouseUp={handlePreviewMouseUp}
+                      className="font-serif text-[24px] tracking-[-0.3px] leading-[1.4] mt-2 p-2 rounded-[6px] border border-dashed border-[var(--border)] bg-[var(--bg)] select-text cursor-text text-center"
+                    >
+                      <AnnotatedText
+                        text={editText}
+                        annotations={editAnnotations}
+                        highlights={highlights}
+                        onClickAnnotation={handleRemoveAnnotation}
+                      />
+                    </div>
+                    <button
+                      onClick={exitEditMode}
+                      className="mt-1 text-[10px] font-medium text-[var(--theme)] hover:underline cursor-pointer bg-transparent border-none"
+                    >
+                      ✓ Done
+                    </button>
+                    {toolbarPos && (
+                      <FloatingToolbar
+                        position={toolbarPos}
+                        highlights={highlights}
+                        symbols={symbols}
+                        onHighlight={handleToolbarHighlight}
+                        onInsertSymbol={handleToolbarSymbol}
+                        onRemoveAnnotation={hasSelectionOverAnnotation ? handleRemoveSelectedAnnotation : undefined}
+                        onClose={handleToolbarClose}
+                      />
+                    )}
+                  </div>
+                );
+              }
+
               return (
                 <div
                   key={line.id}
-                  className={`font-serif tracking-[-0.3px] leading-[1.4] transition-all duration-200 ${
+                  className={`font-serif tracking-[-0.3px] leading-[1.4] transition-all duration-200 cursor-pointer ${
                     isActive
-                      ? "text-[28px] text-[var(--text-primary)]"
-                      : "text-[20px] text-[var(--text-muted)] opacity-40"
+                      ? "text-[28px] text-[var(--text-primary)] hover:text-[var(--theme)]"
+                      : "text-[20px] text-[var(--text-muted)] opacity-40 hover:opacity-70"
                   }`}
+                  onClick={() => player.playLineOnce(lineIdx)}
+                  onDoubleClick={isActive ? (e) => { e.stopPropagation(); enterEditMode(); } : undefined}
+                  title={isActive ? "Click to preview · Double-click to edit" : "Click to preview this line"}
                 >
                   <AnnotatedText
                     text={lineDisplay}
@@ -479,23 +679,27 @@ export function PracticeCenter({
             >
               {cfg.label}
             </button>
-            <button
-              onClick={enterEditMode}
-              className="w-6 h-6 rounded-[5px] border border-[var(--border)] bg-transparent text-[var(--text-muted)] cursor-pointer flex items-center justify-center hover:border-[#888] hover:text-[var(--text-primary)] transition-all"
-              title="Edit annotations"
-            >
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
-                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-              </svg>
-            </button>
+            {!editMode && (
+              <button
+                onClick={enterEditMode}
+                className="w-6 h-6 rounded-[5px] border border-[var(--border)] bg-transparent text-[var(--text-muted)] cursor-pointer flex items-center justify-center hover:border-[#888] hover:text-[var(--text-primary)] transition-all"
+                title="Edit annotations"
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                  <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                </svg>
+              </button>
+            )}
           </div>
         </div>
       ) : (
-        /* Single-line view: prev / current / next */
         <>
-          {/* Previous context line */}
-          <div className="font-serif text-[20px] tracking-[-0.3px] text-[var(--text-muted)] text-center max-w-[600px] leading-relaxed opacity-35 my-[6px]">
+          <div
+            className={`font-serif text-[20px] tracking-[-0.3px] text-[var(--text-muted)] text-center max-w-[600px] leading-relaxed opacity-35 my-[6px] ${prevLine ? "cursor-pointer hover:opacity-60 transition-opacity" : ""}`}
+            onClick={() => prevLine && player.playLineOnce(activeLineIndex - 1)}
+            title={prevLine ? "Click to preview this line" : undefined}
+          >
             {prevLine ? (
               <AnnotatedText
                 text={prevLine.custom_text ?? prevLine.text}
@@ -505,20 +709,80 @@ export function PracticeCenter({
             ) : "\u00A0"}
           </div>
 
-          {/* Current line hero */}
           <div key={activeLineIndex} className="text-center my-5 animate-fade-up">
-            {hasCustomText && (
-              <div className="text-[14px] text-[var(--text-muted)] mb-2 opacity-50">
-                {currentLine.text}
+            {editMode ? (
+              /* Inline editor */
+              <div ref={editWrapperRef} className="max-w-[640px] mx-auto">
+                {currentLine.custom_text !== currentLine.text && currentLine.custom_text != null && (
+                  <div className="text-[11px] text-[var(--text-muted)] opacity-50 mb-2">
+                    Original: {currentLine.text}
+                  </div>
+                )}
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={editText}
+                  onChange={(e) => handleEditTextChange(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") exitEditMode(); }}
+                  className="w-full px-4 py-2 text-[20px] font-serif rounded-[8px] border-2 border-[var(--theme)] bg-[var(--surface)] text-[var(--text-primary)] outline-none shadow-[0_0_0_3px_rgba(37,99,235,0.1)] text-center"
+                  placeholder="Edit lyrics..."
+                />
+                <div
+                  ref={editableRef}
+                  onMouseUp={handlePreviewMouseUp}
+                  className="font-serif text-[28px] tracking-[-0.5px] leading-[1.35] text-[var(--text-primary)] mt-3 p-2 rounded-[8px] border border-dashed border-[var(--border)] bg-[var(--bg)] min-h-[44px] select-text cursor-text"
+                >
+                  <AnnotatedText
+                    text={editText}
+                    annotations={editAnnotations}
+                    highlights={highlights}
+                    onClickAnnotation={handleRemoveAnnotation}
+                  />
+                </div>
+                <div className="text-[9.5px] text-[var(--text-muted)] mt-1 opacity-60">
+                  Select text above to highlight · Click highlight to remove
+                </div>
+                <button
+                  onClick={exitEditMode}
+                  className="mt-2 text-[11px] font-medium text-[var(--theme)] hover:underline cursor-pointer bg-transparent border-none"
+                >
+                  ✓ Done
+                </button>
+                {/* Floating toolbar */}
+                {toolbarPos && (
+                  <FloatingToolbar
+                    position={toolbarPos}
+                    highlights={highlights}
+                    symbols={symbols}
+                    onHighlight={handleToolbarHighlight}
+                    onInsertSymbol={handleToolbarSymbol}
+                    onRemoveAnnotation={hasSelectionOverAnnotation ? handleRemoveSelectedAnnotation : undefined}
+                    onClose={handleToolbarClose}
+                  />
+                )}
               </div>
+            ) : (
+              /* Normal lyrics display */
+              <>
+                {hasCustomText && (
+                  <div className="text-[14px] text-[var(--text-muted)] mb-2 opacity-50">
+                    {currentLine.text}
+                  </div>
+                )}
+                <div
+                  className="font-serif text-[32px] tracking-[-0.5px] leading-[1.35] text-[var(--text-primary)] max-w-[640px] cursor-pointer hover:text-[var(--theme)] transition-colors"
+                  onClick={() => player.playLineOnce(activeLineIndex)}
+                  onDoubleClick={(e) => { e.stopPropagation(); enterEditMode(); }}
+                  title="Click to preview · Double-click to edit"
+                >
+                  <AnnotatedText
+                    text={displayText}
+                    annotations={currentLine.annotations}
+                    highlights={highlights}
+                  />
+                </div>
+              </>
             )}
-            <div className="font-serif text-[32px] tracking-[-0.5px] leading-[1.35] text-[var(--text-primary)] max-w-[640px]">
-              <AnnotatedText
-                text={displayText}
-                annotations={currentLine.annotations}
-                highlights={highlights}
-              />
-            </div>
             <div className="flex items-center justify-center gap-3 mt-[10px]">
               {hasTimestamps && (
                 <span className="text-[11.5px] text-[var(--text-muted)] flex items-center gap-1 tabular-nums">
@@ -539,21 +803,26 @@ export function PracticeCenter({
               >
                 {cfg.label}
               </button>
-              <button
-                onClick={enterEditMode}
-                className="w-6 h-6 rounded-[5px] border border-[var(--border)] bg-transparent text-[var(--text-muted)] cursor-pointer flex items-center justify-center hover:border-[#888] hover:text-[var(--text-primary)] transition-all"
-                title="Edit annotations"
-              >
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
-                  <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-                </svg>
-              </button>
+              {!editMode && (
+                <button
+                  onClick={enterEditMode}
+                  className="w-6 h-6 rounded-[5px] border border-[var(--border)] bg-transparent text-[var(--text-muted)] cursor-pointer flex items-center justify-center hover:border-[#888] hover:text-[var(--text-primary)] transition-all"
+                  title="Edit annotations"
+                >
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                    <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                  </svg>
+                </button>
+              )}
             </div>
           </div>
 
-          {/* Next context line */}
-          <div className="font-serif text-[20px] tracking-[-0.3px] text-[var(--text-muted)] text-center max-w-[600px] leading-relaxed opacity-50 my-[6px]">
+          <div
+            className={`font-serif text-[20px] tracking-[-0.3px] text-[var(--text-muted)] text-center max-w-[600px] leading-relaxed opacity-50 my-[6px] ${nextLineData ? "cursor-pointer hover:opacity-75 transition-opacity" : ""}`}
+            onClick={() => nextLineData && player.playLineOnce(activeLineIndex + 1)}
+            title={nextLineData ? "Click to preview this line" : undefined}
+          >
             {nextLineData ? (
               <AnnotatedText
                 text={nextLineData.custom_text ?? nextLineData.text}
@@ -565,7 +834,7 @@ export function PracticeCenter({
         </>
       )}
 
-      {/* Waveform + Pitch curve / progress bar */}
+      {/* Waveform + Pitch curve */}
       {hasTimestamps && (
         <div className="w-full max-w-[560px] mt-6 flex flex-col gap-[6px]">
           {showWaveform && (
@@ -600,9 +869,34 @@ export function PracticeCenter({
         </div>
       )}
 
+      {/* Recording info: timer + level meter */}
+      {recorder.isRecording && (
+        <div className="flex items-center gap-3 mt-4">
+          <div className="flex items-end gap-[2px] h-[20px]">
+            {[0.15, 0.3, 0.45, 0.6, 0.75].map((threshold, i) => (
+              <div
+                key={i}
+                className="w-[3px] rounded-[1px] transition-all duration-75"
+                style={{
+                  height: `${4 + i * 3.5}px`,
+                  backgroundColor: inputLevel >= threshold
+                    ? (i >= 4 ? "#DC2626" : i >= 3 ? "#F59E0B" : "#22C55E")
+                    : "var(--border)",
+                }}
+              />
+            ))}
+          </div>
+          <span className="text-[12px] text-[#DC2626] font-medium tabular-nums">
+            {elapsedMin}:{elapsedSecStr}.{elapsedTenths}
+          </span>
+          <span className="text-[10px] text-[#DC2626] opacity-60 uppercase tracking-wider">
+            REC
+          </span>
+        </div>
+      )}
+
       {/* Transport controls */}
       <div className="flex items-center gap-3 mt-7">
-        {/* Prev */}
         <button
           onClick={player.prevLine}
           disabled={activeLineIndex === 0}
@@ -614,7 +908,6 @@ export function PracticeCenter({
           </svg>
         </button>
 
-        {/* Play/Pause */}
         <button
           onClick={player.togglePlay}
           className="w-14 h-14 rounded-full bg-[var(--accent)] text-white cursor-pointer flex items-center justify-center hover:opacity-85 hover:scale-105 transition-all border-none"
@@ -633,9 +926,14 @@ export function PracticeCenter({
 
         {/* Record */}
         <button
-          onClick={handleRecord}
+          onClick={(e) => handleRecord(e.shiftKey)}
           disabled={!hasTimestamps || editMode}
-          title={countdownActive ? "Cancel countdown" : recorder.isRecording ? "Stop recording" : "Record this line"}
+          title={
+            countdownActive ? "Cancel countdown" :
+            recorder.isRecording ? "Stop recording" :
+            loopRange ? `Record lines ${loopRange[0] + 1}–${loopRange[1] + 1}` :
+            "Record this line (R)"
+          }
           className={`w-14 h-14 rounded-full bg-[#DC2626] text-white flex items-center justify-center border-none transition-all ${
             !hasTimestamps || editMode
               ? "opacity-30 cursor-not-allowed"
@@ -654,6 +952,34 @@ export function PracticeCenter({
             </svg>
           )}
         </button>
+
+        {/* Retry button */}
+        {showRetry && (
+          <button
+            onClick={handleRetry}
+            title="Retry recording (same scope)"
+            className="w-10 h-10 rounded-full border-[1.5px] border-[#DC2626] bg-transparent text-[#DC2626] cursor-pointer flex items-center justify-center hover:bg-red-50 hover:scale-105 transition-all"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="1 4 1 10 7 10" />
+              <path d="M3.51 15a9 9 0 102.13-9.36L1 10" />
+            </svg>
+          </button>
+        )}
+
+        {/* Record section button */}
+        {showSectionRecord && !showRetry && (
+          <button
+            onClick={handleRecordSection}
+            title={`Record ${activeSection!.name}`}
+            className="h-10 px-3 rounded-full border-[1.5px] border-[#DC2626] bg-transparent text-[#DC2626] cursor-pointer flex items-center justify-center gap-[5px] hover:bg-red-50 hover:scale-105 transition-all text-[11px] font-medium"
+          >
+            <svg width="8" height="8" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="6" fill="#DC2626" />
+            </svg>
+            {activeSection!.name}
+          </button>
+        )}
 
         {/* Backing track toggle */}
         <button
@@ -677,7 +1003,6 @@ export function PracticeCenter({
           )}
         </button>
 
-        {/* Next */}
         <button
           onClick={player.nextLine}
           disabled={activeLineIndex === lines.length - 1}
@@ -688,6 +1013,18 @@ export function PracticeCenter({
             <line x1="19" y1="5" x2="19" y2="19" />
           </svg>
         </button>
+      </div>
+
+      {/* Keyboard hints */}
+      <div className="flex items-center gap-3 mt-3 text-[10px] text-[var(--text-muted)]">
+        <span className="inline-flex items-center gap-1">
+          <span className="px-[5px] py-[1px] rounded bg-[var(--accent-light)] border border-[var(--border)] text-[10px] font-semibold text-[var(--text-secondary)]">R</span>
+          record
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="px-[5px] py-[1px] rounded bg-[var(--accent-light)] border border-[var(--border)] text-[10px] font-semibold text-[var(--text-secondary)]">Shift+R</span>
+          skip countdown
+        </span>
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Sidebar } from "../components/sidebar";
+import { AudioPlayer } from "../components/audio-player";
 import { useSongStore } from "../stores/song-store";
 import {
   fetchLyricsForLanguage,
@@ -634,6 +635,9 @@ export function LyricsInputPage() {
           </div>
         </main>
       </div>
+
+      {/* Audio player */}
+      {song.audio_path && <AudioPlayer audioPath={song.audio_path} />}
 
       {/* Save toast */}
       {saved && (

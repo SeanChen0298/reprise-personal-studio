@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import type { Section } from "../../types/song";
+import type { Line, Section } from "../../types/song";
 import { useSongStore } from "../../stores/song-store";
 import { ConfirmDialog } from "../../components/confirm-dialog";
 import { formatMs } from "../../lib/status-config";
@@ -10,10 +10,15 @@ interface Props {
   activeLineId: string | undefined;
   activeLineOrder?: number;
   sections?: Section[];
+  /** Called to start backing track playback from a given ms position (for A/B) */
+  onABPlay?: (startMs: number) => void;
+  /** Called to stop backing track playback (for A/B) */
+  onABStop?: () => void;
 }
 
-export function RecordingsBar({ songId, activeLineId, activeLineOrder, sections }: Props) {
+export function RecordingsBar({ songId, activeLineId, activeLineOrder, sections, onABPlay, onABStop }: Props) {
   const allRecordings = useSongStore((s) => s.recordings[songId]);
+  const allLines = useSongStore((s) => s.lines[songId]);
 
   // Find section containing the active line
   const activeSection = useMemo(() => {
@@ -26,7 +31,6 @@ export function RecordingsBar({ songId, activeLineId, activeLineOrder, sections 
   const recordings = useMemo(() => {
     const recs = allRecordings ?? [];
     if (!activeLineId) return [];
-    // Line recordings for this line + section recordings for the containing section
     return recs.filter(
       (r) =>
         r.line_id === activeLineId ||
@@ -37,10 +41,16 @@ export function RecordingsBar({ songId, activeLineId, activeLineOrder, sections 
   const toggleMasterTake = useSongStore((s) => s.toggleMasterTake);
 
   const [playingId, setPlayingId] = useState<string | null>(null);
+  const [abPlayingId, setAbPlayingId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const handlePlay = (filePath: string, id: string) => {
+    // Stop A/B mode if active
+    if (abPlayingId) {
+      handleABStop();
+    }
+
     if (playingId === id) {
       audioRef.current?.pause();
       setPlayingId(null);
@@ -54,6 +64,48 @@ export function RecordingsBar({ songId, activeLineId, activeLineOrder, sections 
     audio.play();
     audioRef.current = audio;
     setPlayingId(id);
+  };
+
+  const handleABPlay = (filePath: string, id: string, lineId: string) => {
+    // If already in A/B for this recording, stop it
+    if (abPlayingId === id) {
+      handleABStop();
+      return;
+    }
+
+    // Stop any solo playback
+    if (playingId) {
+      audioRef.current?.pause();
+      setPlayingId(null);
+    }
+    // Stop previous A/B
+    if (abPlayingId) {
+      audioRef.current?.pause();
+      onABStop?.();
+    }
+
+    // Find the line's start_ms for synced playback
+    const line = (allLines ?? []).find((l: Line) => l.id === lineId);
+    const startMs = line?.start_ms ?? 0;
+
+    // Play the recording
+    const audio = new Audio(convertFileSrc(filePath));
+    audio.onended = () => {
+      setAbPlayingId(null);
+      onABStop?.();
+    };
+    audio.play();
+    audioRef.current = audio;
+    setAbPlayingId(id);
+
+    // Start backing track from the same position
+    onABPlay?.(startMs);
+  };
+
+  const handleABStop = () => {
+    audioRef.current?.pause();
+    setAbPlayingId(null);
+    onABStop?.();
   };
 
   const handleDelete = async () => {
@@ -96,7 +148,9 @@ export function RecordingsBar({ songId, activeLineId, activeLineOrder, sections 
           {recordings.map((rec) => (
             <div
               key={rec.id}
-              className="flex items-center gap-3 px-3 py-[6px] rounded-[6px] hover:bg-[var(--bg)] transition-colors group"
+              className={`flex items-center gap-3 px-3 py-[6px] rounded-[6px] transition-colors group ${
+                abPlayingId === rec.id ? "bg-[var(--theme-light)]" : "hover:bg-[var(--bg)]"
+              }`}
             >
               {/* Play/Pause */}
               <button
@@ -113,6 +167,19 @@ export function RecordingsBar({ songId, activeLineId, activeLineOrder, sections 
                     <polygon points="5,3 19,12 5,21" />
                   </svg>
                 )}
+              </button>
+
+              {/* A/B Compare button */}
+              <button
+                onClick={() => handleABPlay(rec.file_path, rec.id, rec.line_id)}
+                title={abPlayingId === rec.id ? "Stop A/B comparison" : "A/B compare with backing track"}
+                className={`text-[9px] font-bold px-[6px] py-[2px] rounded-[4px] border cursor-pointer transition-all flex-shrink-0 ${
+                  abPlayingId === rec.id
+                    ? "bg-[var(--theme)] text-white border-[var(--theme)]"
+                    : "bg-transparent text-[var(--text-muted)] border-[var(--border)] opacity-0 group-hover:opacity-80 hover:!opacity-100 hover:border-[var(--theme)] hover:text-[var(--theme)]"
+                }`}
+              >
+                A/B
               </button>
 
               {/* Info */}

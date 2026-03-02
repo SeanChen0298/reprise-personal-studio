@@ -1,17 +1,19 @@
 import { useRef, useState, useCallback } from "react";
 import { mkdir, exists, writeFile } from "@tauri-apps/plugin-fs";
 
-interface UseRecorderResult {
+export interface RecordingResult {
+  filePath: string;
+  durationMs: number;
+  lineId: string;
+}
+
+export interface UseRecorderResult {
   isRecording: boolean;
   error: string | null;
   startRecording: (lineId: string, songFolder: string, inputDeviceId?: string) => Promise<void>;
   stopRecording: () => Promise<RecordingResult | null>;
-}
-
-interface RecordingResult {
-  filePath: string;
-  durationMs: number;
-  lineId: string;
+  /** Returns current mic input level 0–1 (call in RAF loop during recording) */
+  getInputLevel: () => number;
 }
 
 export function useRecorder(): UseRecorderResult {
@@ -26,6 +28,21 @@ export function useRecorder(): UseRecorderResult {
   const streamRef = useRef<MediaStream | null>(null);
   const resolveStopRef = useRef<((result: RecordingResult | null) => void) | null>(null);
 
+  // Audio analysis for input level meter
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const analyserDataRef = useRef<Uint8Array | null>(null);
+
+  const getInputLevel = useCallback((): number => {
+    const analyser = analyserRef.current;
+    const data = analyserDataRef.current;
+    if (!analyser || !data) return 0;
+    analyser.getByteFrequencyData(data);
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) sum += data[i];
+    return sum / (data.length * 255);
+  }, []);
+
   const startRecording = useCallback(async (lineId: string, songFolder: string, inputDeviceId?: string) => {
     setError(null);
     lineIdRef.current = lineId;
@@ -38,6 +55,17 @@ export function useRecorder(): UseRecorderResult {
         : true;
       const stream = await navigator.mediaDevices.getUserMedia({ audio });
       streamRef.current = stream;
+
+      // Set up analyser for input level meter
+      const ctx = new AudioContext();
+      audioCtxRef.current = ctx;
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.8;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+      analyserDataRef.current = new Uint8Array(analyser.frequencyBinCount);
 
       const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
       mediaRecorderRef.current = recorder;
@@ -75,6 +103,13 @@ export function useRecorder(): UseRecorderResult {
         streamRef.current?.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
         mediaRecorderRef.current = null;
+
+        // Clean up analyser
+        analyserRef.current = null;
+        analyserDataRef.current = null;
+        audioCtxRef.current?.close().catch(() => {});
+        audioCtxRef.current = null;
+
         setIsRecording(false);
 
         try {
@@ -109,5 +144,5 @@ export function useRecorder(): UseRecorderResult {
     });
   }, []);
 
-  return { isRecording, error, startRecording, stopRecording };
+  return { isRecording, error, startRecording, stopRecording, getInputLevel };
 }

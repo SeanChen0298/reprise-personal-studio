@@ -24,6 +24,8 @@ export function PracticePage() {
   const [autoPlayOnClick, setAutoPlayOnClick] = useState(true);
   const [recordingSection, setRecordingSection] = useState<Section | null>(null);
   const [activeSection, setActiveSection] = useState<Section | null>(null);
+  const [skipCountdown, setSkipCountdown] = useState(false);
+  const [recordThrough, setRecordThrough] = useState(false);
   const audioDevices = useAudioDevices();
   const rawSections = useSongStore((s) => (id ? s.sections[id] : undefined));
   const sections = useMemo(() => rawSections ?? [], [rawSections]);
@@ -207,6 +209,12 @@ export function PracticePage() {
           selectedOutputId={audioDevices.selectedOutputId}
           onInputChange={audioDevices.setSelectedInputId}
           onOutputChange={audioDevices.setSelectedOutputId}
+          skipCountdown={skipCountdown}
+          onSkipCountdownToggle={() => setSkipCountdown((v) => !v)}
+          recordThrough={recordThrough}
+          onRecordThroughToggle={() => setRecordThrough((v) => !v)}
+          volume={player.volume}
+          onVolumeChange={player.setVolume}
         />
         <PracticeCenter
           lines={lines}
@@ -220,6 +228,9 @@ export function PracticePage() {
           canAnalyzePitch={song.stem_status === "done" && song.pitch_status !== "processing"}
           activeSection={activeSection}
           recordingSection={recordingSection}
+          loopRange={player.loopRange}
+          skipCountdown={skipCountdown}
+          recordThrough={recordThrough}
           onEditModeChange={setIsEditing}
         />
         <RecordingsBar
@@ -227,6 +238,23 @@ export function PracticePage() {
           activeLineId={lines[player.currentLineIndex]?.id}
           activeLineOrder={lines[player.currentLineIndex]?.order}
           sections={sections}
+          onABPlay={(startMs) => {
+            // Seek backing track to the line's start and play
+            const lineIdx = lines.findIndex((l) => l.start_ms === startMs);
+            if (lineIdx >= 0) {
+              player.goToLine(lineIdx, true);
+            } else {
+              // Fallback: seek directly
+              const audio = player.audioRef.current;
+              if (audio) {
+                audio.currentTime = startMs / 1000;
+                audio.play().catch(() => {});
+              }
+            }
+          }}
+          onABStop={() => {
+            player.pause();
+          }}
         />
       </div>
     </div>

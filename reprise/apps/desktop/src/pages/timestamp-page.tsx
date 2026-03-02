@@ -90,6 +90,15 @@ export function TimestampPage() {
 
   const tapLinesRef = useRef<HTMLDivElement>(null);
 
+  // Which line is currently playing (based on audio position)
+  const playingLineIndex = useMemo(() => {
+    if (!isPlaying) return -1;
+    const timeMs = currentTime * 1000;
+    return timestamps.findIndex(
+      (t) => t.start_ms != null && t.end_ms != null && timeMs >= t.start_ms && timeMs < t.end_ms
+    );
+  }, [isPlaying, currentTime, timestamps]);
+
   // Initialize timestamps from existing line data
   useEffect(() => {
     if (lines.length === 0) return;
@@ -180,6 +189,11 @@ export function TimestampPage() {
       // Set start_ms for current line
       next[currentIdx] = { ...next[currentIdx], start_ms: timeMs };
 
+      // Auto-set end_ms if next line already has start_ms
+      if (currentIdx + 1 < next.length && next[currentIdx + 1].start_ms != null) {
+        next[currentIdx] = { ...next[currentIdx], end_ms: next[currentIdx + 1].start_ms };
+      }
+
       // Set end_ms for previous line (if exists and was already marked)
       if (currentIdx > 0 && next[currentIdx - 1].start_ms != null) {
         next[currentIdx - 1] = { ...next[currentIdx - 1], end_ms: timeMs };
@@ -242,13 +256,21 @@ export function TimestampPage() {
     return () => document.removeEventListener("keydown", handler);
   }, [doTap, doUndo, editingLine]);
 
-  // Auto-scroll current line into view
+  // Seek to a line's start time on click
+  const seekToLine = useCallback((startMs: number) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.currentTime = startMs / 1000;
+    setCurrentTime(audio.currentTime);
+  }, []);
+
+  // Auto-scroll current line into view (tap cursor or playing line)
   useEffect(() => {
     const container = tapLinesRef.current;
     if (!container) return;
-    const el = container.querySelector(".tap-line-current");
+    const el = container.querySelector(".tap-line-current") || container.querySelector(".tap-line-playing");
     if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
-  }, [currentIdx]);
+  }, [currentIdx, playingLineIndex]);
 
   // Save all timestamps to store
   const handleSave = useCallback(() => {
@@ -443,21 +465,27 @@ export function TimestampPage() {
           <div ref={tapLinesRef} className="flex-1 overflow-y-auto px-7 py-4">
             {lines.map((line, i) => {
               const ts = timestamps[i];
-              const isDone = ts?.start_ms != null && i < currentIdx;
               const isCurrent = i === currentIdx;
-              const isPending = i > currentIdx;
+              const isDone = !isCurrent && ts?.start_ms != null && (i < currentIdx || ts?.end_ms != null);
+              const isPending = !isDone && !isCurrent;
               const isEditing = editingLine === line.id;
+              const isPlayingLine = i === playingLineIndex;
 
               return (
                 <div
                   key={line.id}
+                  onClick={() => {
+                    if (!isEditing && ts?.start_ms != null) seekToLine(ts.start_ms);
+                  }}
                   className={`flex items-center gap-3 px-4 py-3 rounded-[9px] mb-1 transition-colors ${
                     isCurrent
                       ? "tap-line-current bg-[var(--theme-light)] border-[1.5px] border-[#BFDBFE]"
-                      : isDone
-                        ? "bg-[var(--surface)] border border-[var(--border-subtle)]"
-                        : "opacity-50"
-                  }`}
+                      : isPlayingLine
+                        ? "tap-line-playing bg-[#FEF9C3] border-[1.5px] border-[#FDE68A]"
+                        : isDone
+                          ? "bg-[var(--surface)] border border-[var(--border-subtle)]"
+                          : "opacity-50"
+                  } ${ts?.start_ms != null && !isEditing ? "cursor-pointer" : ""}`}
                 >
                   {/* Line number */}
                   <span
