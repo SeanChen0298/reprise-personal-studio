@@ -72,9 +72,8 @@ export function SongDetailPage() {
               Edit lyrics
             </button>
             <button
-              disabled
-              className="flex items-center gap-[5px] px-3.5 py-[6px] rounded-[7px] border-[1.5px] border-[var(--border)] bg-transparent text-[12.5px] font-medium text-[var(--text-muted)] opacity-50 cursor-not-allowed"
-              title="Coming soon"
+              onClick={() => navigate(`/song/${id}/timestamps`)}
+              className="flex items-center gap-[5px] px-3.5 py-[6px] rounded-[7px] border-[1.5px] border-[var(--border)] bg-transparent text-[12.5px] font-medium text-[var(--text-secondary)] hover:border-[#888] hover:text-[var(--text-primary)] hover:bg-[var(--accent-light)] transition-all cursor-pointer"
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
