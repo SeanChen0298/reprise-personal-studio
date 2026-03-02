@@ -230,9 +230,10 @@ export function LyricsInputPage() {
     const newLines: Line[] = editLines
       .filter((l) => l.text.trim())
       .map((l, i) => {
-        // Preserve existing line data if possible
+        // Preserve existing line data (custom_text, annotations, status, etc.)
         const existing = storedLines.find((sl) => sl.id === l.id);
         return {
+          ...existing,
           id: l.id,
           song_id: id!,
           text: l.text.trim(),

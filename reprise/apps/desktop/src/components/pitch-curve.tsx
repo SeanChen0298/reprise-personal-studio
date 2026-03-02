@@ -10,6 +10,12 @@ function noteName(semitone: number): string {
   return `${name}${octave}`;
 }
 
+/** Check if a MIDI note is a natural note (white key) */
+function isNatural(note: number): boolean {
+  const idx = ((note % 12) + 12) % 12;
+  return ![1, 3, 6, 8, 10].includes(idx);
+}
+
 interface Props {
   points: PitchDisplayPoint[];
   progress: number;
@@ -31,7 +37,6 @@ export function PitchCurve({ points, progress, onSeek, startMs, endMs }: Props) 
     [onSeek],
   );
 
-  // Render the pitch curve on canvas
   useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
@@ -48,16 +53,16 @@ export function PitchCurve({ points, progress, onSeek, startMs, endMs }: Props) 
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, w, h);
 
-    // If no pitch data, draw simple progress bar fallback
-    if (points.length === 0) {
-      // Progress fill
-      const style = getComputedStyle(container);
-      const themeColor = style.getPropertyValue("--theme").trim() || "#2563EB";
-      ctx.fillStyle = themeColor;
-      ctx.globalAlpha = 0.2;
-      ctx.fillRect(0, 0, progress * w, h);
+    const style = getComputedStyle(container);
+    const themeColor = style.getPropertyValue("--theme").trim() || "#2563EB";
+    const borderSubtle = style.getPropertyValue("--border-subtle").trim() || "#e5e7eb";
+    const textMuted = style.getPropertyValue("--text-muted").trim() || "#9ca3af";
 
-      // Cursor
+    // No pitch data — simple progress bar fallback
+    if (points.length === 0) {
+      ctx.fillStyle = themeColor;
+      ctx.globalAlpha = 0.15;
+      ctx.fillRect(0, 0, progress * w, h);
       ctx.globalAlpha = 1;
       ctx.fillStyle = themeColor;
       ctx.fillRect(progress * w - 1, 0, 2, h);
@@ -67,69 +72,135 @@ export function PitchCurve({ points, progress, onSeek, startMs, endMs }: Props) 
     const duration = endMs - startMs;
     if (duration <= 0) return;
 
-    // Compute Y range from data
+    // --- Y-axis range: snap to natural notes, ensure minimum span ---
     const semitones = points.map((p) => p.semitone);
-    const minSemi = Math.min(...semitones);
-    const maxSemi = Math.max(...semitones);
-    const padding = 2;
-    const yMin = minSemi - padding;
-    const yMax = maxSemi + padding;
+    const dataMin = Math.min(...semitones);
+    const dataMax = Math.max(...semitones);
+    const dataMid = (dataMin + dataMax) / 2;
+    const dataSpan = dataMax - dataMin;
+    // At least 8 semitones visible, with 2-semitone padding on each side
+    const minSpan = 8;
+    const span = Math.max(dataSpan + 4, minSpan);
+    const yMin = Math.floor(dataMid - span / 2);
+    const yMax = Math.ceil(dataMid + span / 2);
     const yRange = yMax - yMin || 1;
 
-    const toX = (timeMs: number) => ((timeMs - startMs) / duration) * w;
+    // Left margin for Y-axis labels
+    const labelMargin = 32;
+    const graphW = w - labelMargin;
+
+    const toX = (timeMs: number) => labelMargin + ((timeMs - startMs) / duration) * graphW;
     const toY = (semi: number) => h - ((semi - yMin) / yRange) * h;
 
-    const style = getComputedStyle(container);
-    const themeColor = style.getPropertyValue("--theme").trim() || "#2563EB";
-
-    // Progress fill
+    // --- Progress fill ---
+    const progressX = labelMargin + progress * graphW;
     ctx.fillStyle = themeColor;
-    ctx.globalAlpha = 0.08;
-    ctx.fillRect(0, 0, progress * w, h);
+    ctx.globalAlpha = 0.06;
+    ctx.fillRect(labelMargin, 0, progress * graphW, h);
     ctx.globalAlpha = 1;
 
-    // Draw note grid lines (light horizontal lines at each semitone)
-    ctx.strokeStyle = style.getPropertyValue("--border-subtle").trim() || "#e5e7eb";
-    ctx.lineWidth = 0.5;
+    // --- Grid lines and Y-axis labels ---
+    // Draw lines at each natural note, label every natural note that has enough spacing
     const minNote = Math.ceil(yMin);
     const maxNote = Math.floor(yMax);
+
+    // Compute minimum pixel spacing to avoid label cramping
+    const minLabelSpacing = 16;
+    const naturalNotes: number[] = [];
     for (let note = minNote; note <= maxNote; note++) {
-      const y = toY(note);
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(w, y);
-      ctx.stroke();
+      if (isNatural(note)) naturalNotes.push(note);
     }
 
-    // Draw note labels on right edge
-    ctx.font = "9px sans-serif";
-    ctx.fillStyle = style.getPropertyValue("--text-muted").trim() || "#9ca3af";
-    ctx.textAlign = "right";
-    ctx.textBaseline = "middle";
-    for (let note = minNote; note <= maxNote; note++) {
-      // Only label natural notes (no sharps) to avoid clutter
-      const noteIdx = ((note % 12) + 12) % 12;
-      if ([1, 3, 6, 8, 10].includes(noteIdx)) continue;
-      const y = toY(note);
-      if (y > 8 && y < h - 8) {
-        ctx.fillText(noteName(note), w - 3, y);
+    // If too many natural notes, thin them out (show every 2nd or 3rd)
+    let labelStep = 1;
+    if (naturalNotes.length > 1) {
+      const avgSpacing = h / naturalNotes.length;
+      if (avgSpacing < minLabelSpacing) {
+        labelStep = Math.ceil(minLabelSpacing / avgSpacing);
       }
     }
 
-    // Draw pitch curve
+    for (let note = minNote; note <= maxNote; note++) {
+      const y = toY(note);
+      if (y < 1 || y > h - 1) continue;
+
+      const natural = isNatural(note);
+
+      // Grid line — natural notes get slightly stronger lines
+      ctx.strokeStyle = borderSubtle;
+      ctx.lineWidth = natural ? 0.8 : 0.3;
+      ctx.globalAlpha = natural ? 0.7 : 0.3;
+      ctx.beginPath();
+      ctx.moveTo(labelMargin, y);
+      ctx.lineTo(w, y);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    // Labels on left axis
+    ctx.font = "9px 'DM Sans', sans-serif";
+    ctx.fillStyle = textMuted;
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    for (let li = 0; li < naturalNotes.length; li++) {
+      if (li % labelStep !== 0) continue;
+      const note = naturalNotes[li];
+      const y = toY(note);
+      if (y > 8 && y < h - 8) {
+        ctx.globalAlpha = 0.7;
+        ctx.fillText(noteName(note), labelMargin - 5, y);
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    // --- Y-axis border line ---
+    ctx.strokeStyle = borderSubtle;
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(labelMargin, 0);
+    ctx.lineTo(labelMargin, h);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    // --- Pitch curve ---
+    // Draw a subtle glow/shadow first, then the main line
     ctx.strokeStyle = themeColor;
-    ctx.lineWidth = 2;
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
-    ctx.beginPath();
 
+    // Shadow pass
+    ctx.save();
+    ctx.globalAlpha = 0.15;
+    ctx.lineWidth = 5;
+    ctx.beginPath();
     let started = false;
     for (let i = 0; i < points.length; i++) {
       const p = points[i];
       const x = toX(p.time_ms);
       const y = toY(p.semitone);
+      const gap = i > 0 ? p.time_ms - points[i - 1].time_ms : 0;
+      if (gap > 50 || !started) {
+        ctx.moveTo(x, y);
+        started = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
+    ctx.stroke();
+    ctx.restore();
 
-      // Break the line if there's a large gap (> 50ms) between points
+    // Main line
+    ctx.strokeStyle = themeColor;
+    ctx.lineWidth = 2;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    started = false;
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i];
+      const x = toX(p.time_ms);
+      const y = toY(p.semitone);
       const gap = i > 0 ? p.time_ms - points[i - 1].time_ms : 0;
       if (gap > 50 || !started) {
         ctx.moveTo(x, y);
@@ -140,20 +211,47 @@ export function PitchCurve({ points, progress, onSeek, startMs, endMs }: Props) 
     }
     ctx.stroke();
 
-    // Playback cursor
-    const cursorX = progress * w;
+    // --- Playback cursor ---
     ctx.strokeStyle = themeColor;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 1.5;
+    ctx.globalAlpha = 0.9;
+    ctx.setLineDash([3, 3]);
     ctx.beginPath();
-    ctx.moveTo(cursorX, 0);
-    ctx.lineTo(cursorX, h);
+    ctx.moveTo(progressX, 0);
+    ctx.lineTo(progressX, h);
     ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+
+    // Cursor dot at intersection with pitch
+    if (points.length > 0) {
+      const cursorTimeMs = startMs + progress * duration;
+      // Find nearest point
+      let closest = points[0];
+      let closestDist = Math.abs(closest.time_ms - cursorTimeMs);
+      for (const p of points) {
+        const d = Math.abs(p.time_ms - cursorTimeMs);
+        if (d < closestDist) { closest = p; closestDist = d; }
+      }
+      if (closestDist < 100) {
+        const dotY = toY(closest.semitone);
+        ctx.fillStyle = themeColor;
+        ctx.beginPath();
+        ctx.arc(progressX, dotY, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+        // White center
+        ctx.fillStyle = "#fff";
+        ctx.beginPath();
+        ctx.arc(progressX, dotY, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
   }, [points, progress, startMs, endMs]);
 
   return (
     <div
       ref={containerRef}
-      className="h-[56px] bg-[var(--border-subtle)] rounded-[4px] relative cursor-pointer overflow-hidden"
+      className="h-[120px] bg-[var(--surface)] border border-[var(--border-subtle)] rounded-[6px] relative cursor-pointer overflow-hidden"
       onClick={handleClick}
     >
       <canvas

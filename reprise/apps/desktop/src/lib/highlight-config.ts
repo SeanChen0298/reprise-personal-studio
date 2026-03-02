@@ -23,6 +23,7 @@ const EXTRA_TEXT_COLORS = ["#92400E", "#3730A3", "#9D174D", "#0F766E"];
 interface HighlightStore {
   highlights: HighlightType[];
   addHighlight: (name: string) => void;
+  updateHighlight: (id: string, updates: Partial<Pick<HighlightType, "name" | "bg" | "color">>) => void;
   removeHighlight: (id: string) => void;
 }
 
@@ -42,6 +43,14 @@ export const useHighlightStore = create<HighlightStore>()(
           color: EXTRA_TEXT_COLORS[idx],
         };
         set({ highlights: [...existing, hl] });
+      },
+
+      updateHighlight: (id, updates) => {
+        set((s) => ({
+          highlights: s.highlights.map((h) =>
+            h.id === id ? { ...h, ...updates } : h
+          ),
+        }));
       },
 
       removeHighlight: (id: string) => {

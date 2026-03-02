@@ -50,14 +50,26 @@ export function usePitchData(
     return () => { cancelled = true; };
   }, [pitchDataPath]);
 
-  // Slice and convert for the current line
+  // Slice, filter low-confidence frames, and convert for the current line
   const points = useMemo<PitchDisplayPoint[]>(() => {
     if (startMs == null || endMs == null || allPointsRef.current.length === 0) {
       return [];
     }
 
+    // Filter: confidence > 0.3 removes silence, breaths, and unreliable harmony frames.
+    // Frequency range 65–1047 Hz (C2–C6) covers human vocal range.
+    const MIN_CONFIDENCE = 0.3;
+    const MIN_FREQ = 65;   // C2
+    const MAX_FREQ = 1047; // C6
+
     return allPointsRef.current
-      .filter((p) => p.time_ms >= startMs && p.time_ms <= endMs)
+      .filter((p) =>
+        p.time_ms >= startMs &&
+        p.time_ms <= endMs &&
+        p.confidence >= MIN_CONFIDENCE &&
+        p.freq_hz >= MIN_FREQ &&
+        p.freq_hz <= MAX_FREQ
+      )
       .map((p) => ({
         time_ms: p.time_ms,
         semitone: freqToSemitone(p.freq_hz),

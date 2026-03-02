@@ -16,7 +16,7 @@ export async function analyzePitch(
   vocalsPath: string,
   songFolder: string,
 ): Promise<string> {
-  const outputPath = `${songFolder}/pitch.csv`;
+  const csvPath = `${songFolder}/pitch.csv`;
   const monoPath = `${songFolder}/vocals_mono.wav`;
 
   // torchcrepe requires mono audio — Demucs outputs stereo
@@ -30,16 +30,30 @@ export async function analyzePitch(
     throw new Error("Failed to convert vocals to mono: " + (ffResult.stderr.split("\n").filter(Boolean).pop() || "ffmpeg error"));
   }
 
-  const command = Command.create("python", [
-    "-m", "torchcrepe",
-    "--audio_files", monoPath,
-    "--output_files", outputPath,
-    "--model", "full",
-    "--hop_length", "160",
-    "--decoder", "viterbi",
-    "--batch_size", "512",
-  ]);
+  // Use torchcrepe Python API to get both pitch and confidence.
+  // The CLI only outputs pitch; the API gives us confidence scores
+  // to filter out silence, breaths, and unreliable harmony frames.
+  const script = [
+    "import torchcrepe, torch, torchaudio",
+    `audio, sr = torchaudio.load(r'${monoPath}')`,
+    "if sr != 16000:",
+    "    audio = torchaudio.functional.resample(audio, sr, 16000)",
+    "    sr = 16000",
+    "pitch, confidence = torchcrepe.predict(",
+    "    audio, sr, hop_length=160, model='full',",
+    "    decoder=torchcrepe.decode.viterbi, batch_size=512,",
+    "    return_periodicity=True,",
+    ")",
+    "# Apply periodicity median filter before squeezing (requires 2D input)",
+    "torchcrepe.filter.median(confidence, 3)",
+    "pitch = pitch.squeeze()",
+    "confidence = confidence.squeeze()",
+    `with open(r'${csvPath}', 'w') as f:`,
+    "    for p, c in zip(pitch.tolist(), confidence.tolist()):",
+    "        f.write(f'{p:.2f},{c:.4f}\\n')",
+  ].join("\n");
 
+  const command = Command.create("python", ["-c", script]);
   const result = await spawnAndWait(command, "[torchcrepe]");
 
   if (result.code !== 0) {
@@ -51,34 +65,39 @@ export async function analyzePitch(
     );
   }
 
-  const fileExists = await exists(outputPath);
-  if (!fileExists) {
+  if (!(await exists(csvPath))) {
     throw new Error("torchcrepe completed but output file was not found");
   }
 
-  return outputPath;
+  return csvPath;
 }
 
 /** Parse torchcrepe CSV output into PitchPoint array.
- *  torchcrepe outputs one frequency per line, one line per hop (10ms at hop_length=160, sr=16000).
- *  Format: single column of frequency values (Hz). */
+ *  Supports two formats:
+ *  - New: "freq,confidence" per line (from Python API)
+ *  - Legacy: single frequency value per line
+ *  One line per hop (10ms at hop_length=160, sr=16000). */
 export function parsePitchData(content: string, hopMs = 10): PitchPoint[] {
   const lines = content.trim().split("\n");
   const points: PitchPoint[] = [];
+  let frameIndex = 0;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     if (!line) continue;
 
-    // torchcrepe CSV may have a header or be headerless — skip non-numeric lines
-    const freq = parseFloat(line);
+    const parts = line.split(",");
+    const freq = parseFloat(parts[0]);
     if (Number.isNaN(freq) || freq <= 0) continue;
 
+    const confidence = parts.length > 1 ? parseFloat(parts[1]) : 1;
+
     points.push({
-      time_ms: i * hopMs,
+      time_ms: frameIndex * hopMs,
       freq_hz: freq,
-      confidence: 1, // torchcrepe CLI doesn't output confidence; assume full
+      confidence: Number.isNaN(confidence) ? 1 : confidence,
     });
+    frameIndex++;
   }
 
   return points;

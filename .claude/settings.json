@@ -26,10 +26,14 @@
       "Bash(pip3 show yt-dlp)",
       "Bash(pip install yt-dlp)",
       "Bash(xargs grep -l \"annotation\\\\|Annotation\")",
-      "Bash(pnpm --filter desktop exec tsc --noEmit)"
+      "Bash(pnpm --filter desktop exec tsc --noEmit)",
+      "Read(//c/Reprise/**)",
+      "Bash(python -c \"import torch; t = torch.load\\(r''C:/Reprise/Mrs. GREEN APPLElulu.Official Music Video - Mrs. GREEN APPLE/pitch.csv'', weights_only=True\\).squeeze\\(\\); f = open\\(r''C:/Reprise/Mrs. GREEN APPLElulu.Official Music Video - Mrs. GREEN APPLE/pitch_converted.csv'', ''w''\\); f.write\\(''\\\\n''.join\\(f''{v:.2f}'' for v in t.tolist\\(\\)\\)\\); f.close\\(\\); print\\(f''Converted {len\\(t\\)} frames''\\)\")",
+      "Bash(python -c \":*)"
     ],
     "additionalDirectories": [
-      "C:\\Repo\\reprise-personal-studio\\separated"
+      "C:\\Repo\\reprise-personal-studio\\separated",
+      "C:\\Reprise\\Mrs. GREEN APPLElulu.Official Music Video - Mrs. GREEN APPLE"
     ]
   }
 }

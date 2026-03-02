@@ -7,8 +7,11 @@ import { useHighlightStore } from "../../lib/highlight-config";
 import { useSymbolStore } from "../../lib/symbol-config";
 import { AnnotatedText } from "../../components/annotated-text";
 import { PitchCurve } from "../../components/pitch-curve";
+import { Waveform } from "../../components/waveform";
 import { usePitchData } from "../../hooks/use-pitch-data";
+import { useWaveformData } from "../../hooks/use-waveform-data";
 import { useRecorder } from "../../hooks/use-recorder";
+import { usePreferencesStore } from "../../stores/preferences-store";
 
 interface Props {
   lines: Line[];
@@ -51,6 +54,12 @@ export function PracticeCenter({
   }, [activeSection, lines]);
   const hasTimestamps = currentLine?.start_ms != null && currentLine?.end_ms != null;
   const pitchData = usePitchData(pitchDataPath, currentLine?.start_ms, currentLine?.end_ms);
+  const showWaveform = usePreferencesStore((s) => s.showWaveform);
+  const waveform = useWaveformData(
+    showWaveform ? (player.audioSrc || undefined) : undefined,
+    currentLine?.start_ms,
+    currentLine?.end_ms,
+  );
 
   const [editMode, setEditMode] = useState(false);
   const [playBacking, setPlayBacking] = useState(true);
@@ -556,9 +565,16 @@ export function PracticeCenter({
         </>
       )}
 
-      {/* Pitch curve / progress bar */}
+      {/* Waveform + Pitch curve / progress bar */}
       {hasTimestamps && (
-        <div className="w-full max-w-[560px] mt-6">
+        <div className="w-full max-w-[560px] mt-6 flex flex-col gap-[6px]">
+          {showWaveform && (
+            <Waveform
+              peaks={waveform.peaks}
+              progress={player.lineProgress}
+              onSeek={player.seekWithinLine}
+            />
+          )}
           <PitchCurve
             points={pitchData.points}
             progress={player.lineProgress}

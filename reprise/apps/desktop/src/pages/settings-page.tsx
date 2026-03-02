@@ -7,6 +7,7 @@ import { useAuthStore } from "../stores/auth-store";
 import { checkYtDlpInstalled, checkPythonInstalled, checkFfmpegInstalled, checkDemucsInstalled, COOKIES_PATH } from "../lib/audio-download";
 import { checkTorchcrepeInstalled } from "../lib/audio-analysis";
 import { useHighlightStore } from "../lib/highlight-config";
+import { usePreferencesStore } from "../stores/preferences-store";
 
 type Tab = "highlights" | "account" | "preferences" | "downloads";
 
@@ -27,14 +28,17 @@ export function SettingsPage() {
   const [activeTab, setActiveTab] = useState<Tab>("highlights");
   const highlights = useHighlightStore((s) => s.highlights);
   const addHighlight = useHighlightStore((s) => s.addHighlight);
+  const updateHighlight = useHighlightStore((s) => s.updateHighlight);
   const removeHighlight = useHighlightStore((s) => s.removeHighlight);
   const [newHighlightName, setNewHighlightName] = useState("");
+  const [editingHighlightId, setEditingHighlightId] = useState<string | null>(null);
   const [activeTheme, setActiveTheme] = useState("blue");
   const [speed, setSpeed] = useState(100);
   const [autoPlay, setAutoPlay] = useState(true);
   const [loopMode, setLoopMode] = useState("3");
   const [countIn, setCountIn] = useState("2");
-  const [showWaveforms, setShowWaveforms] = useState(true);
+  const showWaveforms = usePreferencesStore((s) => s.showWaveform);
+  const setShowWaveforms = usePreferencesStore((s) => s.setShowWaveform);
   const [confirmDelete, setConfirmDelete] = useState(true);
   const [autoSync, setAutoSync] = useState(true);
 
@@ -231,42 +235,113 @@ export function SettingsPage() {
 
                   <div className="flex flex-col gap-1.5">
                     {highlights.map((h) => (
-                      <div
-                        key={h.id}
-                        className="flex items-center gap-3 px-4 py-3 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)] hover:shadow-[0_2px_12px_rgba(0,0,0,0.05)] transition-shadow"
-                      >
+                      <div key={h.id}>
                         <div
-                          className="w-7 h-7 rounded-[6px] flex-shrink-0 border border-black/[0.06] cursor-pointer hover:scale-110 transition-transform"
-                          style={{ background: h.bg }}
-                        />
-                        <div className="flex-1 min-w-0">
-                          <div className="text-[13.5px] font-medium mb-px">{h.name}</div>
-                          {h.description && (
-                            <div className="text-[11.5px] text-[var(--text-muted)]">{h.description}</div>
-                          )}
-                        </div>
-                        <span
-                          className="text-[12px] px-2.5 py-0.5 rounded font-medium flex-shrink-0"
-                          style={{ background: h.bg, color: h.color }}
+                          className="flex items-center gap-3 px-4 py-3 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)] hover:shadow-[0_2px_12px_rgba(0,0,0,0.05)] transition-shadow"
                         >
-                          sample text
-                        </span>
-                        <div className="flex gap-1 flex-shrink-0">
-                          <button className="w-7 h-7 rounded-[6px] border border-[var(--border)] bg-transparent text-[var(--text-muted)] cursor-pointer flex items-center justify-center hover:border-[#888] hover:text-[var(--text-primary)] hover:bg-[var(--accent-light)] transition-all">
-                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
-                            </svg>
-                          </button>
-                          <button
-                            onClick={() => handleDeleteHighlight(h.id)}
-                            className="w-7 h-7 rounded-[6px] border border-[var(--border)] bg-transparent text-[var(--text-muted)] cursor-pointer flex items-center justify-center hover:text-[#DC2626] hover:border-[#FECACA] hover:bg-[#FEF2F2] transition-all"
+                          <div
+                            className="w-7 h-7 rounded-[6px] flex-shrink-0 border border-black/[0.06] cursor-pointer hover:scale-110 transition-transform"
+                            style={{ background: h.bg }}
+                            onClick={() => setEditingHighlightId(editingHighlightId === h.id ? null : h.id)}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="text-[13.5px] font-medium mb-px">{h.name}</div>
+                            {h.description && (
+                              <div className="text-[11.5px] text-[var(--text-muted)]">{h.description}</div>
+                            )}
+                          </div>
+                          <span
+                            className="text-[12px] px-2.5 py-0.5 rounded font-medium flex-shrink-0"
+                            style={{ background: h.bg, color: h.color }}
                           >
-                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <polyline points="3 6 5 6 21 6" />
-                              <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6M10 11v6M14 11v6" />
-                            </svg>
-                          </button>
+                            sample text
+                          </span>
+                          <div className="flex gap-1 flex-shrink-0">
+                            <button
+                              onClick={() => setEditingHighlightId(editingHighlightId === h.id ? null : h.id)}
+                              className={`w-7 h-7 rounded-[6px] border bg-transparent cursor-pointer flex items-center justify-center transition-all ${
+                                editingHighlightId === h.id
+                                  ? "border-[var(--theme)] text-[var(--theme)]"
+                                  : "border-[var(--border)] text-[var(--text-muted)] hover:border-[#888] hover:text-[var(--text-primary)]"
+                              }`}
+                            >
+                              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={() => handleDeleteHighlight(h.id)}
+                              className="w-7 h-7 rounded-[6px] border border-[var(--border)] bg-transparent text-[var(--text-muted)] cursor-pointer flex items-center justify-center hover:text-[#DC2626] hover:border-[#FECACA] hover:bg-[#FEF2F2] transition-all"
+                            >
+                              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <polyline points="3 6 5 6 21 6" />
+                                <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6M10 11v6M14 11v6" />
+                              </svg>
+                            </button>
+                          </div>
                         </div>
+
+                        {/* Inline color editor */}
+                        {editingHighlightId === h.id && (
+                          <div className="mt-1 ml-10 p-3 bg-[var(--bg)] border border-[var(--border-subtle)] rounded-[8px] flex flex-col gap-2.5">
+                            {/* Name */}
+                            <div className="flex items-center gap-2">
+                              <label className="text-[11.5px] text-[var(--text-muted)] w-[80px] flex-shrink-0">Name</label>
+                              <input
+                                type="text"
+                                value={h.name}
+                                onChange={(e) => updateHighlight(h.id, { name: e.target.value })}
+                                className="flex-1 px-2.5 py-[5px] rounded-[6px] border border-[var(--border)] bg-[var(--surface)] text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--theme)] transition-colors"
+                              />
+                            </div>
+                            {/* Background color */}
+                            <div className="flex items-center gap-2">
+                              <label className="text-[11.5px] text-[var(--text-muted)] w-[80px] flex-shrink-0">Background</label>
+                              <div className="flex items-center gap-2 flex-1">
+                                <input
+                                  type="color"
+                                  value={h.bg}
+                                  onChange={(e) => updateHighlight(h.id, { bg: e.target.value })}
+                                  className="w-7 h-7 rounded-[4px] border border-[var(--border)] cursor-pointer p-0 bg-transparent"
+                                />
+                                <input
+                                  type="text"
+                                  value={h.bg}
+                                  onChange={(e) => updateHighlight(h.id, { bg: e.target.value })}
+                                  className="w-[90px] px-2 py-[5px] rounded-[6px] border border-[var(--border)] bg-[var(--surface)] text-[12px] text-[var(--text-secondary)] font-mono outline-none focus:border-[var(--theme)] transition-colors"
+                                />
+                              </div>
+                            </div>
+                            {/* Text color */}
+                            <div className="flex items-center gap-2">
+                              <label className="text-[11.5px] text-[var(--text-muted)] w-[80px] flex-shrink-0">Text color</label>
+                              <div className="flex items-center gap-2 flex-1">
+                                <input
+                                  type="color"
+                                  value={h.color}
+                                  onChange={(e) => updateHighlight(h.id, { color: e.target.value })}
+                                  className="w-7 h-7 rounded-[4px] border border-[var(--border)] cursor-pointer p-0 bg-transparent"
+                                />
+                                <input
+                                  type="text"
+                                  value={h.color}
+                                  onChange={(e) => updateHighlight(h.id, { color: e.target.value })}
+                                  className="w-[90px] px-2 py-[5px] rounded-[6px] border border-[var(--border)] bg-[var(--surface)] text-[12px] text-[var(--text-secondary)] font-mono outline-none focus:border-[var(--theme)] transition-colors"
+                                />
+                              </div>
+                            </div>
+                            {/* Preview */}
+                            <div className="flex items-center gap-2">
+                              <label className="text-[11.5px] text-[var(--text-muted)] w-[80px] flex-shrink-0">Preview</label>
+                              <span
+                                className="text-[13px] px-3 py-1 rounded-[5px] font-medium"
+                                style={{ background: h.bg, color: h.color }}
+                              >
+                                {h.name || "sample text"}
+                              </span>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -518,8 +593,8 @@ export function SettingsPage() {
                   {sectionHeader("General")}
 
                   {settingRow(
-                    "Show waveforms in library",
-                    "Display audio waveforms on song cards",
+                    "Show waveform in practice",
+                    "Display audio waveform visualization above the pitch curve",
                     toggle(showWaveforms, setShowWaveforms),
                   )}
 
