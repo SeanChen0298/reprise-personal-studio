@@ -101,7 +101,8 @@ export function buildSongFolder(title: string, artist: string): string {
   const folderName = sanitizeFolderName(
     artist ? `${title} - ${artist}` : title
   );
-  return `${REPRISE_ROOT}/${folderName}`;
+  const uniqueId = Date.now().toString(36);
+  return `${REPRISE_ROOT}/${folderName} [${uniqueId}]`;
 }
 
 /** Ensure the song folder exists, creating it if necessary */

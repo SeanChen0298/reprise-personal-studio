@@ -41,7 +41,7 @@ export async function analyzePitch(
     "    sr = 16000",
     "pitch, confidence = torchcrepe.predict(",
     "    audio, sr, hop_length=160, model='full',",
-    "    decoder=torchcrepe.decode.viterbi, batch_size=512,",
+    "    decoder=torchcrepe.decode.argmax, batch_size=512,",
     "    return_periodicity=True,",
     ")",
     "# Apply periodicity median filter before squeezing (requires 2D input)",
