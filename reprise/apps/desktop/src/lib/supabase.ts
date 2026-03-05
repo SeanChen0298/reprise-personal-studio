@@ -1,12 +1,12 @@
 import { createClient } from "@supabase/supabase-js";
+import type { Database } from "./database.types";
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.error(
-    "Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY in .env — check apps/desktop/.env"
-  );
+  throw new Error("Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY env vars");
 }
 
-export const supabase = createClient(supabaseUrl ?? "", supabaseAnonKey ?? "");
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey) as any;

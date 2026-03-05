@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { User, Session } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
+import { useSongStore } from "./song-store";
 
 interface AuthStore {
   user: User | null;
@@ -24,68 +25,54 @@ export const useAuthStore = create<AuthStore>((set) => ({
 
   initialize: async () => {
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      set({
-        session,
-        user: session?.user ?? null,
-        loading: false,
-      });
+      const { data: { session } } = await supabase.auth.getSession();
+      set({ session, user: session?.user ?? null, loading: false });
+
+      // If already logged in on app launch, load data immediately
+      if (session?.user) {
+        useSongStore.getState().loadAllData();
+      }
     } catch (err) {
       console.error("Failed to initialize auth:", err);
       set({ loading: false });
     }
 
-    supabase.auth.onAuthStateChange((_event, session) => {
-      set({
-        session,
-        user: session?.user ?? null,
-      });
+    supabase.auth.onAuthStateChange((_event: string, session: import("@supabase/supabase-js").Session | null) => {
+      set({ session, user: session?.user ?? null });
+
+      if (session?.user) {
+        // User just signed in — load their data
+        useSongStore.getState().loadAllData();
+      } else {
+        // User signed out — clear song data
+        useSongStore.getState().clearData();
+      }
     });
   },
 
   signInWithEmail: async (email, password) => {
     set({ error: null });
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (error) {
-      set({ error: error.message });
-      throw error;
-    }
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) { set({ error: error.message }); throw error; }
   },
 
   signUpWithEmail: async (email, password) => {
     set({ error: null });
     const { data, error } = await supabase.auth.signUp({ email, password });
-    if (error) {
-      set({ error: error.message });
-      throw error;
-    }
-    // session is null when email confirmation is required
+    if (error) { set({ error: error.message }); throw error; }
     return { needsConfirmation: !data.session };
   },
 
   signInWithGoogle: async () => {
     set({ error: null });
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-    });
-    if (error) {
-      set({ error: error.message });
-      throw error;
-    }
+    const { error } = await supabase.auth.signInWithOAuth({ provider: "google" });
+    if (error) { set({ error: error.message }); throw error; }
   },
 
   resetPassword: async (email) => {
     set({ error: null });
     const { error } = await supabase.auth.resetPasswordForEmail(email);
-    if (error) {
-      set({ error: error.message });
-      throw error;
-    }
+    if (error) { set({ error: error.message }); throw error; }
   },
 
   signOut: async () => {

@@ -65,7 +65,7 @@ export function AddSongPage() {
     if (!draft || !title.trim()) return;
     setSaving(true);
 
-    const song = addSong({
+    const song = await addSong({
       title: title.trim(),
       artist: artist.trim(),
       youtube_url: draft.metadata.youtube_url,
