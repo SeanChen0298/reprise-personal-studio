@@ -398,6 +398,7 @@ export async function fetchLyricsForLanguage(
     console.warn("[fetchLyrics] Cleanup error (non-fatal):", err);
   }
 
+  
   const args = [
     ...YT_DLP_BASE,
     "--write-subs",
