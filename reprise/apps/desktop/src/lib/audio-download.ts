@@ -469,14 +469,26 @@ export async function fetchLyricsForLanguage(
   return lyrics;
 }
 
-/** Separate a song's audio into vocals and instrumental using Demucs.
- *  Returns paths to the output WAV files. */
 export async function separateStems(
   audioPath: string,
   songFolder: string,
 ): Promise<{ vocalsPath: string; instrumentalPath: string }> {
-  // Demucs outputs to <outputDir>/htdemucs/<stem-name>/vocals.wav
-  // We use the song folder as output dir so stems stay with the song
+  
+  const audioFileName = audioPath.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "audio";
+  const stemDir = `${songFolder}/htdemucs/${audioFileName}`;
+  const vocalsPath = `${stemDir}/vocals.wav`;
+  const instrumentalPath = `${stemDir}/no_vocals.wav`;
+
+  // Skip if already done
+  const [vocalsExist, instExist] = await Promise.all([
+    exists(vocalsPath),
+    exists(instrumentalPath),
+  ]);
+  if (vocalsExist && instExist) {
+    console.log("[demucs] Stems already exist, skipping separation");
+    return { vocalsPath, instrumentalPath };
+  }
+
   const command = Command.create("python", [
     "-m", "demucs",
     "-n", "htdemucs",
@@ -488,7 +500,6 @@ export async function separateStems(
   const result = await spawnAndWait(command, "[demucs]");
 
   if (result.code !== 0) {
-    // Check for common errors
     if (result.stderr.includes("No module named 'demucs'")) {
       throw new Error("Demucs is not installed. Run: pip install demucs soundfile");
     }
@@ -498,23 +509,88 @@ export async function separateStems(
     throw new Error(result.stderr.split("\n").filter(Boolean).pop() || "Demucs separation failed");
   }
 
-  // Demucs names the output folder after the input filename (without extension)
-  const audioFileName = audioPath.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "audio";
-  const stemDir = `${songFolder}/htdemucs/${audioFileName}`;
-  const vocalsPath = `${stemDir}/vocals.wav`;
-  const instrumentalPath = `${stemDir}/no_vocals.wav`;
-
   // Verify output files exist
-  const [vocalsExist, instExist] = await Promise.all([
+  const [vocalsExist2, instExist2] = await Promise.all([
     exists(vocalsPath),
     exists(instrumentalPath),
   ]);
 
-  if (!vocalsExist || !instExist) {
+  if (!vocalsExist2 || !instExist2) {
     throw new Error("Demucs completed but output files were not found");
   }
 
   return { vocalsPath, instrumentalPath };
+}
+
+/** Separate a vocals stem into lead and backing vocals using audio-separator.
+ *  Expects vocalsPath from separateStems. Outputs lead.wav and backing.wav
+ *  into the same stem directory alongside the existing Demucs outputs. */
+export async function separateLeadAndBacking(
+  vocalsPath: string,
+): Promise<{ leadPath: string; backingPath: string }> {
+
+  // stemDir is the folder containing vocals.wav (same as Demucs output dir)
+  const stemDir = vocalsPath.substring(0, vocalsPath.lastIndexOf("/"));
+
+  const command = Command.create("python", [
+    "-c",
+    `
+from audio_separator.separator import Separator
+sep = Separator(output_dir=r"${stemDir}")
+sep.load_model("mel_band_roformer_karaoke_aufr33_viperx_sdr_10.1956.ckpt")
+files = sep.separate(r"${vocalsPath}")
+import os, shutil
+# audio-separator names outputs based on the model — rename to lead/backing
+for f in files:
+    low = f.lower()
+    if "instrumental" in low or "backing" in low or "karaoke" in low:
+        shutil.move(f, r"${stemDir}/backing.wav")
+    elif "vocals" in low or "lead" in low:
+        shutil.move(f, r"${stemDir}/lead.wav")
+`.trim(),
+  ]);
+
+  const result = await spawnAndWait(command, "[audio-separator]");
+
+  if (result.code !== 0) {
+    if (result.stderr.includes("No module named 'audio_separator'")) {
+      throw new Error("audio-separator is not installed. Run: pip install audio-separator");
+    }
+    throw new Error(
+      result.stderr.split("\n").filter(Boolean).pop() || "audio-separator separation failed"
+    );
+  }
+
+  const leadPath = `${stemDir}/lead.wav`;
+  const backingPath = `${stemDir}/backing.wav`;
+
+  const [leadExists, backingExists] = await Promise.all([
+    exists(leadPath),
+    exists(backingPath),
+  ]);
+
+  if (!leadExists || !backingExists) {
+    throw new Error("audio-separator completed but lead/backing files were not found");
+  }
+
+  return { leadPath, backingPath };
+}
+
+/** Check if audio-separator is installed via pip. Returns version string or null. */
+export async function checkAudioSeparatorInstalled(): Promise<string | null> {
+
+  // TODO: Use this in setting page to warn users if they want to use the lead/backing separation feature but don't have the dependency installed. Currently audio-separator is only used for an optional extra step after Demucs separation.
+  // We should build logic such that if audio-separator is not installed, we skip the lead/backing separation and just use the Demucs vocals output as the "vocals" path in the app, without showing any errors to the user. Then if they try to use the lead/backing feature, we can show a warning with instructions on how to install audio-separator.
+
+  try {
+    const command = Command.create("python", [
+      "-c", "import audio_separator; print(audio_separator.__version__)",
+    ]);
+    const result = await command.execute();
+    return result.code === 0 ? result.stdout.trim() || "installed" : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Check if yt-dlp is available on the system. Returns version string or null. */

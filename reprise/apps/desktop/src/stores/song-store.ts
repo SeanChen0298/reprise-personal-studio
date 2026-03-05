@@ -5,6 +5,7 @@ import {
   downloadAudio,
   buildSongFolder,
   separateStems,
+  separateLeadAndBacking,
 } from "../lib/audio-download";
 import { analyzePitch } from "../lib/audio-analysis";
 
@@ -186,10 +187,17 @@ export const useSongStore = create<SongStore>()(
 
         try {
           const result = await separateStems(song.audio_path, song.audio_folder);
+          const { leadPath } = await separateLeadAndBacking(result.vocalsPath);
 
+          // TODO: 
+          // const vocalsPath = settings.harmonicSeparation
+          //   ? (await separateLeadAndBacking(result.vocalsPath)).leadPath
+          //   : result.vocalsPath;
+
+          // TODO: Use backingPath in the app for features like isolated backing track playback, or even separate pitch analysis for lead vs backing vocals to help users identify harmony parts. For now we just store it and show it in the UI for users who want to explore it manually.
           get().updateSong(id, {
             stem_status: "done",
-            vocals_path: result.vocalsPath,
+            vocals_path: leadPath,
             instrumental_path: result.instrumentalPath,
           });
 
