@@ -523,6 +523,62 @@ export async function separateStems(
   return { vocalsPath, instrumentalPath };
 }
 
+/**
+ * List available subtitle languages for a YouTube video using yt-dlp --list-subs.
+ * Returns an array of language codes (e.g. ["en", "ja", "ko"]).
+ */
+export async function listSubtitleLanguages(youtubeUrl: string): Promise<string[]> {
+  const cleanUrl = sanitizeYouTubeUrl(youtubeUrl);
+  const args = [
+    ...YT_DLP_BASE,
+    "--list-subs",
+    "--skip-download",
+    cleanUrl,
+  ];
+
+  let command;
+  try {
+    command = import.meta.env.DEV
+      ? Command.create("yt-dlp", args)
+      : Command.sidecar("binaries/yt-dlp", args);
+  } catch (err) {
+    throw err;
+  }
+
+  const result = await spawnAndWait(command, "[listSubs]");
+
+  // yt-dlp exits non-zero for some videos even when subs are listed — check output too
+  if (result.code !== 0 && !result.stdout.trim()) {
+    if (isBotDetectionError(result.stderr)) {
+      throw new Error(COOKIES_EXPIRED_MESSAGE);
+    }
+    throw new Error(`Failed to list subtitles: ${result.stderr}`);
+  }
+
+  return parseSubtitleLanguageCodes(result.stdout + "\n" + result.stderr);
+}
+
+function parseSubtitleLanguageCodes(output: string): string[] {
+  const langs = new Set<string>();
+
+  for (const line of output.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    // Match lines that start with a language code pattern
+    const match = trimmed.match(/^([a-z]{2,3}(?:-[a-zA-Z0-9]+)*)\s+/);
+    if (!match) continue;
+
+    const code = match[1];
+    if (code === "live_chat") continue; // skip non-language entries
+    if (code.includes("-x-")) continue; // skip autogen variants
+
+    langs.add(code.includes("-") ? code.split("-")[0] : code);
+  }
+
+  return [...langs].sort();
+}
+
 /** Check if yt-dlp is available on the system. Returns version string or null. */
 export async function checkYtDlpInstalled(): Promise<string | null> {
   try {

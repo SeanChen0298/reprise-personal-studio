@@ -13,6 +13,7 @@ export interface Song {
   duration_ms?: number;
   bpm?: number;
   language?: string;
+  translation_language?: string;
   tags: string[];
   notes?: string;
   pinned: boolean;
@@ -49,6 +50,7 @@ export interface Line {
   start_ms?: number;
   end_ms?: number;
   status: LineStatus;
+  language?: string; // e.g. "en", "ja" — null/undefined means primary/legacy
   created_at: string;
   updated_at: string;
 }

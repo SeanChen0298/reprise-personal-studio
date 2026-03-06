@@ -5,6 +5,7 @@ import { AudioPlayer } from "../components/audio-player";
 import { useSongStore } from "../stores/song-store";
 import {
   fetchLyricsForLanguage,
+  listSubtitleLanguages,
   SUBTITLE_LANGUAGES,
   buildSongFolder,
 } from "../lib/audio-download";
@@ -17,7 +18,8 @@ export function LyricsInputPage() {
   const navigate = useNavigate();
   const song = useSongStore((s) => s.songs.find((s) => s.id === id));
   const storedLines = useSongStore((s) => (id ? s.lines[id] : undefined)) ?? [];
-  const setLines = useSongStore((s) => s.setLines);
+  const setLinesForLanguage = useSongStore((s) => s.setLinesForLanguage);
+  const updateSong = useSongStore((s) => s.updateSong);
   const sections = useSongStore((s) => (id ? s.sections[id] : undefined)) ?? [];
   const addSection = useSongStore((s) => s.addSection);
   const updateSection = useSongStore((s) => s.updateSection);
@@ -35,15 +37,19 @@ export function LyricsInputPage() {
   const [editSectionName, setEditSectionName] = useState("");
 
   // Language fetch state
-  const [lyricsLang, setLyricsLang] = useState<string>(
-    song?.language
-      ? SUBTITLE_LANGUAGES.find(
-          (l) => l.label.toLowerCase() === song.language?.toLowerCase()
-        )?.code ?? "en"
-      : "en"
-  );
+  const [lyricsLang, setLyricsLang] = useState<string>(song?.language ?? "en");
   const [fetching, setFetching] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
+
+  // Available subtitle languages (from yt-dlp --list-subs)
+  const [availableLangs, setAvailableLangs] = useState<string[] | null>(null);
+  const [checkingLangs, setCheckingLangs] = useState(false);
+  const [langCheckError, setLangCheckError] = useState<string | null>(null);
+
+  // Translation language + fetch state
+  const [translationLang, setTranslationLang] = useState<string>(song?.translation_language ?? "");
+  const [savingTranslation, setSavingTranslation] = useState(false);
+  const [translationSaveMsg, setTranslationSaveMsg] = useState<string | null>(null);
 
   // Map stored line ID -> stored order for section display
   const storedOrderById = useMemo(() => {
@@ -226,6 +232,51 @@ export function LyricsInputPage() {
     }
   }
 
+  async function handleCheckLanguages() {
+    if (!song?.youtube_url) return;
+    setCheckingLangs(true);
+    setLangCheckError(null);
+    try {
+      const langs = await listSubtitleLanguages(song.youtube_url);
+      setAvailableLangs(langs.length > 0 ? langs : null);
+      if (langs.length === 0) setLangCheckError("No subtitles found for this video.");
+    } catch (err) {
+      setLangCheckError(err instanceof Error ? err.message : "Failed to check languages");
+    } finally {
+      setCheckingLangs(false);
+    }
+  }
+
+  async function handleSaveTranslation() {
+    if (!song?.youtube_url || !translationLang || !id) return;
+    setSavingTranslation(true);
+    setTranslationSaveMsg(null);
+    try {
+      const songFolder = song.audio_folder ?? buildSongFolder(song.title, song.artist);
+      const timedLines = await fetchLyricsForLanguage(song.youtube_url, songFolder, translationLang);
+      const now = new Date().toISOString();
+      const newLines: Line[] = timedLines.map((tl, i) => ({
+        id: crypto.randomUUID(),
+        song_id: id,
+        text: tl.text,
+        language: translationLang,
+        order: i,
+        start_ms: tl.start_ms,
+        end_ms: tl.end_ms,
+        status: "not_started" as const,
+        created_at: now,
+        updated_at: now,
+      }));
+      await setLinesForLanguage(id, translationLang, newLines);
+      await updateSong(id, { translation_language: translationLang });
+      setTranslationSaveMsg(`${newLines.length} translation lines saved (${translationLang.toUpperCase()})`);
+    } catch (err) {
+      setTranslationSaveMsg(`Error: ${err instanceof Error ? err.message : "Failed"}`);
+    } finally {
+      setSavingTranslation(false);
+    }
+  }
+
   function handleSave() {
     const now = new Date().toISOString();
     const newLines: Line[] = editLines
@@ -238,6 +289,7 @@ export function LyricsInputPage() {
           id: l.id,
           song_id: id!,
           text: l.text.trim(),
+          language: lyricsLang || undefined,
           order: i,
           start_ms: l.start_ms ?? existing?.start_ms,
           end_ms: l.end_ms ?? existing?.end_ms,
@@ -247,7 +299,14 @@ export function LyricsInputPage() {
         };
       });
 
-    setLines(id!, newLines);
+    // Language-scoped save: preserves lines of other languages (e.g. translation),
+    // and replaces null-language legacy lines for backward compat.
+    setLinesForLanguage(id!, lyricsLang || null, newLines);
+
+    // Persist the primary language on the song if it changed
+    if (lyricsLang && lyricsLang !== song!.language) {
+      updateSong(id!, { language: lyricsLang });
+    }
 
     // Remap section boundaries to new line orders
     const newOrderById = new Map<string, number>();
@@ -337,54 +396,137 @@ export function LyricsInputPage() {
 
             {/* Import from YouTube section */}
             {song.youtube_url && (
-              <div className="flex items-center gap-2 p-3 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)] mb-5">
-                <div className="flex items-center gap-1.5 text-[12.5px] text-[var(--text-secondary)] flex-shrink-0">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
-                  </svg>
-                  Import from YouTube
-                </div>
-                <select
-                  value={lyricsLang}
-                  onChange={(e) => setLyricsLang(e.target.value)}
-                  className="px-2.5 py-[5px] rounded-[6px] border-[1.5px] border-[var(--border)] bg-[var(--bg)] text-[12.5px] text-[var(--text-primary)] font-sans outline-none focus:border-[var(--theme)] transition-colors cursor-pointer"
-                >
-                  {SUBTITLE_LANGUAGES.map((lang) => (
-                    <option key={lang.code} value={lang.code}>
-                      {lang.label}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  onClick={handleFetchLyrics}
-                  disabled={fetching}
-                  className="flex items-center gap-[5px] px-3 py-[5px] rounded-[6px] bg-[var(--accent)] text-white text-[12px] font-medium hover:opacity-80 transition-opacity disabled:opacity-50 flex-shrink-0"
-                >
-                  {fetching ? (
-                    <>
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin">
-                        <circle cx="12" cy="12" r="10" />
-                        <polyline points="12 6 12 12 16 14" />
-                      </svg>
-                      Fetching...
-                    </>
-                  ) : (
-                    <>
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <polyline points="23 4 23 10 17 10" />
-                        <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
-                      </svg>
-                      Fetch lyrics
-                    </>
+              <div className="flex flex-col gap-2 p-3 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)] mb-5">
+                {/* Row 1: main lyrics fetch */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-1.5 text-[12.5px] text-[var(--text-secondary)] flex-shrink-0">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
+                    </svg>
+                    Import from YouTube
+                  </div>
+                  <select
+                    value={lyricsLang}
+                    onChange={(e) => setLyricsLang(e.target.value)}
+                    className="px-2.5 py-[5px] rounded-[6px] border-[1.5px] border-[var(--border)] bg-[var(--bg)] text-[12.5px] text-[var(--text-primary)] font-sans outline-none focus:border-[var(--theme)] transition-colors cursor-pointer"
+                  >
+                    {(availableLangs ?? SUBTITLE_LANGUAGES.map((l) => l.code)).map((code) => {
+                      const label = SUBTITLE_LANGUAGES.find((l) => l.code === code)?.label ?? code.toUpperCase();
+                      return <option key={code} value={code}>{label}</option>;
+                    })}
+                  </select>
+                  <button
+                    onClick={handleFetchLyrics}
+                    disabled={fetching}
+                    className="flex items-center gap-[5px] px-3 py-[5px] rounded-[6px] bg-[var(--accent)] text-white text-[12px] font-medium hover:opacity-80 transition-opacity disabled:opacity-50 flex-shrink-0"
+                  >
+                    {fetching ? (
+                      <>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin">
+                          <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+                        </svg>
+                        Fetching...
+                      </>
+                    ) : (
+                      <>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
+                        </svg>
+                        Fetch lyrics
+                      </>
+                    )}
+                  </button>
+                  {/* Check available languages */}
+                  <button
+                    onClick={handleCheckLanguages}
+                    disabled={checkingLangs}
+                    title="Check which subtitle languages are available for this video"
+                    className="flex items-center gap-[5px] px-3 py-[5px] rounded-[6px] border border-[var(--border)] bg-transparent text-[12px] text-[var(--text-secondary)] hover:border-[#888] hover:text-[var(--text-primary)] transition-all disabled:opacity-50 flex-shrink-0"
+                  >
+                    {checkingLangs ? (
+                      <>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin">
+                          <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+                        </svg>
+                        Checking...
+                      </>
+                    ) : (
+                      <>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+                        </svg>
+                        {availableLangs ? `${availableLangs.length} langs` : "Check languages"}
+                      </>
+                    )}
+                  </button>
+                  {fetchError && (
+                    <span className="text-[11px] text-red-500 truncate" title={fetchError}>{fetchError}</span>
                   )}
-                </button>
-                {fetchError && (
-                  <span className="text-[11px] text-red-500 ml-1 truncate" title={fetchError}>
-                    {fetchError}
-                  </span>
-                )}
+                  {langCheckError && (
+                    <span className="text-[11px] text-red-500 truncate" title={langCheckError}>{langCheckError}</span>
+                  )}
+                </div>
+
+                {/* Row 2: translation fetch */}
+                <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-[var(--border-subtle)]">
+                  <span className="text-[12px] text-[var(--text-muted)] flex-shrink-0">Translation (optional):</span>
+                  <select
+                    value={translationLang}
+                    onChange={(e) => setTranslationLang(e.target.value)}
+                    className="px-2.5 py-[5px] rounded-[6px] border-[1.5px] border-[var(--border)] bg-[var(--bg)] text-[12.5px] text-[var(--text-primary)] font-sans outline-none focus:border-[var(--theme)] transition-colors cursor-pointer"
+                  >
+                    <option value="">— none —</option>
+                    {(availableLangs ?? SUBTITLE_LANGUAGES.map((l) => l.code)).map((code) => {
+                      const label = SUBTITLE_LANGUAGES.find((l) => l.code === code)?.label ?? code.toUpperCase();
+                      return <option key={code} value={code}>{label}</option>;
+                    })}
+                  </select>
+                  <button
+                    onClick={handleSaveTranslation}
+                    disabled={!translationLang || savingTranslation}
+                    className="flex items-center gap-[5px] px-3 py-[5px] rounded-[6px] border border-[var(--border)] bg-transparent text-[12px] text-[var(--text-secondary)] hover:border-[#888] hover:text-[var(--text-primary)] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
+                  >
+                    {savingTranslation ? (
+                      <>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin">
+                          <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+                        </svg>
+                        Saving...
+                      </>
+                    ) : (
+                      <>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        Fetch &amp; Save Translation
+                      </>
+                    )}
+                  </button>
+                  {translationSaveMsg && (
+                    <span
+                      className={`text-[11px] truncate ${translationSaveMsg.startsWith("Error") ? "text-red-500" : "text-green-600"}`}
+                      title={translationSaveMsg}
+                    >
+                      {translationSaveMsg}
+                    </span>
+                  )}
+                </div>
               </div>
             )}
+
+            {/* Language selector (applies to all save modes) */}
+            <div className="flex items-center gap-2 mb-4">
+              <span className="text-[12px] text-[var(--text-muted)]">Language:</span>
+              <select
+                value={lyricsLang}
+                onChange={(e) => setLyricsLang(e.target.value)}
+                className="px-2 py-[4px] rounded-[6px] border-[1.5px] border-[var(--border)] bg-[var(--bg)] text-[12px] text-[var(--text-primary)] font-sans outline-none focus:border-[var(--theme)] transition-colors cursor-pointer"
+              >
+                {SUBTITLE_LANGUAGES.map((lang) => (
+                  <option key={lang.code} value={lang.code}>{lang.label}</option>
+                ))}
+              </select>
+            </div>
 
             {/* Mode tabs */}
             <div className="flex gap-0 border-b border-[var(--border)] mb-5">

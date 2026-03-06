@@ -23,6 +23,7 @@ interface RecordingScope {
 
 interface Props {
   lines: Line[];
+  translationLines?: Line[];
   activeLineIndex: number;
   player: UseLinePlayerReturn;
   songId: string;
@@ -40,7 +41,7 @@ interface Props {
 }
 
 export function PracticeCenter({
-  lines, activeLineIndex, player, songId, songFolder, bpm, inputDeviceId,
+  lines, translationLines, activeLineIndex, player, songId, songFolder, bpm, inputDeviceId,
   pitchDataPath, canAnalyzePitch, activeSection, recordingSection,
   loopRange, skipCountdown, recordThrough,
   onEditModeChange,
@@ -57,6 +58,14 @@ export function PracticeCenter({
   const currentLine = lines[activeLineIndex];
   const prevLine = lines[activeLineIndex - 1];
   const nextLineData = lines[activeLineIndex + 1];
+
+  // Translation support
+  const [showTranslation, setShowTranslation] = useState(true);
+  const translationByOrder = useMemo(() => {
+    if (!translationLines || translationLines.length === 0) return new Map<number, string>();
+    return new Map(translationLines.map((l) => [l.order, l.text]));
+  }, [translationLines]);
+  const hasTranslation = translationByOrder.size > 0;
 
   // Lines within the active section
   const sectionLines = useMemo(() => {
@@ -639,22 +648,28 @@ export function PracticeCenter({
               }
 
               return (
-                <div
-                  key={line.id}
-                  className={`font-serif tracking-[-0.3px] leading-[1.4] transition-all duration-200 cursor-pointer ${
-                    isActive
-                      ? "text-[28px] text-[var(--text-primary)] hover:text-[var(--theme)]"
-                      : "text-[20px] text-[var(--text-muted)] opacity-40 hover:opacity-70"
-                  }`}
-                  onClick={() => player.playLineOnce(lineIdx)}
-                  onDoubleClick={isActive ? (e) => { e.stopPropagation(); enterEditMode(); } : undefined}
-                  title={isActive ? "Click to preview · Double-click to edit" : "Click to preview this line"}
-                >
-                  <AnnotatedText
-                    text={lineDisplay}
-                    annotations={line.annotations}
-                    highlights={highlights}
-                  />
+                <div key={line.id}>
+                  <div
+                    className={`font-serif tracking-[-0.3px] leading-[1.4] transition-all duration-200 cursor-pointer ${
+                      isActive
+                        ? "text-[28px] text-[var(--text-primary)] hover:text-[var(--theme)]"
+                        : "text-[20px] text-[var(--text-muted)] opacity-40 hover:opacity-70"
+                    }`}
+                    onClick={() => player.playLineOnce(lineIdx)}
+                    onDoubleClick={isActive ? (e) => { e.stopPropagation(); enterEditMode(); } : undefined}
+                    title={isActive ? "Click to preview · Double-click to edit" : "Click to preview this line"}
+                  >
+                    <AnnotatedText
+                      text={lineDisplay}
+                      annotations={line.annotations}
+                      highlights={highlights}
+                    />
+                  </div>
+                  {showTranslation && translationByOrder.has(line.order) && (
+                    <div className={`font-sans leading-relaxed text-[var(--text-muted)] ${isActive ? "text-[14px] opacity-65 mt-1" : "text-[12px] opacity-40 mt-0.5"}`}>
+                      {translationByOrder.get(line.order)}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -691,22 +706,44 @@ export function PracticeCenter({
                 </svg>
               </button>
             )}
+            {hasTranslation && (
+              <button
+                onClick={() => setShowTranslation((v) => !v)}
+                title={showTranslation ? "Hide translation" : "Show translation"}
+                className={`w-6 h-6 rounded-[5px] border bg-transparent cursor-pointer flex items-center justify-center transition-all ${
+                  showTranslation
+                    ? "border-[var(--theme)] text-[var(--theme-text)]"
+                    : "border-[var(--border)] text-[var(--text-muted)] hover:border-[#888] hover:text-[var(--text-primary)]"
+                }`}
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M5 8l6 6 6-6" />
+                </svg>
+              </button>
+            )}
           </div>
         </div>
       ) : (
         <>
           <div
-            className={`font-serif text-[20px] tracking-[-0.3px] text-[var(--text-muted)] text-center max-w-[600px] leading-relaxed opacity-35 my-[6px] ${prevLine ? "cursor-pointer hover:opacity-60 transition-opacity" : ""}`}
+            className={`text-center max-w-[600px] my-[6px] opacity-35 ${prevLine ? "cursor-pointer hover:opacity-60 transition-opacity" : ""}`}
             onClick={() => prevLine && player.playLineOnce(activeLineIndex - 1)}
             title={prevLine ? "Click to preview this line" : undefined}
           >
-            {prevLine ? (
-              <AnnotatedText
-                text={prevLine.custom_text ?? prevLine.text}
-                annotations={prevLine.annotations}
-                highlights={highlights}
-              />
-            ) : "\u00A0"}
+            <div className="font-serif text-[20px] tracking-[-0.3px] text-[var(--text-muted)] leading-relaxed">
+              {prevLine ? (
+                <AnnotatedText
+                  text={prevLine.custom_text ?? prevLine.text}
+                  annotations={prevLine.annotations}
+                  highlights={highlights}
+                />
+              ) : "\u00A0"}
+            </div>
+            {prevLine && showTranslation && translationByOrder.has(prevLine.order) && (
+              <div className="text-[13px] text-[var(--text-muted)] font-sans leading-relaxed mt-0.5">
+                {translationByOrder.get(prevLine.order)}
+              </div>
+            )}
           </div>
 
           <div key={activeLineIndex} className="text-center my-5 animate-fade-up">
@@ -781,6 +818,11 @@ export function PracticeCenter({
                     highlights={highlights}
                   />
                 </div>
+                {showTranslation && translationByOrder.has(currentLine.order) && (
+                  <div className="text-[15px] text-[var(--text-muted)] font-sans leading-relaxed mt-2 opacity-70">
+                    {translationByOrder.get(currentLine.order)}
+                  </div>
+                )}
               </>
             )}
             <div className="flex items-center justify-center gap-3 mt-[10px]">
@@ -815,21 +857,43 @@ export function PracticeCenter({
                   </svg>
                 </button>
               )}
+              {hasTranslation && (
+                <button
+                  onClick={() => setShowTranslation((v) => !v)}
+                  title={showTranslation ? "Hide translation" : "Show translation"}
+                  className={`w-6 h-6 rounded-[5px] border bg-transparent cursor-pointer flex items-center justify-center transition-all ${
+                    showTranslation
+                      ? "border-[var(--theme)] text-[var(--theme-text)]"
+                      : "border-[var(--border)] text-[var(--text-muted)] hover:border-[#888] hover:text-[var(--text-primary)]"
+                  }`}
+                >
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M5 8l6 6 6-6" />
+                  </svg>
+                </button>
+              )}
             </div>
           </div>
 
           <div
-            className={`font-serif text-[20px] tracking-[-0.3px] text-[var(--text-muted)] text-center max-w-[600px] leading-relaxed opacity-50 my-[6px] ${nextLineData ? "cursor-pointer hover:opacity-75 transition-opacity" : ""}`}
+            className={`text-center max-w-[600px] my-[6px] opacity-50 ${nextLineData ? "cursor-pointer hover:opacity-75 transition-opacity" : ""}`}
             onClick={() => nextLineData && player.playLineOnce(activeLineIndex + 1)}
             title={nextLineData ? "Click to preview this line" : undefined}
           >
-            {nextLineData ? (
-              <AnnotatedText
-                text={nextLineData.custom_text ?? nextLineData.text}
-                annotations={nextLineData.annotations}
-                highlights={highlights}
-              />
-            ) : "\u00A0"}
+            <div className="font-serif text-[20px] tracking-[-0.3px] text-[var(--text-muted)] leading-relaxed">
+              {nextLineData ? (
+                <AnnotatedText
+                  text={nextLineData.custom_text ?? nextLineData.text}
+                  annotations={nextLineData.annotations}
+                  highlights={highlights}
+                />
+              ) : "\u00A0"}
+            </div>
+            {nextLineData && showTranslation && translationByOrder.has(nextLineData.order) && (
+              <div className="text-[13px] text-[var(--text-muted)] font-sans leading-relaxed mt-0.5">
+                {translationByOrder.get(nextLineData.order)}
+              </div>
+            )}
           </div>
         </>
       )}

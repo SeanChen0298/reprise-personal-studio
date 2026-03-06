@@ -57,6 +57,9 @@ interface SongStore {
 
   // Lines management
   setLines: (songId: string, lines: Line[]) => Promise<void>;
+  /** Replace only lines matching `language` (or null-language legacy lines when language is null).
+   *  Lines of other languages are preserved. */
+  setLinesForLanguage: (songId: string, language: string | null, lines: Line[]) => Promise<void>;
   addLine: (songId: string, text: string, order: number) => Promise<void>;
   updateLine: (songId: string, lineId: string, data: Partial<Line>) => Promise<void>;
   removeLine: (songId: string, lineId: string) => Promise<void>;
@@ -364,6 +367,48 @@ export const useSongStore = create<SongStore>()((set, get) => ({
     }
   },
 
+  setLinesForLanguage: async (songId, language, lines) => {
+    const userId = await getUserId();
+
+    // Optimistic: keep lines of OTHER languages, replace matching-language lines
+    set((s) => ({
+      lines: {
+        ...s.lines,
+        [songId]: [
+          ...(s.lines[songId] ?? []).filter(
+            (l) => l.language != null && l.language !== language
+          ),
+          ...lines,
+        ],
+      },
+    }));
+
+    // Delete: lines matching this language + null-language legacy lines (both treated as primary)
+    const orFilter = language
+      ? `language.eq.${language},language.is.null`
+      : `language.is.null`;
+    const { error: delError } = await db
+      .from("lines")
+      .delete()
+      .eq("song_id", songId)
+      .or(orFilter);
+
+    if (delError) {
+      await get().loadAllData();
+      throw delError;
+    }
+
+    if (lines.length > 0) {
+      const { error: insError } = await db
+        .from("lines")
+        .insert(lines.map((l) => lineToDbRow(l, userId)));
+      if (insError) {
+        await get().loadAllData();
+        throw insError;
+      }
+    }
+  },
+
   addLine: async (songId, text, order) => {
     const userId = await getUserId();
     const now = new Date().toISOString();
@@ -619,6 +664,7 @@ function dbRowToSong(row: Record<string, unknown>): Song {
     duration_ms: row.duration_ms as number | undefined,
     bpm: row.bpm as number | undefined,
     language: row.language as string | undefined,
+    translation_language: row.translation_language as string | undefined,
     tags: (row.tags as string[]) ?? [],
     notes: row.notes as string | undefined,
     pinned: row.pinned as boolean,
@@ -651,6 +697,7 @@ function songToDbRow(song: Song): Record<string, unknown> {
     duration_ms: song.duration_ms ?? null,
     bpm: song.bpm ?? null,
     language: song.language ?? null,
+    translation_language: song.translation_language ?? null,
     tags: song.tags,
     notes: song.notes ?? null,
     pinned: song.pinned,
@@ -684,6 +731,7 @@ function dbRowToLine(row: Record<string, unknown>): Line {
     start_ms: row.start_ms as number | undefined,
     end_ms: row.end_ms as number | undefined,
     status: row.status as LineStatus,
+    language: row.language as string | undefined,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -701,6 +749,7 @@ function lineToDbRow(line: Line, userId: string): Record<string, unknown> {
     start_ms: line.start_ms ?? null,
     end_ms: line.end_ms ?? null,
     status: line.status,
+    language: line.language ?? null,
     created_at: line.created_at,
     updated_at: line.updated_at,
   };
