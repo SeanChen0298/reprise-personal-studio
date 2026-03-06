@@ -191,8 +191,10 @@ export async function downloadAudio(
   ];
   console.log("[downloadAudio] Subtitle pass args:", subArgs);
   try {
-    const subCommand = Command.create("binaries/yt-dlp", subArgs);
-    console.log("[downloadAudio] Command.create succeeded for subtitles");
+    const subCommand = import.meta.env.DEV
+      ? Command.create("yt-dlp", subArgs)        // dev: uses system yt-dlp
+      : Command.sidecar("binaries/yt-dlp", subArgs);  // prod: uses bundled sidecar
+    console.log("[downloadAudio] Command.sidecar succeeded for subtitles");
     const subResult = await spawnAndWait(subCommand, "[downloadAudio][sub]");
     console.log("[downloadAudio] Subtitle pass done, code:", subResult.code);
   } catch (err) {
@@ -215,10 +217,12 @@ export async function downloadAudio(
 
   let audioCommand;
   try {
-    audioCommand = Command.create("binaries/yt-dlp", audioArgs);
-    console.log("[downloadAudio] Command.create succeeded for audio");
+    audioCommand = import.meta.env.DEV
+      ? Command.create("yt-dlp", audioArgs)        // dev: uses system yt-dlp
+      : Command.sidecar("binaries/yt-dlp", audioArgs);  // prod: uses bundled sidecar
+    console.log("[downloadAudio] Command.sidecar succeeded for audio");
   } catch (err) {
-    console.error("[downloadAudio] Command.create FAILED for audio:", err);
+    console.error("[downloadAudio] Command.sidecar FAILED for audio:", err);
     throw err;
   }
 
@@ -415,10 +419,12 @@ export async function fetchLyricsForLanguage(
 
   let command;
   try {
-    command = Command.create("binaries/yt-dlp", args);
-    console.log("[fetchLyrics] Command.create succeeded");
+    command = import.meta.env.DEV
+      ? Command.create("yt-dlp", args)        // dev: uses system yt-dlp
+      : Command.sidecar("binaries/yt-dlp", args);  // prod: uses bundled sidecar
+    console.log("[fetchLyrics] Command.sidecar succeeded");
   } catch (err) {
-    console.error("[fetchLyrics] Command.create FAILED:", err);
+    console.error("[fetchLyrics] Command.sidecar FAILED:", err);
     throw err;
   }
 
@@ -520,7 +526,9 @@ export async function separateStems(
 /** Check if yt-dlp is available on the system. Returns version string or null. */
 export async function checkYtDlpInstalled(): Promise<string | null> {
   try {
-    const command = Command.create("binaries/yt-dlp", ["--version"]);
+    const command = import.meta.env.DEV
+      ? Command.create("yt-dlp", ["--version"])        // dev: uses system yt-dlp
+      : Command.sidecar("binaries/yt-dlp", ["--version"]);  // prod: uses bundled sidecar
     const result = await command.execute();
     return result.code === 0 ? result.stdout.trim() : null;
   } catch {
