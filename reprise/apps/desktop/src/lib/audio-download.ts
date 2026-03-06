@@ -191,7 +191,7 @@ export async function downloadAudio(
   ];
   console.log("[downloadAudio] Subtitle pass args:", subArgs);
   try {
-    const subCommand = Command.create("yt-dlp", subArgs);
+    const subCommand = Command.create("binaries/yt-dlp", subArgs);
     console.log("[downloadAudio] Command.create succeeded for subtitles");
     const subResult = await spawnAndWait(subCommand, "[downloadAudio][sub]");
     console.log("[downloadAudio] Subtitle pass done, code:", subResult.code);
@@ -215,7 +215,7 @@ export async function downloadAudio(
 
   let audioCommand;
   try {
-    audioCommand = Command.create("yt-dlp", audioArgs);
+    audioCommand = Command.create("binaries/yt-dlp", audioArgs);
     console.log("[downloadAudio] Command.create succeeded for audio");
   } catch (err) {
     console.error("[downloadAudio] Command.create FAILED for audio:", err);
@@ -415,7 +415,7 @@ export async function fetchLyricsForLanguage(
 
   let command;
   try {
-    command = Command.create("yt-dlp", args);
+    command = Command.create("binaries/yt-dlp", args);
     console.log("[fetchLyrics] Command.create succeeded");
   } catch (err) {
     console.error("[fetchLyrics] Command.create FAILED:", err);
@@ -520,7 +520,7 @@ export async function separateStems(
 /** Check if yt-dlp is available on the system. Returns version string or null. */
 export async function checkYtDlpInstalled(): Promise<string | null> {
   try {
-    const command = Command.create("yt-dlp", ["--version"]);
+    const command = Command.create("binaries/yt-dlp", ["--version"]);
     const result = await command.execute();
     return result.code === 0 ? result.stdout.trim() : null;
   } catch {
