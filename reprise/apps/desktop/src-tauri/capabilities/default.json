@@ -19,7 +19,7 @@
           "name": "yt-dlp",
           "cmd": "yt-dlp",
           "args": true,
-          "sidecar": false
+          "sidecar": true
         },
         {
           "name": "python",
@@ -42,7 +42,7 @@
           "name": "yt-dlp",
           "cmd": "yt-dlp",
           "args": true,
-          "sidecar": false
+          "sidecar": true
         },
         {
           "name": "python",
