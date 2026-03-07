@@ -573,7 +573,7 @@ function parseSubtitleLanguageCodes(output: string): string[] {
     if (code === "live_chat") continue; // skip non-language entries
     if (code.includes("-x-")) continue; // skip autogen variants
 
-    langs.add(code.includes("-") ? code.split("-")[0] : code);
+    langs.add(code);
   }
 
   return [...langs].sort();

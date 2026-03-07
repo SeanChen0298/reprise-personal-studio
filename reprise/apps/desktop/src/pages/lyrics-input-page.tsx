@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Sidebar } from "../components/sidebar";
 import { AudioPlayer } from "../components/audio-player";
@@ -13,17 +13,31 @@ import type { Line, Section } from "../types/song";
 
 type Mode = "lines" | "bulk";
 
+/** Resolve a BCP-47 language code to a display name using the browser's Intl API */
+function getLangLabel(code: string): string {
+  try {
+    const dn = new Intl.DisplayNames(["en"], { type: "language" });
+    const name = dn.of(code);
+    if (name && name !== code) return name;
+  } catch {
+    // Intl.DisplayNames not supported or invalid code
+  }
+  return code;
+}
+
 export function LyricsInputPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const song = useSongStore((s) => s.songs.find((s) => s.id === id));
-  const storedLines = useSongStore((s) => (id ? s.lines[id] : undefined)) ?? [];
+  const rawLinesForSong = useSongStore((s) => (id ? s.lines[id] : undefined));
+  const storedLines = rawLinesForSong ?? [];
   const setLinesForLanguage = useSongStore((s) => s.setLinesForLanguage);
   const updateSong = useSongStore((s) => s.updateSong);
   const sections = useSongStore((s) => (id ? s.sections[id] : undefined)) ?? [];
   const addSection = useSongStore((s) => s.addSection);
   const updateSection = useSongStore((s) => s.updateSection);
   const removeSection = useSongStore((s) => s.removeSection);
+  const removeLine = useSongStore((s) => s.removeLine);
 
   const [mode, setMode] = useState<Mode>("lines");
   const [editLines, setEditLines] = useState<{ id: string; text: string; start_ms?: number; end_ms?: number }[]>([]);
@@ -84,18 +98,47 @@ export function LyricsInputPage() {
     return set;
   }, [sections, editLines, storedOrderById]);
 
-  // Initialize from stored lines
+  // Main-language lines only (exclude translation lines)
+  const mainStoredLines = useMemo(() => {
+    const mainLang = song?.language;
+    return storedLines
+      .filter((l) => !mainLang || !l.language || l.language === mainLang)
+      .sort((a, b) => a.order - b.order);
+  }, [storedLines, song?.language]);
+
+  // Translation lines (read-only in the editor)
+  const translationStoredLines = useMemo(() => {
+    const transLang = song?.translation_language;
+    if (!transLang) return [];
+    return storedLines
+      .filter((l) => l.language === transLang)
+      .sort((a, b) => a.order - b.order);
+  }, [storedLines, song?.translation_language]);
+
+  // Map from edit-line index → translation text (matched by position)
+  const translationByEditIndex = useMemo(() => {
+    const map = new Map<number, string>();
+    for (let i = 0; i < translationStoredLines.length; i++) {
+      map.set(i, translationStoredLines[i].text);
+    }
+    return map;
+  }, [translationStoredLines]);
+
+  // Initialize editLines from mainStoredLines the first time real data arrives.
+  // Uses a ref so in-progress edits aren't overwritten by later store updates.
+  const initializedRef = useRef(false);
   useEffect(() => {
-    if (storedLines.length > 0) {
+    if (initializedRef.current) return;
+    if (rawLinesForSong === undefined) return; // store not yet loaded
+    initializedRef.current = true;
+    if (mainStoredLines.length > 0) {
       setEditLines(
-        storedLines
-          .sort((a, b) => a.order - b.order)
-          .map((l) => ({ id: l.id, text: l.text }))
+        mainStoredLines.map((l) => ({ id: l.id, text: l.text, start_ms: l.start_ms, end_ms: l.end_ms }))
       );
     } else {
       setEditLines([{ id: crypto.randomUUID(), text: "" }]);
     }
-  }, []);
+  }, [rawLinesForSong, mainStoredLines]);
 
   if (!song || !id) {
     return (
@@ -125,6 +168,14 @@ export function LyricsInputPage() {
   }
 
   function handleDeleteLine(index: number) {
+    // Cascade: remove matching translation line by stored order
+    if (id && song?.translation_language) {
+      const deletedOrder = storedOrderById.get(editLines[index]?.id ?? "");
+      if (deletedOrder != null) {
+        const transLine = translationStoredLines.find((l) => l.order === deletedOrder);
+        if (transLine) removeLine(id, transLine.id);
+      }
+    }
     setEditLines((prev) => {
       if (prev.length <= 1) return [{ id: crypto.randomUUID(), text: "" }];
       return prev.filter((_, i) => i !== index);
@@ -132,6 +183,14 @@ export function LyricsInputPage() {
   }
 
   function handleMergeWithNext(index: number) {
+    // Cascade: remove translation for the line being merged away (index + 1)
+    if (id && song?.translation_language) {
+      const mergedAwayOrder = storedOrderById.get(editLines[index + 1]?.id ?? "");
+      if (mergedAwayOrder != null) {
+        const transLine = translationStoredLines.find((l) => l.order === mergedAwayOrder);
+        if (transLine) removeLine(id, transLine.id);
+      }
+    }
     setEditLines((prev) => {
       if (index >= prev.length - 1) return prev;
       const current = prev[index];
@@ -411,7 +470,7 @@ export function LyricsInputPage() {
                     className="px-2.5 py-[5px] rounded-[6px] border-[1.5px] border-[var(--border)] bg-[var(--bg)] text-[12.5px] text-[var(--text-primary)] font-sans outline-none focus:border-[var(--theme)] transition-colors cursor-pointer"
                   >
                     {(availableLangs ?? SUBTITLE_LANGUAGES.map((l) => l.code)).map((code) => {
-                      const label = SUBTITLE_LANGUAGES.find((l) => l.code === code)?.label ?? code.toUpperCase();
+                      const label = SUBTITLE_LANGUAGES.find((l) => l.code === code)?.label ?? getLangLabel(code);
                       return <option key={code} value={code}>{label}</option>;
                     })}
                   </select>
@@ -477,7 +536,7 @@ export function LyricsInputPage() {
                   >
                     <option value="">— none —</option>
                     {(availableLangs ?? SUBTITLE_LANGUAGES.map((l) => l.code)).map((code) => {
-                      const label = SUBTITLE_LANGUAGES.find((l) => l.code === code)?.label ?? code.toUpperCase();
+                      const label = SUBTITLE_LANGUAGES.find((l) => l.code === code)?.label ?? getLangLabel(code);
                       return <option key={code} value={code}>{label}</option>;
                     })}
                   </select>
@@ -723,6 +782,18 @@ export function LyricsInputPage() {
                             </button>
                           </div>
                         </div>
+
+                        {/* Read-only translation line */}
+                        {translationByEditIndex.has(i) && (
+                          <div className="flex items-center gap-2 px-3 py-[5px] ml-[34px] rounded-b-[7px] bg-[var(--bg)] border border-t-0 border-[var(--border-subtle)]">
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-[var(--text-muted)] flex-shrink-0 opacity-50">
+                              <path d="M5 8l10 0M5 12l6 0" /><rect x="3" y="4" width="18" height="16" rx="2" />
+                            </svg>
+                            <span className="text-[12px] text-[var(--text-muted)] italic leading-snug">
+                              {translationByEditIndex.get(i)}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
