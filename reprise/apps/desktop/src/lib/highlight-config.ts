@@ -25,6 +25,7 @@ interface HighlightStore {
   addHighlight: (name: string) => void;
   updateHighlight: (id: string, updates: Partial<Pick<HighlightType, "name" | "bg" | "color">>) => void;
   removeHighlight: (id: string) => void;
+  setHighlights: (highlights: HighlightType[]) => void;
 }
 
 export const useHighlightStore = create<HighlightStore>()(
@@ -56,6 +57,8 @@ export const useHighlightStore = create<HighlightStore>()(
       removeHighlight: (id: string) => {
         set((s) => ({ highlights: s.highlights.filter((h) => h.id !== id) }));
       },
+
+      setHighlights: (highlights) => set({ highlights }),
     }),
     { name: "reprise-highlights" }
   )

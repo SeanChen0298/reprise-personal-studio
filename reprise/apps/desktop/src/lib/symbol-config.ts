@@ -18,6 +18,7 @@ interface SymbolStore {
   symbols: VocalSymbol[];
   addSymbol: (label: string, char: string) => void;
   removeSymbol: (id: string) => void;
+  setSymbols: (symbols: VocalSymbol[]) => void;
 }
 
 export const useSymbolStore = create<SymbolStore>()(
@@ -37,6 +38,8 @@ export const useSymbolStore = create<SymbolStore>()(
       removeSymbol: (id: string) => {
         set((s) => ({ symbols: s.symbols.filter((sym) => sym.id !== id) }));
       },
+
+      setSymbols: (symbols) => set({ symbols }),
     }),
     { name: "reprise-symbols" }
   )

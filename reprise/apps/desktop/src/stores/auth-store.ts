@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { User, Session } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 import { useSongStore } from "./song-store";
+import { loadPreferences, startPrefSync, stopPrefSync } from "../lib/sync-preferences";
 
 interface AuthStore {
   user: User | null;
@@ -31,6 +32,8 @@ export const useAuthStore = create<AuthStore>((set) => ({
       // If already logged in on app launch, load data immediately
       if (session?.user) {
         useSongStore.getState().loadAllData();
+        await loadPreferences(session.user.id);
+        startPrefSync(session.user.id);
       }
     } catch (err) {
       console.error("Failed to initialize auth:", err);
@@ -43,9 +46,11 @@ export const useAuthStore = create<AuthStore>((set) => ({
       if (session?.user) {
         // User just signed in — load their data
         useSongStore.getState().loadAllData();
+        loadPreferences(session.user.id).then(() => startPrefSync(session.user.id));
       } else {
-        // User signed out — clear song data
+        // User signed out — clear song data and stop syncing preferences
         useSongStore.getState().clearData();
+        stopPrefSync();
       }
     });
   },
@@ -76,6 +81,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
   },
 
   signOut: async () => {
+    stopPrefSync();
     await supabase.auth.signOut();
     set({ user: null, session: null });
   },

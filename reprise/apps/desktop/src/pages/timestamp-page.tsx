@@ -6,6 +6,7 @@ import { FullWaveform } from "../components/full-waveform";
 import { useSongStore } from "../stores/song-store";
 import { useWaveformData } from "../hooks/use-waveform-data";
 import { formatMs } from "../lib/status-config";
+import type { Line } from "../types/song";
 
 /** Local working copy of a line's timestamps (before saving) */
 interface TimestampEntry {
@@ -24,6 +25,8 @@ interface UndoAction {
   prevEndMs: number | undefined;
   /** Index of the previous line (-1 if none) */
   prevLineIndex: number;
+  /** If a [Music] line was inserted, its ID — present on undo to remove it */
+  insertedMusicLineId?: string;
 }
 
 function formatSeconds(sec: number): string {
@@ -66,10 +69,15 @@ export function TimestampPage() {
   const navigate = useNavigate();
   const song = useSongStore((s) => s.songs.find((s) => s.id === id));
   const rawLines = useSongStore((s) => (id ? s.lines[id] : undefined));
-  const updateLine = useSongStore((s) => s.updateLine);
+  const setLinesStore = useSongStore((s) => s.setLines);
   const lines = useMemo(
-    () => (rawLines ? [...rawLines].sort((a, b) => a.order - b.order) : []),
-    [rawLines],
+    () =>
+      rawLines
+        ? [...rawLines]
+            .filter((l) => !song?.translation_language || l.language !== song.translation_language)
+            .sort((a, b) => a.order - b.order)
+        : [],
+    [rawLines, song?.translation_language],
   );
 
   // Audio
@@ -79,6 +87,8 @@ export function TimestampPage() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
 
+  // Local lines — working copy; can include locally-inserted [Music] lines not yet in DB
+  const [localLines, setLocalLines] = useState<Line[]>([]);
   // Local timestamps (working copy — saved on "Save")
   const [timestamps, setTimestamps] = useState<TimestampEntry[]>([]);
   const [currentIdx, setCurrentIdx] = useState(0);
@@ -99,9 +109,10 @@ export function TimestampPage() {
     );
   }, [isPlaying, currentTime, timestamps]);
 
-  // Initialize timestamps from existing line data
+  // Initialize local lines and timestamps from existing line data
   useEffect(() => {
     if (lines.length === 0) return;
+    setLocalLines(lines);
     const entries: TimestampEntry[] = lines.map((l) => ({
       lineId: l.id,
       start_ms: l.start_ms,
@@ -207,14 +218,80 @@ export function TimestampPage() {
     setDirty(true);
   }, [currentIdx, timestamps.length]);
 
+  // End current line + insert a [Music] instrumental break after it
+  const doInsertMusic = useCallback(() => {
+    if (currentIdx >= localLines.length) return;
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const timeMs = Math.round(audio.currentTime * 1000);
+    const created = new Date().toISOString();
+    const newLineId = crypto.randomUUID();
+    const newLine: Line = {
+      id: newLineId,
+      song_id: id!,
+      text: "[Music]",
+      order: 0, // renumbered below
+      status: "not_started",
+      annotations: [],
+      created_at: created,
+      updated_at: created,
+    };
+
+    setTimestamps((prev) => {
+      const next = [...prev];
+      if (currentIdx >= next.length) return prev;
+
+      const undoEntry: UndoAction = {
+        lineIndex: currentIdx,
+        prev: { start_ms: next[currentIdx].start_ms, end_ms: next[currentIdx].end_ms },
+        prevEndMs: undefined,
+        prevLineIndex: -1,
+        insertedMusicLineId: newLineId,
+      };
+
+      // Close current line at now
+      next[currentIdx] = { ...next[currentIdx], end_ms: timeMs };
+      // Insert [Music] entry immediately after — its start is now, end TBD
+      next.splice(currentIdx + 1, 0, { lineId: newLineId, start_ms: timeMs, end_ms: undefined });
+
+      setUndoStack((s) => [...s, undoEntry]);
+      return next;
+    });
+
+    setLocalLines((prev) => {
+      const next = [...prev];
+      next.splice(currentIdx + 1, 0, newLine);
+      // Renumber orders to stay sequential
+      return next.map((l, i) => ({ ...l, order: i }));
+    });
+
+    // Advance to the line after [Music] so the next tap closes [Music] and opens the next vocal line
+    setCurrentIdx(currentIdx + 2);
+    setDirty(true);
+  }, [currentIdx, localLines.length, id]);
+
   // Undo
   const doUndo = useCallback(() => {
     if (undoStack.length === 0) return;
+    const action = undoStack[undoStack.length - 1];
+    setUndoStack((s) => s.slice(0, -1));
 
-    setUndoStack((s) => {
-      const stack = [...s];
-      const action = stack.pop()!;
-
+    if (action.insertedMusicLineId) {
+      // Undo [Music] insert: remove the inserted line and restore current line's end_ms
+      const musicId = action.insertedMusicLineId;
+      setLocalLines((prev) => prev.filter((l) => l.id !== musicId));
+      setTimestamps((prev) => {
+        const idx = prev.findIndex((t) => t.lineId === musicId);
+        if (idx === -1) return prev;
+        const next = [...prev.slice(0, idx), ...prev.slice(idx + 1)];
+        if (action.lineIndex < next.length) {
+          next[action.lineIndex] = { ...next[action.lineIndex], end_ms: action.prev.end_ms };
+        }
+        return next;
+      });
+      setCurrentIdx(action.lineIndex);
+    } else {
       setTimestamps((prev) => {
         const next = [...prev];
         // Restore the marked line
@@ -232,13 +309,11 @@ export function TimestampPage() {
         }
         return next;
       });
-
       setCurrentIdx(action.lineIndex);
-      return stack;
-    });
-  }, [undoStack.length]);
+    }
+  }, [undoStack]);
 
-  // Keyboard: Space to tap, Ctrl+Z to undo
+  // Keyboard: Space to tap, Ctrl+Z to undo, M to insert [Music]
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       // Don't capture when editing an input
@@ -251,12 +326,16 @@ export function TimestampPage() {
         e.preventDefault();
         doUndo();
       }
+      if (e.code === "KeyM" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        doInsertMusic();
+      }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [doTap, doUndo, editingLine]);
+  }, [doTap, doUndo, doInsertMusic, editingLine]);
 
-  // Seek to a line's start time on click
+  // Seek to a line's start time
   const seekToLine = useCallback((startMs: number) => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -272,27 +351,27 @@ export function TimestampPage() {
     if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [currentIdx, playingLineIndex]);
 
-  // Save all timestamps to store
-  const handleSave = useCallback(() => {
+  // Save all timestamps to store (uses setLines to handle locally-inserted lines)
+  const handleSave = useCallback(async () => {
     if (!id) return;
-    // Set end_ms for the last marked line if not set
-    const final = [...timestamps];
-    for (let i = 0; i < final.length; i++) {
-      if (final[i].start_ms != null && final[i].end_ms == null) {
-        // Use next line's start_ms or song duration
-        const nextStart = i + 1 < final.length ? final[i + 1].start_ms : undefined;
-        final[i] = { ...final[i], end_ms: nextStart ?? durationMs };
-      }
-    }
-
-    for (const entry of final) {
-      updateLine(id, entry.lineId, {
-        start_ms: entry.start_ms,
-        end_ms: entry.end_ms,
+    try {
+      const now = new Date().toISOString();
+      const final: Line[] = localLines.map((line, i) => {
+        const ts = timestamps[i];
+        let end_ms = ts?.end_ms;
+        if (ts?.start_ms != null && end_ms == null) {
+          // Use next line's start_ms or song duration
+          const nextStart = i + 1 < timestamps.length ? timestamps[i + 1].start_ms : undefined;
+          end_ms = nextStart ?? durationMs;
+        }
+        return { ...line, start_ms: ts?.start_ms, end_ms, updated_at: now };
       });
+      await setLinesStore(id, final);
+      navigate(`/song/${id}`);
+    } catch (err) {
+      console.error("Failed to save timestamps:", err);
     }
-    navigate(`/song/${id}`);
-  }, [id, timestamps, durationMs, updateLine, navigate]);
+  }, [id, localLines, timestamps, durationMs, setLinesStore, navigate]);
 
   // Start editing a line's timestamps
   const startEdit = useCallback((lineId: string, startMs: number | undefined, endMs: number | undefined) => {
@@ -457,25 +536,34 @@ export function TimestampPage() {
               <span className="inline-flex items-center px-[6px] py-[1px] rounded bg-[#FEF3C7] border border-[#FDE68A] text-[11px] font-semibold text-[#92400E]">
                 Space
               </span>
-              ) each time a new line begins. Click the edit icon to manually adjust timestamps.
+              ) each time a new line begins. Press{" "}
+              <span className="inline-flex items-center px-[6px] py-[1px] rounded bg-[#FEF3C7] border border-[#FDE68A] text-[11px] font-semibold text-[#92400E]">
+                M
+              </span>
+              {" "}to insert a [Music] break. Click a mapped line to remap from it.
             </div>
           </div>
 
           {/* Line list */}
           <div ref={tapLinesRef} className="flex-1 overflow-y-auto px-7 py-4">
-            {lines.map((line, i) => {
+            {localLines.map((line, i) => {
               const ts = timestamps[i];
               const isCurrent = i === currentIdx;
               const isDone = !isCurrent && ts?.start_ms != null && (i < currentIdx || ts?.end_ms != null);
               const isPending = !isDone && !isCurrent;
               const isEditing = editingLine === line.id;
               const isPlayingLine = i === playingLineIndex;
+              // Show seamless-snap button when this line and the next both have start_ms
+              const canSnapToNext = isDone && !isEditing && i + 1 < localLines.length && timestamps[i + 1]?.start_ms != null;
 
               return (
                 <div
                   key={line.id}
                   onClick={() => {
-                    if (!isEditing && ts?.start_ms != null) seekToLine(ts.start_ms);
+                    if (!isEditing && ts?.start_ms != null) {
+                      seekToLine(ts.start_ms);
+                      setCurrentIdx(i);
+                    }
                   }}
                   className={`flex items-center gap-3 px-4 py-3 rounded-[9px] mb-1 transition-colors ${
                     isCurrent
@@ -559,7 +647,7 @@ export function TimestampPage() {
                         }}
                       />
                       <button
-                        onClick={confirmEdit}
+                        onClick={(e) => { e.stopPropagation(); confirmEdit(); }}
                         className="w-6 h-6 rounded bg-[var(--theme)] text-white border-none cursor-pointer flex items-center justify-center"
                         title="Confirm"
                       >
@@ -568,7 +656,7 @@ export function TimestampPage() {
                         </svg>
                       </button>
                       <button
-                        onClick={cancelEdit}
+                        onClick={(e) => { e.stopPropagation(); cancelEdit(); }}
                         className="w-6 h-6 rounded bg-transparent border border-[var(--border)] text-[var(--text-muted)] cursor-pointer flex items-center justify-center hover:text-[var(--text-primary)]"
                         title="Cancel"
                       >
@@ -591,10 +679,35 @@ export function TimestampPage() {
                     </span>
                   )}
 
+                  {/* Seamless snap button — sets end_ms to exactly the next line's start_ms */}
+                  {canSnapToNext && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const nextStart = timestamps[i + 1].start_ms!;
+                        setTimestamps((prev) => {
+                          const next = [...prev];
+                          next[i] = { ...next[i], end_ms: nextStart };
+                          return next;
+                        });
+                        setDirty(true);
+                      }}
+                      className="w-6 h-6 rounded-[5px] border-none bg-transparent text-[var(--text-muted)] cursor-pointer flex items-center justify-center hover:text-[var(--accent)] hover:bg-[var(--accent-light)] transition-colors flex-shrink-0"
+                      title="Snap end to next line's start (seamless)"
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
+                      </svg>
+                    </button>
+                  )}
+
                   {/* Edit button (only for done lines) */}
                   {isDone && !isEditing && (
                     <button
-                      onClick={() => startEdit(line.id, ts?.start_ms, ts?.end_ms)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        startEdit(line.id, ts?.start_ms, ts?.end_ms);
+                      }}
                       className="w-6 h-6 rounded-[5px] border-none bg-transparent text-[var(--text-muted)] cursor-pointer flex items-center justify-center hover:text-[var(--text-primary)] hover:bg-[var(--accent-light)] transition-colors flex-shrink-0"
                       title="Edit timestamp"
                     >
@@ -616,7 +729,7 @@ export function TimestampPage() {
           </div>
 
           {/* Tap bar */}
-          <div className="px-7 py-4 border-t border-[var(--border)] bg-[var(--surface)] flex items-center justify-center gap-4 flex-shrink-0">
+          <div className="px-7 py-4 border-t border-[var(--border)] bg-[var(--surface)] flex items-center justify-center gap-3 flex-shrink-0">
             <button
               onClick={doUndo}
               disabled={undoStack.length === 0}
@@ -626,6 +739,18 @@ export function TimestampPage() {
                 <polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 102.13-9.36L1 10" />
               </svg>
               Undo
+            </button>
+
+            <button
+              onClick={doInsertMusic}
+              disabled={allDone || !audioSrc}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-[8px] border-[1.5px] border-[var(--border)] bg-transparent text-[var(--text-secondary)] text-[12px] font-medium cursor-pointer hover:border-[#888] hover:text-[var(--text-primary)] transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+              title="End line + insert [Music] break (M)"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
+              </svg>
+              [Music]
             </button>
 
             <button

@@ -32,7 +32,8 @@ export function SettingsPage() {
   const removeHighlight = useHighlightStore((s) => s.removeHighlight);
   const [newHighlightName, setNewHighlightName] = useState("");
   const [editingHighlightId, setEditingHighlightId] = useState<string | null>(null);
-  const [activeTheme, setActiveTheme] = useState("blue");
+  const activeTheme = usePreferencesStore((s) => s.theme);
+  const setTheme = usePreferencesStore((s) => s.setTheme);
   const [speed, setSpeed] = useState(100);
   const [autoPlay, setAutoPlay] = useState(true);
   const [loopMode, setLoopMode] = useState("3");
@@ -91,13 +92,7 @@ export function SettingsPage() {
   }
 
   function handleThemeChange(key: string) {
-    setActiveTheme(key);
-    const t = THEME_OPTIONS.find((o) => o.key === key);
-    if (t) {
-      document.documentElement.style.setProperty("--theme", t.color);
-      document.documentElement.style.setProperty("--theme-light", t.light);
-      document.documentElement.style.setProperty("--theme-text", t.text);
-    }
+    setTheme(key);
   }
 
   const tabDef = (key: Tab, label: string, icon: React.ReactNode) => (
