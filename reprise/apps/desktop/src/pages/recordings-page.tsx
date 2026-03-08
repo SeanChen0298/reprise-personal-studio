@@ -240,8 +240,31 @@ export function RecordingsPage() {
   const updateRecording = useSongStore((s) => s.updateRecording);
   const highlights = useHighlightStore((s) => s.highlights);
 
-  const lines = useMemo(
-    () => (rawLines ? [...rawLines].sort((a, b) => a.order - b.order) : []),
+  // Main lines: exclude translation lines from the lyric list
+  const lines = useMemo(() => {
+    if (!rawLines) return [];
+    const mainLang = song?.language;
+    const transLang = song?.translation_language;
+    return [...rawLines]
+      .filter((l) => {
+        if (transLang && l.language === transLang) return false;
+        return !mainLang || !l.language || l.language === mainLang;
+      })
+      .sort((a, b) => a.order - b.order);
+  }, [rawLines, song?.language, song?.translation_language]);
+
+  // Translation subtext by line order
+  const translationByOrder = useMemo(() => {
+    const transLang = song?.translation_language;
+    if (!transLang || !rawLines) return new Map<number, string>();
+    return new Map(
+      rawLines.filter((l) => l.language === transLang).map((l) => [l.order, l.text])
+    );
+  }, [rawLines, song?.translation_language]);
+
+  // Full line lookup (all languages) so recording entries always resolve their line
+  const lineById = useMemo(
+    () => new Map((rawLines ?? []).map((l) => [l.id, l])),
     [rawLines],
   );
   const sections = useMemo(() => rawSections ?? [], [rawSections]);
@@ -464,7 +487,6 @@ export function RecordingsPage() {
       .filter((g) => g.recordings.length > 0);
   }, [lines, recordings]);
 
-  const lineById = useMemo(() => new Map(lines.map((l) => [l.id, l])), [lines]);
   const sectionById = useMemo(() => new Map(sections.map((s) => [s.id, s])), [sections]);
 
   // ── Early return ─────────────────────────────────────────────────────────
@@ -554,20 +576,30 @@ export function RecordingsPage() {
                 </p>
               ) : (
                 <div className="flex flex-col gap-[6px]">
-                  {lines.map((line, i) => (
-                    <div key={line.id} className="flex items-start gap-3 py-[5px]">
-                      <span className="text-[10.5px] text-[var(--text-muted)] tabular-nums w-5 text-right flex-shrink-0 mt-[2px]">
-                        {i + 1}
-                      </span>
-                      <span className="text-[14px] leading-[1.6] text-[var(--text-primary)] flex-1 min-w-0">
-                        <AnnotatedText
-                          text={line.custom_text ?? line.text}
-                          annotations={line.annotations}
-                          highlights={highlights}
-                        />
-                      </span>
-                    </div>
-                  ))}
+                  {lines.map((line, i) => {
+                    const translation = translationByOrder.get(line.order);
+                    return (
+                      <div key={line.id} className="flex items-start gap-3 py-[5px]">
+                        <span className="text-[10.5px] text-[var(--text-muted)] tabular-nums w-5 text-right flex-shrink-0 mt-[2px]">
+                          {i + 1}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[14px] leading-[1.6] text-[var(--text-primary)]">
+                            <AnnotatedText
+                              text={line.custom_text ?? line.text}
+                              annotations={line.annotations}
+                              highlights={highlights}
+                            />
+                          </div>
+                          {translation && (
+                            <div className="text-[12px] leading-snug text-[var(--text-muted)] mt-0.5">
+                              {translation}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

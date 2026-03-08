@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Sidebar } from "../components/sidebar";
 import { AudioPlayer } from "../components/audio-player";
@@ -14,10 +14,29 @@ export function SongDetailPage() {
   const updateSong = useSongStore((s) => s.updateSong);
   const removeSong = useSongStore((s) => s.removeSong);
   const rawLines = useSongStore((s) => (id ? s.lines[id] : undefined));
-  const lines = useMemo(
-    () => (rawLines ? [...rawLines].sort((a, b) => a.order - b.order) : []),
-    [rawLines]
-  );
+  const audioRef = useRef<HTMLAudioElement>(null);
+
+  // Main lines: primary language (or no language for legacy) — exclude translation lines
+  const lines = useMemo(() => {
+    if (!rawLines) return [];
+    const mainLang = song?.language;
+    const transLang = song?.translation_language;
+    return [...rawLines]
+      .filter((l) => {
+        if (transLang && l.language === transLang) return false;
+        return !mainLang || !l.language || l.language === mainLang;
+      })
+      .sort((a, b) => a.order - b.order);
+  }, [rawLines, song?.language, song?.translation_language]);
+
+  // Translation subtext by line order
+  const translationByOrder = useMemo(() => {
+    const transLang = song?.translation_language;
+    if (!transLang || !rawLines) return new Map<number, string>();
+    return new Map(
+      rawLines.filter((l) => l.language === transLang).map((l) => [l.order, l.text])
+    );
+  }, [rawLines, song?.translation_language]);
   const [showEdit, setShowEdit] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
 
@@ -274,10 +293,12 @@ export function SongDetailPage() {
                 <div className="flex flex-col gap-1">
                   {lines.map((line, i) => {
                     const cfg = STATUS_CONFIG[line.status];
+                    const translation = translationByOrder.get(line.order);
+                    const canPlay = hasAudio && line.start_ms != null;
                     return (
                       <div
                         key={line.id}
-                        className="flex items-center gap-3 px-4 py-3 bg-[var(--surface)] border border-[var(--border)] rounded-[9px] hover:shadow-[0_2px_12px_rgba(0,0,0,0.05)] hover:border-[#C8C8C8] transition-all cursor-pointer"
+                        className="flex items-center gap-3 px-4 py-3 bg-[var(--surface)] border border-[var(--border)] rounded-[9px] hover:shadow-[0_2px_12px_rgba(0,0,0,0.05)] hover:border-[#C8C8C8] transition-all"
                       >
                         <span className="w-6 text-center text-[11px] font-medium text-[var(--text-muted)] tabular-nums flex-shrink-0">
                           {i + 1}
@@ -290,6 +311,11 @@ export function SongDetailPage() {
                           <div className="text-[14px] leading-[1.5] text-[var(--text-primary)] truncate">
                             {line.text}
                           </div>
+                          {translation && (
+                            <div className="text-[12px] leading-snug text-[var(--text-muted)] truncate mt-0.5">
+                              {translation}
+                            </div>
+                          )}
                           {(line.start_ms != null && line.end_ms != null) && (
                             <div className="text-[10.5px] text-[var(--text-muted)] tabular-nums mt-0.5">
                               {formatMs(line.start_ms)} — {formatMs(line.end_ms)}
@@ -303,11 +329,21 @@ export function SongDetailPage() {
                           >
                             {cfg.label}
                           </span>
-                          <button className="w-7 h-7 rounded-[6px] bg-[var(--accent)] text-white flex items-center justify-center hover:opacity-80 transition-opacity flex-shrink-0">
-                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                              <polygon points="5 3 19 12 5 21 5 3" />
-                            </svg>
-                          </button>
+                          {canPlay && (
+                            <button
+                              onClick={() => {
+                                const audio = audioRef.current;
+                                if (!audio) return;
+                                audio.currentTime = (line.start_ms ?? 0) / 1000;
+                                audio.play().catch(() => {});
+                              }}
+                              className="w-7 h-7 rounded-[6px] bg-[var(--accent)] text-white flex items-center justify-center hover:opacity-80 transition-opacity flex-shrink-0 border-none cursor-pointer"
+                            >
+                              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+                                <polygon points="5 3 19 12 5 21 5 3" />
+                              </svg>
+                            </button>
+                          )}
                         </div>
                       </div>
                     );
@@ -357,7 +393,7 @@ export function SongDetailPage() {
         </main>
 
         {/* Audio Player (sticky bottom) */}
-        {hasAudio && <AudioPlayer audioPath={song.audio_path!} />}
+        {hasAudio && <AudioPlayer ref={audioRef} audioPath={song.audio_path!} />}
       </div>
 
       {/* Edit song modal */}

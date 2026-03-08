@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 
 interface AudioPlayerProps {
@@ -11,8 +11,10 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export function AudioPlayer({ audioPath }: AudioPlayerProps) {
+export const AudioPlayer = forwardRef<HTMLAudioElement, AudioPlayerProps>(
+function AudioPlayer({ audioPath }, ref) {
   const audioRef = useRef<HTMLAudioElement>(null);
+  useImperativeHandle(ref, () => audioRef.current!, []);
   const seekRef = useRef<HTMLDivElement>(null);
 
   const [playing, setPlaying] = useState(false);
@@ -282,4 +284,5 @@ export function AudioPlayer({ audioPath }: AudioPlayerProps) {
       </div>
     </div>
   );
-}
+});
+AudioPlayer.displayName = "AudioPlayer";
