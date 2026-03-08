@@ -232,7 +232,7 @@ export function TimestampPage() {
       song_id: id!,
       text: "[Music]",
       order: 0, // renumbered below
-      status: "not_started",
+      status: "new",
       annotations: [],
       created_at: created,
       updated_at: created,

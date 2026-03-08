@@ -50,9 +50,14 @@ export function useRecorder(): UseRecorderResult {
     chunksRef.current = [];
 
     try {
-      const audio: boolean | MediaTrackConstraints = inputDeviceId
-        ? { deviceId: { exact: inputDeviceId } }
-        : true;
+      const audio: MediaTrackConstraints = {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+        sampleRate: 48000,
+        channelCount: 1,
+        ...(inputDeviceId ? { deviceId: { exact: inputDeviceId } } : {}),
+      };
       const stream = await navigator.mediaDevices.getUserMedia({ audio });
       streamRef.current = stream;
 
@@ -67,14 +72,14 @@ export function useRecorder(): UseRecorderResult {
       analyserRef.current = analyser;
       analyserDataRef.current = new Uint8Array(analyser.frequencyBinCount);
 
-      const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      const recorder = new MediaRecorder(stream, { mimeType: "audio/webm;codecs=opus", audioBitsPerSecond: 128000 });
       mediaRecorderRef.current = recorder;
 
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
 
-      recorder.start();
+      recorder.start(100);
       startTimeRef.current = Date.now();
       setIsRecording(true);
     } catch (err) {

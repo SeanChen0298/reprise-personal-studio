@@ -21,8 +21,12 @@ export function applyThemeCssVars(key: string) {
 interface PreferencesState {
   theme: string;
   showWaveform: boolean;
+  countInEnabled: boolean;
+  recordingPlaybackGain: number;
   setTheme: (v: string) => void;
   setShowWaveform: (v: boolean) => void;
+  setCountInEnabled: (v: boolean) => void;
+  setRecordingPlaybackGain: (v: number) => void;
 }
 
 export const usePreferencesStore = create<PreferencesState>()(
@@ -30,11 +34,15 @@ export const usePreferencesStore = create<PreferencesState>()(
     (set) => ({
       theme: "blue",
       showWaveform: true,
+      countInEnabled: true,
+      recordingPlaybackGain: 8.0,
       setTheme: (v) => {
         applyThemeCssVars(v);
         set({ theme: v });
       },
       setShowWaveform: (v) => set({ showWaveform: v }),
+      setCountInEnabled: (v) => set({ countInEnabled: v }),
+      setRecordingPlaybackGain: (v) => set({ recordingPlaybackGain: v }),
     }),
     {
       name: "reprise-preferences",

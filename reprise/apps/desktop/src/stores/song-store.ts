@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { Song, ImportDraft, Line, LineStatus, Annotation, Recording, Section } from "../types/song";
+import { upgradeStatus } from "../lib/status-config";
 import {
   downloadAudio,
   buildSongFolder,
@@ -7,6 +8,8 @@ import {
 } from "../lib/audio-download";
 import { analyzePitch } from "../lib/audio-analysis";
 import { supabase } from "../lib/supabase";
+import { readFile } from "@tauri-apps/plugin-fs";
+import MusicTempo from "music-tempo";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -17,6 +20,20 @@ import { supabase } from "../lib/supabase";
 // Safety is enforced by RLS policies and the DB schema instead.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const db = supabase as any;
+
+async function detectBpmFromFile(filePath: string): Promise<number | null> {
+  try {
+    const data = await readFile(filePath);
+    const ctx = new AudioContext();
+    const audioBuffer = await ctx.decodeAudioData(data.buffer as ArrayBuffer);
+    await ctx.close();
+    const channelData = audioBuffer.getChannelData(0);
+    const mt = new MusicTempo(channelData);
+    return Math.round(mt.tempo);
+  } catch {
+    return null;
+  }
+}
 
 async function getUserId(): Promise<string> {
   const { data: { user } } = await supabase.auth.getUser();
@@ -64,6 +81,8 @@ interface SongStore {
   updateLine: (songId: string, lineId: string, data: Partial<Line>) => Promise<void>;
   removeLine: (songId: string, lineId: string) => Promise<void>;
   updateLineStatus: (songId: string, lineId: string, status: LineStatus) => Promise<void>;
+  /** Increment play_count and auto-upgrade status (listened at 1, practiced at 10) */
+  incrementPlayCount: (songId: string, lineId: string) => Promise<void>;
   updateLineCustomText: (songId: string, lineId: string, customText: string) => Promise<void>;
   updateLineAnnotations: (songId: string, lineId: string, annotations: Annotation[]) => Promise<void>;
   getLinesForSong: (songId: string) => Line[];
@@ -71,6 +90,7 @@ interface SongStore {
   // Recordings management
   addRecording: (songId: string, recording: Recording) => Promise<void>;
   removeRecording: (songId: string, recordingId: string) => Promise<void>;
+  updateRecording: (songId: string, recordingId: string, data: Partial<Pick<Recording, "note" | "is_best_take">>) => Promise<void>;
   toggleMasterTake: (songId: string, recordingId: string) => Promise<void>;
   getRecordingsForLine: (songId: string, lineId: string) => Recording[];
 
@@ -265,6 +285,13 @@ export const useSongStore = create<SongStore>()((set, get) => ({
         audio_folder: songFolder,
       });
 
+      // Auto-detect BPM in background if not already set
+      if (!song.bpm) {
+        detectBpmFromFile(result.audioPath).then((bpm) => {
+          if (bpm) get().updateSong(id, { bpm }).catch(() => {});
+        }).catch((e) => console.warn("BPM detection failed:", e));
+      }
+
       if (result.lyrics && result.lyrics.length > 0) {
         const existingLines = get().lines[id];
         if (!existingLines || existingLines.length === 0) {
@@ -276,7 +303,7 @@ export const useSongStore = create<SongStore>()((set, get) => ({
             order: i,
             start_ms: tl.start_ms,
             end_ms: tl.end_ms,
-            status: "not_started" as const,
+            status: "new" as const,
             created_at: now,
             updated_at: now,
           }));
@@ -417,7 +444,8 @@ export const useSongStore = create<SongStore>()((set, get) => ({
       song_id: songId,
       text,
       order,
-      status: "not_started",
+      status: "new",
+      play_count: 0,
       created_at: now,
       updated_at: now,
     };
@@ -481,12 +509,26 @@ export const useSongStore = create<SongStore>()((set, get) => ({
     await get().updateLine(songId, lineId, { status });
   },
 
+  incrementPlayCount: async (songId, lineId) => {
+    const line = (get().lines[songId] ?? []).find((l) => l.id === lineId);
+    if (!line) return;
+    const newCount = (line.play_count ?? 0) + 1;
+    let newStatus = upgradeStatus(line.status, "listened");
+    if (newCount >= 10) newStatus = upgradeStatus(newStatus, "practiced");
+    await get().updateLine(songId, lineId, { play_count: newCount, status: newStatus });
+  },
+
   updateLineCustomText: async (songId, lineId, customText) => {
     await get().updateLine(songId, lineId, { custom_text: customText });
   },
 
   updateLineAnnotations: async (songId, lineId, annotations) => {
-    await get().updateLine(songId, lineId, { annotations });
+    const line = (get().lines[songId] ?? []).find((l) => l.id === lineId);
+    const updates: Partial<Line> = { annotations };
+    if (line && annotations.length > 0) {
+      updates.status = upgradeStatus(line.status, "annotated");
+    }
+    await get().updateLine(songId, lineId, updates);
   },
 
   getLinesForSong: (songId) => {
@@ -516,6 +558,17 @@ export const useSongStore = create<SongStore>()((set, get) => ({
       await get().loadAllData();
       throw error;
     }
+
+    // Auto-upgrade line status to recorded (if tied to a line)
+    if (recording.line_id) {
+      const line = (get().lines[songId] ?? []).find((l) => l.id === recording.line_id);
+      if (line) {
+        const newStatus = upgradeStatus(line.status, "recorded");
+        if (newStatus !== line.status) {
+          await get().updateLine(songId, recording.line_id, { status: newStatus });
+        }
+      }
+    }
   },
 
   removeRecording: async (songId, recordingId) => {
@@ -534,6 +587,34 @@ export const useSongStore = create<SongStore>()((set, get) => ({
     }
   },
 
+  updateRecording: async (songId, recordingId, data) => {
+    const now = new Date().toISOString();
+    const recBefore = (get().recordings[songId] ?? []).find((r) => r.id === recordingId);
+    set((s) => ({
+      recordings: {
+        ...s.recordings,
+        [songId]: (s.recordings[songId] ?? []).map((r) =>
+          r.id === recordingId ? { ...r, ...data, updated_at: now } : r
+        ),
+      },
+    }));
+    const { error } = await db.from("recordings").update({ ...data, updated_at: now }).eq("id", recordingId);
+    if (error) {
+      await get().loadAllData();
+      throw error;
+    }
+    // Auto-upgrade line status to best_take_set when marking as best take
+    if (data.is_best_take === true && recBefore?.line_id) {
+      const line = (get().lines[songId] ?? []).find((l) => l.id === recBefore.line_id);
+      if (line) {
+        const newStatus = upgradeStatus(line.status, "best_take_set");
+        if (newStatus !== line.status) {
+          await get().updateLine(songId, recBefore.line_id, { status: newStatus });
+        }
+      }
+    }
+  },
+
   toggleMasterTake: async (songId, recordingId) => {
     const recs = get().recordings[songId] ?? [];
     const target = recs.find((r) => r.id === recordingId);
@@ -542,24 +623,30 @@ export const useSongStore = create<SongStore>()((set, get) => ({
     const lineId = target.line_id;
     const now = new Date().toISOString();
 
-    // Determine new state
-    const updatedRecs = recs.map((r) =>
-      r.line_id === lineId
-        ? {
-            ...r,
-            is_master_take: r.id === recordingId ? !r.is_master_take : false,
-            updated_at: now,
-          }
-        : r
-    );
+    let updatedRecs: Recording[];
+    let lineRecs: Recording[];
+
+    if (lineId === null) {
+      // Free recordings: just toggle the individual recording
+      updatedRecs = recs.map((r) =>
+        r.id === recordingId ? { ...r, is_master_take: !r.is_master_take, updated_at: now } : r
+      );
+      lineRecs = updatedRecs.filter((r) => r.id === recordingId);
+    } else {
+      // Line recordings: exclusive toggle (only one master per line)
+      updatedRecs = recs.map((r) =>
+        r.line_id === lineId
+          ? { ...r, is_master_take: r.id === recordingId ? !r.is_master_take : false, updated_at: now }
+          : r
+      );
+      lineRecs = updatedRecs.filter((r) => r.line_id === lineId);
+    }
 
     // Optimistic update
     set((s) => ({
       recordings: { ...s.recordings, [songId]: updatedRecs },
     }));
 
-    // Update all affected recordings in DB (those belonging to the same line)
-    const lineRecs = updatedRecs.filter((r) => r.line_id === lineId);
     const updates = lineRecs.map((r) =>
       supabase
         .from("recordings")
@@ -572,6 +659,18 @@ export const useSongStore = create<SongStore>()((set, get) => ({
     if (firstError) {
       await get().loadAllData();
       throw firstError;
+    }
+
+    // Auto-upgrade line status to best_take_set when setting a master take
+    const newTarget = updatedRecs.find((r) => r.id === recordingId);
+    if (newTarget?.is_master_take && newTarget?.line_id) {
+      const line = (get().lines[songId] ?? []).find((l) => l.id === newTarget.line_id);
+      if (line) {
+        const newStatus = upgradeStatus(line.status, "best_take_set");
+        if (newStatus !== line.status) {
+          await get().updateLine(songId, newTarget.line_id, { status: newStatus });
+        }
+      }
     }
   },
 
@@ -731,6 +830,7 @@ function dbRowToLine(row: Record<string, unknown>): Line {
     start_ms: row.start_ms as number | undefined,
     end_ms: row.end_ms as number | undefined,
     status: row.status as LineStatus,
+    play_count: (row.play_count as number | undefined) ?? 0,
     language: row.language as string | undefined,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
@@ -749,6 +849,7 @@ function lineToDbRow(line: Line, userId: string): Record<string, unknown> {
     start_ms: line.start_ms ?? null,
     end_ms: line.end_ms ?? null,
     status: line.status,
+    play_count: line.play_count ?? 0,
     language: line.language ?? null,
     created_at: line.created_at,
     updated_at: line.updated_at,
@@ -759,11 +860,13 @@ function dbRowToRecording(row: Record<string, unknown>): Recording {
   return {
     id: row.id as string,
     song_id: row.song_id as string,
-    line_id: row.line_id as string,
+    line_id: (row.line_id as string | null) ?? null,
     file_path: row.file_path as string,
     duration_ms: row.duration_ms as number,
     is_master_take: row.is_master_take as boolean,
-    section_id: row.section_id as string | undefined,
+    is_best_take: (row.is_best_take as boolean) ?? false,
+    note: (row.note as string | undefined) ?? undefined,
+    section_id: (row.section_id as string | undefined) ?? undefined,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -778,6 +881,8 @@ function recordingToDbRow(recording: Recording, userId: string): Record<string, 
     file_path: recording.file_path,
     duration_ms: recording.duration_ms,
     is_master_take: recording.is_master_take,
+    is_best_take: recording.is_best_take,
+    note: recording.note ?? null,
     section_id: recording.section_id ?? null,
     created_at: recording.created_at,
     updated_at: recording.updated_at,

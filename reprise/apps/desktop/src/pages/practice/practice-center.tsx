@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Line, Annotation, Section } from "../../types/song";
 import type { UseLinePlayerReturn } from "../../hooks/use-line-player";
-import { STATUS_CONFIG, formatMs, nextStatus } from "../../lib/status-config";
+import { STATUS_CONFIG, formatMs } from "../../lib/status-config";
 import { useSongStore } from "../../stores/song-store";
 import { useHighlightStore } from "../../lib/highlight-config";
 import { useSymbolStore } from "../../lib/symbol-config";
@@ -12,6 +12,8 @@ import { usePitchData } from "../../hooks/use-pitch-data";
 import { useWaveformData } from "../../hooks/use-waveform-data";
 import { useRecorder } from "../../hooks/use-recorder";
 import { usePreferencesStore } from "../../stores/preferences-store";
+import { playRecordingWithGain, type RecordingPlaybackHandle } from "../../lib/play-recording";
+import { remove } from "@tauri-apps/plugin-fs";
 import { FloatingToolbar } from "../../components/floating-toolbar";
 
 interface RecordingScope {
@@ -46,7 +48,6 @@ export function PracticeCenter({
   loopRange, skipCountdown, recordThrough,
   onEditModeChange,
 }: Props) {
-  const updateLineStatus = useSongStore((s) => s.updateLineStatus);
   const updateLineCustomText = useSongStore((s) => s.updateLineCustomText);
   const updateLineAnnotations = useSongStore((s) => s.updateLineAnnotations);
   const addRecording = useSongStore((s) => s.addRecording);
@@ -104,8 +105,11 @@ export function PracticeCenter({
   const [hasSelectionOverAnnotation, setHasSelectionOverAnnotation] = useState(false);
   const editWrapperRef = useRef<HTMLDivElement>(null);
 
-  // Retry: last recording scope
+  // Retry: last recording scope and file path
   const [lastRecordingScope, setLastRecordingScope] = useState<RecordingScope | null>(null);
+  const [lastRecordingFilePath, setLastRecordingFilePath] = useState<string | null>(null);
+  const [feedbackPlaying, setFeedbackPlaying] = useState(false);
+  const feedbackHandleRef = useRef<RecordingPlaybackHandle | null>(null);
 
   // Recording timer
   const [recordingElapsed, setRecordingElapsed] = useState(0);
@@ -135,12 +139,17 @@ export function PracticeCenter({
     prevLineIndexRef.current = activeLineIndex;
   }, [activeLineIndex, editMode, currentLine, lines, songId, editText, editAnnotations, updateLineCustomText, updateLineAnnotations]);
 
-  // Clear lastRecordingScope when user navigates to a different line
+  // Clear recording feedback when user navigates to a different line
   useEffect(() => {
     if (lastRecordingScope && activeLineIndex !== lastRecordingScope.startIdx) {
       setLastRecordingScope(null);
+      setLastRecordingFilePath(null);
+      feedbackHandleRef.current?.stop();
+      feedbackHandleRef.current = null;
+      setFeedbackPlaying(false);
+      player.setAdvancePaused(false);
     }
-  }, [activeLineIndex, lastRecordingScope]);
+  }, [activeLineIndex, lastRecordingScope, player]);
 
   // Recording timer — count up while recording
   useEffect(() => {
@@ -351,6 +360,8 @@ export function PracticeCenter({
     endLineIdx: number,
     section?: Section,
   ) => {
+    player.pause();
+    player.setAdvancePaused(true);
     player.goToLine(startLineIdx, false);
     recordingLineIdRef.current = lineId;
     recordingSectionRef.current = section ?? null;
@@ -369,13 +380,15 @@ export function PracticeCenter({
     endLineIdx: number,
     section?: Section,
   ) => {
+    player.pause();
     if (skipCountdown) {
       startRecordingImmediate(lineId, startLineIdx, endLineIdx, section);
       return;
     }
 
-    const totalBeats = bpm ? 8 : 4;
-    const beatInterval = bpm ? 60000 / bpm : 1000;
+    const effectiveBpm = bpm ?? 80;
+    const totalBeats = 4;
+    const beatInterval = 60000 / effectiveBpm;
     let beat = 0;
 
     setCountdownActive(true);
@@ -391,6 +404,7 @@ export function PracticeCenter({
         setCountdownActive(false);
         setCountdownBeat(0);
 
+        player.setAdvancePaused(true);
         recordingLineIdRef.current = lineId;
         recordingSectionRef.current = section ?? null;
         recordingEndLineIdx.current = endLineIdx;
@@ -441,10 +455,12 @@ export function PracticeCenter({
         file_path: result.filePath,
         duration_ms: result.durationMs,
         is_master_take: false,
+        is_best_take: false,
         section_id: sectionId,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       });
+      setLastRecordingFilePath(result.filePath);
     }
     recordingLineIdRef.current = null;
     recordingSectionRef.current = null;
@@ -502,12 +518,50 @@ export function PracticeCenter({
     }
   }, [countdownActive, cancelCountdown, recorder.isRecording, saveRecording, getRecordingScope, skipCountdown, startRecordingImmediate, startCountdownThenRecord]);
 
-  // Handle retry (re-record same scope)
-  const handleRetry = useCallback(() => {
+  // Feedback loop: play back the last recording with gain boost
+  const handleFeedbackPlayback = useCallback(() => {
+    if (!lastRecordingFilePath) return;
+    // Stop any in-progress playback
+    feedbackHandleRef.current?.stop();
+    feedbackHandleRef.current = null;
+    setFeedbackPlaying(false);
+
+    playRecordingWithGain(lastRecordingFilePath, () => {
+      setFeedbackPlaying(false);
+      feedbackHandleRef.current = null;
+    })
+      .then((handle) => {
+        feedbackHandleRef.current = handle;
+        setFeedbackPlaying(true);
+      })
+      .catch(() => {
+        setFeedbackPlaying(false);
+      });
+  }, [lastRecordingFilePath]);
+
+  // Feedback loop: discard take and retry
+  const handleRetryWithDelete = useCallback(async () => {
     if (!lastRecordingScope || recorder.isRecording || countdownActive) return;
+    feedbackHandleRef.current?.stop();
+    feedbackHandleRef.current = null;
+    setFeedbackPlaying(false);
+    const pathToDelete = lastRecordingFilePath;
+    setLastRecordingFilePath(null);
+    if (pathToDelete) remove(pathToDelete).catch(() => {});
     const { lineId, startIdx, endIdx, section } = lastRecordingScope;
     startCountdownThenRecord(lineId, startIdx, endIdx, section);
-  }, [lastRecordingScope, recorder.isRecording, countdownActive, startCountdownThenRecord]);
+  }, [lastRecordingScope, lastRecordingFilePath, recorder.isRecording, countdownActive, startCountdownThenRecord]);
+
+  // Feedback loop: accept take and advance to next line
+  const handleFeedbackNext = useCallback(() => {
+    feedbackHandleRef.current?.stop();
+    feedbackHandleRef.current = null;
+    setFeedbackPlaying(false);
+    setLastRecordingScope(null);
+    setLastRecordingFilePath(null);
+    player.setAdvancePaused(false);
+    player.nextLine();
+  }, [player]);
 
   // Handle section recording from transport
   const handleRecordSection = useCallback(() => {
@@ -544,8 +598,10 @@ export function PracticeCenter({
         e.preventDefault();
         if (recorder.isRecording) {
           saveRecording(recordingSectionRef.current?.id).then(() => {
-            setTimeout(() => handleRetry(), 50);
+            setTimeout(() => handleRetryWithDelete(), 50);
           });
+        } else if (lastRecordingFilePath && lastRecordingScope && !countdownActive) {
+          handleRetryWithDelete();
         } else {
           handleRecord(e.shiftKey);
         }
@@ -553,13 +609,7 @@ export function PracticeCenter({
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [editMode, recorder.isRecording, saveRecording, handleRecord, handleRetry]);
-
-  const handleStatusClick = () => {
-    if (!currentLine) return;
-    const next = nextStatus(currentLine.status);
-    updateLineStatus(songId, currentLine.id, next);
-  };
+  }, [editMode, recorder.isRecording, saveRecording, handleRecord, handleRetryWithDelete, lastRecordingFilePath, lastRecordingScope, countdownActive]);
 
   if (!currentLine) {
     return (
@@ -572,8 +622,8 @@ export function PracticeCenter({
   const cfg = STATUS_CONFIG[currentLine.status];
   const displayText = currentLine.custom_text ?? currentLine.text;
   const hasCustomText = currentLine.custom_text != null && currentLine.custom_text !== currentLine.text;
-  const showRetry = lastRecordingScope && !recorder.isRecording && !countdownActive;
-  const showSectionRecord = activeSection && !recorder.isRecording && !countdownActive;
+  const showFeedback = lastRecordingFilePath && lastRecordingScope && !recorder.isRecording && !countdownActive;
+  const showSectionRecord = activeSection && !recorder.isRecording && !countdownActive && !showFeedback;
 
   const elapsedSec = recordingElapsed / 1000;
   const elapsedMin = Math.floor(elapsedSec / 60);
@@ -687,13 +737,12 @@ export function PracticeCenter({
             <span className="text-[11.5px] text-[var(--text-muted)] tabular-nums">
               Line {activeLineIndex + 1} of {lines.length}
             </span>
-            <button
-              onClick={handleStatusClick}
-              className="text-[10.5px] font-medium px-[9px] py-[2px] rounded-[20px] cursor-pointer border-none transition-colors"
+            <span
+              className="text-[10.5px] font-medium px-[9px] py-[2px] rounded-[20px]"
               style={{ background: cfg.tagBg, color: cfg.tagColor }}
             >
               {cfg.label}
-            </button>
+            </span>
             {!editMode && (
               <button
                 onClick={enterEditMode}
@@ -838,13 +887,12 @@ export function PracticeCenter({
               <span className="text-[11.5px] text-[var(--text-muted)] tabular-nums">
                 Line {activeLineIndex + 1} of {lines.length}
               </span>
-              <button
-                onClick={handleStatusClick}
-                className="text-[10.5px] font-medium px-[9px] py-[2px] rounded-[20px] cursor-pointer border-none transition-colors"
+              <span
+                className="text-[10.5px] font-medium px-[9px] py-[2px] rounded-[20px]"
                 style={{ background: cfg.tagBg, color: cfg.tagColor }}
               >
                 {cfg.label}
-              </button>
+              </span>
               {!editMode && (
                 <button
                   onClick={enterEditMode}
@@ -1017,22 +1065,46 @@ export function PracticeCenter({
           )}
         </button>
 
-        {/* Retry button */}
-        {showRetry && (
-          <button
-            onClick={handleRetry}
-            title="Retry recording (same scope)"
-            className="w-10 h-10 rounded-full border-[1.5px] border-[#DC2626] bg-transparent text-[#DC2626] cursor-pointer flex items-center justify-center hover:bg-red-50 hover:scale-105 transition-all"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="1 4 1 10 7 10" />
-              <path d="M3.51 15a9 9 0 102.13-9.36L1 10" />
-            </svg>
-          </button>
+        {/* Feedback loop: play / retry / next */}
+        {showFeedback && (
+          <>
+            <button
+              onClick={handleFeedbackPlayback}
+              title={feedbackPlaying ? "Playing back…" : "Play back recording"}
+              className={`w-10 h-10 rounded-full border-[1.5px] cursor-pointer flex items-center justify-center hover:scale-105 transition-all ${
+                feedbackPlaying
+                  ? "border-[var(--theme)] bg-[var(--theme-light)] text-[var(--theme-text)]"
+                  : "border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)] hover:border-[#888]"
+              }`}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="5,3 19,12 5,21" />
+              </svg>
+            </button>
+            <button
+              onClick={handleRetryWithDelete}
+              title="Discard take and retry"
+              className="w-10 h-10 rounded-full border-[1.5px] border-[#DC2626] bg-transparent text-[#DC2626] cursor-pointer flex items-center justify-center hover:bg-red-50 hover:scale-105 transition-all"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="1 4 1 10 7 10" />
+                <path d="M3.51 15a9 9 0 102.13-9.36L1 10" />
+              </svg>
+            </button>
+            <button
+              onClick={handleFeedbackNext}
+              title="Accept take and go to next line"
+              className="w-10 h-10 rounded-full border-[1.5px] border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)] cursor-pointer flex items-center justify-center hover:border-[#888] hover:text-[var(--text-primary)] hover:scale-105 transition-all"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="9,18 15,12 9,6" />
+              </svg>
+            </button>
+          </>
         )}
 
         {/* Record section button */}
-        {showSectionRecord && !showRetry && (
+        {showSectionRecord && (
           <button
             onClick={handleRecordSection}
             title={`Record ${activeSection!.name}`}

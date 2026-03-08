@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { exists } from "@tauri-apps/plugin-fs";
 import { open } from "@tauri-apps/plugin-shell";
@@ -8,8 +8,9 @@ import { checkYtDlpInstalled, checkPythonInstalled, checkFfmpegInstalled, checkD
 import { checkTorchcrepeInstalled } from "../lib/audio-analysis";
 import { useHighlightStore } from "../lib/highlight-config";
 import { usePreferencesStore } from "../stores/preferences-store";
+import { useAudioDevices } from "../hooks/use-audio-devices";
 
-type Tab = "highlights" | "account" | "preferences" | "downloads";
+type Tab = "highlights" | "account" | "preferences" | "downloads" | "audio";
 
 const THEME_OPTIONS = [
   { key: "blue", color: "#2563EB", label: "Blue", light: "#EFF6FF", text: "#1D4ED8" },
@@ -37,11 +38,130 @@ export function SettingsPage() {
   const [speed, setSpeed] = useState(100);
   const [autoPlay, setAutoPlay] = useState(true);
   const [loopMode, setLoopMode] = useState("3");
-  const [countIn, setCountIn] = useState("2");
+  const countInEnabled = usePreferencesStore((s) => s.countInEnabled);
+  const setCountInEnabled = usePreferencesStore((s) => s.setCountInEnabled);
+  const countIn = countInEnabled ? "2" : "none";
   const showWaveforms = usePreferencesStore((s) => s.showWaveform);
   const setShowWaveforms = usePreferencesStore((s) => s.setShowWaveform);
+  const recordingPlaybackGain = usePreferencesStore((s) => s.recordingPlaybackGain);
+  const setRecordingPlaybackGain = usePreferencesStore((s) => s.setRecordingPlaybackGain);
   const [confirmDelete, setConfirmDelete] = useState(true);
   const [autoSync, setAutoSync] = useState(true);
+
+  // Audio I/O tab
+  const audioDevices = useAudioDevices();
+  const [audioLevel, setAudioLevel] = useState(0);
+  const audioLevelStreamRef = useRef<MediaStream | null>(null);
+  const audioLevelCtxRef = useRef<AudioContext | null>(null);
+  const audioLevelRafRef = useRef<number>(0);
+  const [testState, setTestState] = useState<"idle" | "recording" | "playing">("idle");
+  const testRecorderRef = useRef<MediaRecorder | null>(null);
+  const testChunksRef = useRef<Blob[]>([]);
+  const testAudioRef = useRef<HTMLAudioElement | null>(null);
+  const testCtxRef = useRef<AudioContext | null>(null);
+
+  // Start/stop live level meter when audio tab is active
+  useEffect(() => {
+    if (activeTab !== "audio") {
+      cancelAnimationFrame(audioLevelRafRef.current);
+      audioLevelStreamRef.current?.getTracks().forEach((t) => t.stop());
+      audioLevelStreamRef.current = null;
+      audioLevelCtxRef.current?.close().catch(() => {});
+      audioLevelCtxRef.current = null;
+      setAudioLevel(0);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const constraints: MediaTrackConstraints = {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          ...(audioDevices.selectedInputId ? { deviceId: { exact: audioDevices.selectedInputId } } : {}),
+        };
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+        audioLevelStreamRef.current = stream;
+        const ctx = new AudioContext();
+        audioLevelCtxRef.current = ctx;
+        const source = ctx.createMediaStreamSource(stream);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 256;
+        analyser.smoothingTimeConstant = 0.8;
+        source.connect(analyser);
+        const data = new Uint8Array(analyser.frequencyBinCount);
+        const tick = () => {
+          analyser.getByteFrequencyData(data);
+          let sum = 0;
+          for (let i = 0; i < data.length; i++) sum += data[i];
+          setAudioLevel(sum / (data.length * 255));
+          audioLevelRafRef.current = requestAnimationFrame(tick);
+        };
+        audioLevelRafRef.current = requestAnimationFrame(tick);
+      } catch { /* permission denied */ }
+    })();
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(audioLevelRafRef.current);
+      audioLevelStreamRef.current?.getTracks().forEach((t) => t.stop());
+      audioLevelStreamRef.current = null;
+      audioLevelCtxRef.current?.close().catch(() => {});
+      audioLevelCtxRef.current = null;
+      setAudioLevel(0);
+    };
+  }, [activeTab, audioDevices.selectedInputId]);
+
+  const handleTestMic = useCallback(async () => {
+    if (testState === "recording") {
+      testRecorderRef.current?.stop();
+      return;
+    }
+    if (testState === "playing") {
+      testAudioRef.current?.pause();
+      testCtxRef.current?.close().catch(() => {});
+      testCtxRef.current = null;
+      setTestState("idle");
+      return;
+    }
+    try {
+      const constraints: MediaTrackConstraints = {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+        ...(audioDevices.selectedInputId ? { deviceId: { exact: audioDevices.selectedInputId } } : {}),
+      };
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+      testChunksRef.current = [];
+      const recorder = new MediaRecorder(stream, { mimeType: "audio/webm;codecs=opus" });
+      testRecorderRef.current = recorder;
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) testChunksRef.current.push(e.data); };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(testChunksRef.current, { type: "audio/webm" });
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        const ctx = new AudioContext();
+        testCtxRef.current = ctx;
+        const source = ctx.createMediaElementSource(audio);
+        const gain = ctx.createGain();
+        gain.gain.value = usePreferencesStore.getState().recordingPlaybackGain;
+        const compressor = ctx.createDynamicsCompressor();
+        source.connect(gain);
+        gain.connect(compressor);
+        compressor.connect(ctx.destination);
+        testAudioRef.current = audio;
+        audio.onended = () => { URL.revokeObjectURL(url); setTestState("idle"); ctx.close().catch(() => {}); testCtxRef.current = null; };
+        setTestState("playing");
+        audio.play().catch(() => { setTestState("idle"); ctx.close().catch(() => {}); testCtxRef.current = null; });
+      };
+      recorder.start(100);
+      setTestState("recording");
+      // Auto-stop after 5 seconds
+      setTimeout(() => { if (testRecorderRef.current?.state === "recording") testRecorderRef.current.stop(); }, 5000);
+    } catch { setTestState("idle"); }
+  }, [testState, audioDevices.selectedInputId]);
 
   // Downloads tab state
   const [ytdlpVersion, setYtdlpVersion] = useState<string | null | undefined>(undefined);
@@ -218,6 +338,16 @@ export function SettingsPage() {
                   <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
                   <polyline points="7 10 12 15 17 10" />
                   <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>,
+              )}
+              {tabDef(
+                "audio",
+                "Audio I/O",
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
+                  <path d="M19 10v2a7 7 0 01-14 0v-2" />
+                  <line x1="12" y1="19" x2="12" y2="23" />
+                  <line x1="8" y1="23" x2="16" y2="23" />
                 </svg>,
               )}
             </div>
@@ -566,7 +696,7 @@ export function SettingsPage() {
                     "Play a metronome count before recording starts",
                     <select
                       value={countIn}
-                      onChange={(e) => setCountIn(e.target.value)}
+                      onChange={(e) => setCountInEnabled(e.target.value !== "none")}
                       className="px-3 py-[7px] pr-8 rounded-[7px] border-[1.5px] border-[var(--border)] bg-[var(--surface)] text-[var(--text-primary)] text-[13px] outline-none appearance-none cursor-pointer focus:border-[var(--theme)] transition-colors flex-shrink-0"
                       style={{
                         backgroundImage: `url("data:image/svg+xml,%3Csvg width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2' xmlns='http://www.w3.org/2000/svg'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E")`,
@@ -605,6 +735,151 @@ export function SettingsPage() {
                     toggle(autoSync, setAutoSync),
                     true,
                   )}
+                </div>
+              </div>
+            )}
+
+            {/* ═══ AUDIO I/O TAB ═══ */}
+            {activeTab === "audio" && (
+              <div>
+                {/* Input device */}
+                <div className="mb-7">
+                  {sectionHeader("Microphone (input)")}
+                  <select
+                    value={audioDevices.selectedInputId}
+                    onChange={(e) => audioDevices.setSelectedInputId(e.target.value)}
+                    className="w-full px-3 py-[9px] pr-8 rounded-[7px] border-[1.5px] border-[var(--border)] bg-[var(--surface)] text-[var(--text-primary)] text-[13px] outline-none appearance-none cursor-pointer focus:border-[var(--theme)] transition-colors"
+                    style={{
+                      backgroundImage: `url("data:image/svg+xml,%3Csvg width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2' xmlns='http://www.w3.org/2000/svg'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E")`,
+                      backgroundRepeat: "no-repeat",
+                      backgroundPosition: "right 12px center",
+                    }}
+                  >
+                    <option value="">System default</option>
+                    {audioDevices.inputDevices.map((d) => (
+                      <option key={d.deviceId} value={d.deviceId}>{d.label}</option>
+                    ))}
+                  </select>
+
+                  {/* Live input level meter */}
+                  <div className="mt-4">
+                    <div className="text-[11.5px] text-[var(--text-muted)] mb-2">Input level</div>
+                    <div className="flex items-end gap-[3px] h-[28px]">
+                      {Array.from({ length: 20 }, (_, i) => {
+                        const threshold = (i + 1) / 20;
+                        const active = audioLevel >= threshold;
+                        const color = i >= 17 ? "#DC2626" : i >= 13 ? "#F59E0B" : "#22C55E";
+                        return (
+                          <div
+                            key={i}
+                            className="flex-1 rounded-[2px] transition-all duration-75"
+                            style={{
+                              height: `${8 + i * 1.1}px`,
+                              backgroundColor: active ? color : "var(--border)",
+                            }}
+                          />
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Output device */}
+                <div className="mb-7">
+                  {sectionHeader("Speaker (output)")}
+                  <select
+                    value={audioDevices.selectedOutputId}
+                    onChange={(e) => audioDevices.setSelectedOutputId(e.target.value)}
+                    className="w-full px-3 py-[9px] pr-8 rounded-[7px] border-[1.5px] border-[var(--border)] bg-[var(--surface)] text-[var(--text-primary)] text-[13px] outline-none appearance-none cursor-pointer focus:border-[var(--theme)] transition-colors"
+                    style={{
+                      backgroundImage: `url("data:image/svg+xml,%3Csvg width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2' xmlns='http://www.w3.org/2000/svg'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E")`,
+                      backgroundRepeat: "no-repeat",
+                      backgroundPosition: "right 12px center",
+                    }}
+                  >
+                    <option value="">System default</option>
+                    {audioDevices.outputDevices.map((d) => (
+                      <option key={d.deviceId} value={d.deviceId}>{d.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Recording playback gain */}
+                <div className="mb-7">
+                  {sectionHeader("Recording playback")}
+                  {settingRow(
+                    "Playback gain",
+                    "Boost volume when listening back to your recordings",
+                    <div className="flex items-center gap-3 w-[200px]">
+                      <input
+                        type="range"
+                        min="2"
+                        max="60"
+                        step="1"
+                        value={Math.round(recordingPlaybackGain * 2)}
+                        onChange={(e) => setRecordingPlaybackGain(Number(e.target.value) / 2)}
+                        className="flex-1 h-1 bg-[var(--border)] rounded-sm outline-none appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--accent)] [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:shadow-[0_1px_4px_rgba(0,0,0,0.2)] [&::-webkit-slider-thumb]:cursor-pointer"
+                      />
+                      <span className="text-[12px] font-medium text-[var(--text-secondary)] min-w-[40px] text-right">
+                        {recordingPlaybackGain % 1 === 0 ? `${recordingPlaybackGain}x` : `${recordingPlaybackGain.toFixed(1)}x`}
+                      </span>
+                    </div>,
+                    true,
+                  )}
+                </div>
+
+                {/* Mic test */}
+                <div className="mb-7">
+                  {sectionHeader("Microphone test")}
+                  <p className="text-[13px] text-[var(--text-secondary)] leading-[1.7] mb-4">
+                    Record a short clip and play it back immediately to verify your microphone is working correctly.
+                  </p>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={handleTestMic}
+                      className={`flex items-center gap-[6px] px-[18px] py-2 rounded-[7px] text-[13px] font-medium border-none cursor-pointer transition-all ${
+                        testState === "recording"
+                          ? "bg-[#DC2626] text-white hover:opacity-85 animate-pulse"
+                          : testState === "playing"
+                          ? "bg-[var(--theme)] text-white hover:opacity-85"
+                          : "bg-[var(--accent)] text-white hover:opacity-80 hover:-translate-y-px"
+                      }`}
+                    >
+                      {testState === "recording" ? (
+                        <>
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                            <rect x="6" y="6" width="12" height="12" rx="2" />
+                          </svg>
+                          Stop recording
+                        </>
+                      ) : testState === "playing" ? (
+                        <>
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                            <rect x="6" y="4" width="4" height="16" />
+                            <rect x="14" y="4" width="4" height="16" />
+                          </svg>
+                          Stop playback
+                        </>
+                      ) : (
+                        <>
+                          <svg width="10" height="10" viewBox="0 0 24 24">
+                            <circle cx="12" cy="12" r="6" fill="currentColor" />
+                          </svg>
+                          Test microphone
+                        </>
+                      )}
+                    </button>
+                    {testState === "recording" && (
+                      <span className="text-[12px] text-[#DC2626] font-medium">
+                        Recording… (auto-stops after 5s)
+                      </span>
+                    )}
+                    {testState === "playing" && (
+                      <span className="text-[12px] text-[var(--theme-text)] font-medium">
+                        Playing back…
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             )}

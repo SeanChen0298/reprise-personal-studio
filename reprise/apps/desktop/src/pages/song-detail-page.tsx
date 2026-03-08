@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { Sidebar } from "../components/sidebar";
 import { AudioPlayer } from "../components/audio-player";
 import { useSongStore } from "../stores/song-store";
-import { STATUS_CONFIG, formatMs } from "../lib/status-config";
+import { STATUS_CONFIG, STATUS_ORDER, formatMs } from "../lib/status-config";
 import { EditSongModal } from "../components/edit-song-modal";
 import { ConfirmDialog } from "../components/confirm-dialog";
 
@@ -29,10 +29,22 @@ export function SongDetailPage() {
     );
   }
 
-  const masteredCount = lines.filter((l) => l.status === "mastered").length;
-  const learningCount = lines.filter((l) => l.status === "learning").length;
-  const notStartedCount = lines.filter((l) => l.status === "not_started").length;
-  const masteryPct = lines.length > 0 ? Math.round((masteredCount / lines.length) * 100) : song.mastery;
+  // Count lines at each status tier (exact)
+  const statusCounts = STATUS_ORDER.reduce((acc, s) => {
+    acc[s] = lines.filter((l) => l.status === s).length;
+    return acc;
+  }, {} as Record<string, number>);
+
+  // "At or above" counts for overlapping bar fills (each tier covers lines at that tier OR higher)
+  const atOrAbove = (tier: string) => {
+    const tierIdx = STATUS_ORDER.indexOf(tier as never);
+    return lines.filter((l) => STATUS_ORDER.indexOf(l.status) >= tierIdx).length;
+  };
+
+  // Mastery = % of lines at best_take_set (the gold standard)
+  const masteryPct = lines.length > 0
+    ? Math.round((statusCounts["best_take_set"] / lines.length) * 100)
+    : song.mastery;
   const hasAudio = song.download_status === "done" && song.audio_path;
 
   return (
@@ -89,6 +101,15 @@ export function SongDetailPage() {
               </svg>
               Audio setup
             </button>
+            <button
+              onClick={() => navigate(`/song/${id}/recordings`)}
+              className="flex items-center gap-[5px] px-3.5 py-[6px] rounded-[7px] border-[1.5px] border-[var(--border)] bg-transparent text-[12.5px] font-medium text-[var(--text-secondary)] hover:border-[#888] hover:text-[var(--text-primary)] hover:bg-[var(--accent-light)] transition-all cursor-pointer"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="3" />
+              </svg>
+              Recordings
+            </button>
             {hasAudio && (
               <button
                 onClick={() => navigate(`/song/${id}/practice`)}
@@ -129,7 +150,7 @@ export function SongDetailPage() {
                 <div className="font-serif text-[24px] tracking-[-0.5px]">{song.title}</div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-[11px] font-medium px-2.5 py-[3px] rounded-full bg-[var(--theme-light)] text-[var(--theme-text)] flex items-center gap-1">
-                    {masteryPct}% mastered
+                    {masteryPct}% best take
                   </span>
                   {lines.length > 0 && (
                     <span className="text-[11px] font-medium px-2.5 py-[3px] rounded-full bg-[var(--accent-light)] text-[var(--text-secondary)] flex items-center gap-1">
@@ -158,31 +179,56 @@ export function SongDetailPage() {
               <div className="mb-6">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-[11px] font-medium text-[var(--text-muted)] uppercase tracking-[0.06em]">
-                    Overall mastery
+                    Progress
                   </span>
                   <span className="text-[13px] font-medium text-[var(--theme-text)]">
-                    {masteryPct}%
+                    {masteryPct}% best take
                   </span>
                 </div>
-                <div className="h-[6px] bg-[var(--border-subtle)] rounded-[3px] overflow-hidden mb-2">
-                  <div
-                    className="h-full rounded-[3px] bg-gradient-to-r from-[var(--theme)] to-[#93C5FD] transition-[width] duration-500"
-                    style={{ width: `${masteryPct}%` }}
-                  />
-                </div>
-                <div className="flex gap-4">
-                  <div className="flex items-center gap-[5px] text-[11.5px] text-[var(--text-muted)]">
-                    <span className="w-2 h-2 rounded-full bg-[#22C55E]" />
-                    <span className="font-medium text-[var(--text-secondary)]">{masteredCount}</span> mastered
-                  </div>
-                  <div className="flex items-center gap-[5px] text-[11.5px] text-[var(--text-muted)]">
-                    <span className="w-2 h-2 rounded-full bg-[var(--theme)]" />
-                    <span className="font-medium text-[var(--text-secondary)]">{learningCount}</span> learning
-                  </div>
-                  <div className="flex items-center gap-[5px] text-[11.5px] text-[var(--text-muted)]">
-                    <span className="w-2 h-2 rounded-full bg-[var(--border)]" />
-                    <span className="font-medium text-[var(--text-secondary)]">{notStartedCount}</span> not started
-                  </div>
+
+                {/* Multi-color overlapping bar */}
+                {(() => {
+                  // Tiers to render (lowest → highest, each overlaps the previous)
+                  const tiers: Array<{ key: string; color: string }> = [
+                    { key: "listened",      color: STATUS_CONFIG.listened.barColor },
+                    { key: "annotated",     color: STATUS_CONFIG.annotated.barColor },
+                    { key: "practiced",     color: STATUS_CONFIG.practiced.barColor },
+                    { key: "recorded",      color: STATUS_CONFIG.recorded.barColor },
+                    { key: "best_take_set", color: STATUS_CONFIG.best_take_set.barColor },
+                  ];
+                  const tooltip = STATUS_ORDER
+                    .filter((s) => statusCounts[s] > 0)
+                    .map((s) => `${statusCounts[s]} ${STATUS_CONFIG[s].label.toLowerCase()}`)
+                    .join(", ");
+                  return (
+                    <div
+                      className="h-[6px] bg-[var(--border-subtle)] rounded-[3px] overflow-hidden mb-2 relative"
+                      title={tooltip || "No lines practiced yet"}
+                    >
+                      {tiers.map(({ key, color }) => {
+                        const pct = (atOrAbove(key) / lines.length) * 100;
+                        if (pct === 0) return null;
+                        return (
+                          <div
+                            key={key}
+                            className="absolute inset-y-0 left-0 transition-[width] duration-500"
+                            style={{ width: `${pct}%`, background: color }}
+                          />
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+
+                {/* Legend */}
+                <div className="flex flex-wrap gap-x-4 gap-y-1">
+                  {STATUS_ORDER.filter((s) => statusCounts[s] > 0).map((s) => (
+                    <div key={s} className="flex items-center gap-[5px] text-[11.5px] text-[var(--text-muted)]">
+                      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: STATUS_CONFIG[s].dot }} />
+                      <span className="font-medium text-[var(--text-secondary)]">{statusCounts[s]}</span>
+                      {STATUS_CONFIG[s].label.toLowerCase()}
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
@@ -238,10 +284,7 @@ export function SongDetailPage() {
                         </span>
                         <span
                           className="w-2 h-2 rounded-full flex-shrink-0"
-                          style={{
-                            background: cfg.dot,
-                            border: line.status === "not_started" ? "1px solid #D1D1D1" : "none",
-                          }}
+                          style={{ background: cfg.dot }}
                         />
                         <div className="flex-1 min-w-0">
                           <div className="text-[14px] leading-[1.5] text-[var(--text-primary)] truncate">

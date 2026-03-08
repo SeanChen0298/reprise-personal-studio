@@ -4,6 +4,7 @@ import type { Section } from "../../types/song";
 import { useSongStore } from "../../stores/song-store";
 import { useLinePlayer } from "../../hooks/use-line-player";
 import { useAudioDevices } from "../../hooks/use-audio-devices";
+import { usePreferencesStore } from "../../stores/preferences-store";
 import { LineNavigator } from "./line-navigator";
 import { PracticeTopbar } from "./practice-topbar";
 import { PracticeCenter } from "./practice-center";
@@ -38,7 +39,9 @@ export function PracticePage() {
   const [autoPlayOnClick, setAutoPlayOnClick] = useState(true);
   const [recordingSection, setRecordingSection] = useState<Section | null>(null);
   const [activeSection, setActiveSection] = useState<Section | null>(null);
-  const [skipCountdown, setSkipCountdown] = useState(false);
+  const incrementPlayCount = useSongStore((s) => s.incrementPlayCount);
+  const countInEnabled = usePreferencesStore((s) => s.countInEnabled);
+  const [skipCountdown, setSkipCountdown] = useState(!countInEnabled);
   const [recordThrough, setRecordThrough] = useState(false);
   const audioDevices = useAudioDevices();
   const rawSections = useSongStore((s) => (id ? s.sections[id] : undefined));
@@ -68,6 +71,13 @@ export function PracticePage() {
     audioPath,
     lines,
     initialLineIndex: 0,
+    onLinePlayed: useCallback(
+      (index: number) => {
+        const line = lines[index];
+        if (id && line) incrementPlayCount(id, line.id);
+      },
+      [lines, id, incrementPlayCount]
+    ),
   });
 
   const handleShiftClick = useCallback(

@@ -38,6 +38,8 @@ export interface UseLinePlayerReturn {
   nextLine: () => void;
   prevLine: () => void;
   seekWithinLine: (fraction: number) => void;
+  /** Suspend auto-advance (line index won't change) while true. Time still tracks. */
+  setAdvancePaused: (v: boolean) => void;
 }
 
 interface Options {
@@ -47,6 +49,8 @@ interface Options {
   initialSpeed?: number;
   maxLoops?: number;
   onLineChange?: (index: number) => void;
+  /** Called once each time a line is played through to its end_ms in practice mode */
+  onLinePlayed?: (index: number) => void;
 }
 
 export function useLinePlayer(opts: Options): UseLinePlayerReturn {
@@ -81,8 +85,13 @@ export function useLinePlayer(opts: Options): UseLinePlayerReturn {
     loopRange,
     lines,
     onLineChange,
+    onLinePlayed: opts.onLinePlayed,
+    pauseAdvance: false,
   });
-  stateRef.current = { currentLineIndex, isPlaying, loopEnabled, loopCount, maxLoops, loopRange, lines, onLineChange };
+  stateRef.current = { currentLineIndex, isPlaying, loopEnabled, loopCount, maxLoops, loopRange, lines, onLineChange, onLinePlayed: opts.onLinePlayed, pauseAdvance: stateRef.current.pauseAdvance };
+
+  // Tracks whether the line end was already crossed (to fire onLinePlayed exactly once per crossing)
+  const wasAtEndRef = useRef(false);
 
   const rafRef = useRef<number>(0);
 
@@ -158,6 +167,16 @@ export function useLinePlayer(opts: Options): UseLinePlayerReturn {
         const t = audio.currentTime;
         setCurrentTime(t);
 
+        const line = st.lines[st.currentLineIndex];
+        const hasTs = line?.start_ms != null && line?.end_ms != null;
+
+        // Detect line-end crossing and fire onLinePlayed exactly once per crossing
+        const atEnd = hasTs && t >= (line.end_ms! / 1000);
+        if (atEnd && !wasAtEndRef.current) {
+          st.onLinePlayed?.(st.currentLineIndex);
+        }
+        wasAtEndRef.current = atEnd;
+
         // One-shot playback: stop when reaching the end time
         if (playOnceEndRef.current != null && t >= playOnceEndRef.current) {
           audio.pause();
@@ -167,8 +186,12 @@ export function useLinePlayer(opts: Options): UseLinePlayerReturn {
           return;
         }
 
-        const line = st.lines[st.currentLineIndex];
-        const hasTs = line?.start_ms != null && line?.end_ms != null;
+        // During recording / feedback, don't auto-advance the line index.
+        // Time still updates so lineProgress can be used for auto-stop detection.
+        if (st.pauseAdvance) {
+          rafRef.current = requestAnimationFrame(tick);
+          return;
+        }
 
         if (st.loopEnabled) {
           // Loop mode: replay line(s) N times, then advance
@@ -266,6 +289,7 @@ export function useLinePlayer(opts: Options): UseLinePlayerReturn {
     (index: number, autoPlay = true) => {
       if (index < 0 || index >= lines.length) return;
       userNavigatedRef.current = true;
+      wasAtEndRef.current = false;
       setCurrentLineIndex(index);
       setLoopCount(1);
       onLineChange?.(index);
@@ -291,6 +315,7 @@ export function useLinePlayer(opts: Options): UseLinePlayerReturn {
       // Clear any previous one-shot
       playOnceEndRef.current = line.end_ms / 1000;
       userNavigatedRef.current = true;
+      wasAtEndRef.current = false;
       setCurrentLineIndex(index);
       setLoopCount(1);
       onLineChange?.(index);
@@ -315,9 +340,14 @@ export function useLinePlayer(opts: Options): UseLinePlayerReturn {
       const targetTime = lineStartSec + fraction * lineDuration;
       audio.currentTime = targetTime;
       setCurrentTime(targetTime);
+      if (fraction < 1) wasAtEndRef.current = false; // allow re-firing if seeking back
     },
     [hasTimestamps, lineStartSec, lineDuration]
   );
+
+  const setAdvancePaused = useCallback((v: boolean) => {
+    stateRef.current.pauseAdvance = v;
+  }, []);
 
   const setVolume = useCallback((v: number) => {
     setVolumeState(Math.round(Math.min(1, Math.max(0, v)) * 100) / 100);
@@ -363,5 +393,6 @@ export function useLinePlayer(opts: Options): UseLinePlayerReturn {
     nextLine,
     prevLine,
     seekWithinLine,
+    setAdvancePaused,
   };
 }

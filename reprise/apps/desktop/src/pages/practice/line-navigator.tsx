@@ -27,7 +27,7 @@ export function LineNavigator({
   const listRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef<HTMLDivElement>(null);
 
-  const masteredCount = lines.filter((l) => l.status === "mastered").length;
+  const masteredCount = lines.filter((l) => l.status === "best_take_set").length;
   const masteryPct = lines.length > 0 ? Math.round((masteredCount / lines.length) * 100) : 0;
 
   useEffect(() => {

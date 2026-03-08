@@ -322,7 +322,7 @@ export function LyricsInputPage() {
         order: i,
         start_ms: tl.start_ms,
         end_ms: tl.end_ms,
-        status: "not_started" as const,
+        status: "new" as const,
         created_at: now,
         updated_at: now,
       }));
@@ -352,7 +352,7 @@ export function LyricsInputPage() {
           order: i,
           start_ms: l.start_ms ?? existing?.start_ms,
           end_ms: l.end_ms ?? existing?.end_ms,
-          status: existing?.status ?? ("not_started" as const),
+          status: existing?.status ?? ("new" as const),
           created_at: existing?.created_at ?? now,
           updated_at: now,
         };

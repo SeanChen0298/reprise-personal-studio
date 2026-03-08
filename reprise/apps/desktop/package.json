@@ -15,9 +15,11 @@
     "@tauri-apps/api": "^2.2.0",
     "@tauri-apps/plugin-fs": "^2.4.5",
     "@tauri-apps/plugin-shell": "^2.2.0",
+    "music-tempo": "^1.0.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.1.0",
+    "wavesurfer.js": "^7.12.1",
     "zustand": "^5.0.3"
   },
   "devDependencies": {

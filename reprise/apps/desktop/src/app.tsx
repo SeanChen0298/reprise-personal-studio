@@ -15,6 +15,7 @@ import { LyricsInputPage } from "./pages/lyrics-input-page";
 import { SettingsPage } from "./pages/settings-page";
 import { PracticePage } from "./pages/practice";
 import { TimestampPage } from "./pages/timestamp-page";
+import { RecordingsPage } from "./pages/recordings-page";
 
 export function App() {
   const initialize = useAuthStore((s) => s.initialize);
@@ -102,6 +103,14 @@ export function App() {
           element={
             <ProtectedRoute>
               <LyricsInputPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/song/:id/recordings"
+          element={
+            <ProtectedRoute>
+              <RecordingsPage />
             </ProtectedRoute>
           }
         />

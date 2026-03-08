@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import type { Line, Section } from "../../types/song";
+import { playRecordingWithGain, type RecordingPlaybackHandle } from "../../lib/play-recording";
 import { useSongStore } from "../../stores/song-store";
 import { ConfirmDialog } from "../../components/confirm-dialog";
 import { formatMs } from "../../lib/status-config";
@@ -43,7 +44,8 @@ export function RecordingsBar({ songId, activeLineId, activeLineOrder, sections,
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [abPlayingId, setAbPlayingId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const playHandleRef = useRef<RecordingPlaybackHandle | null>(null);
+  const abAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const handlePlay = (filePath: string, id: string) => {
     // Stop A/B mode if active
@@ -52,18 +54,24 @@ export function RecordingsBar({ songId, activeLineId, activeLineOrder, sections,
     }
 
     if (playingId === id) {
-      audioRef.current?.pause();
+      playHandleRef.current?.stop();
+      playHandleRef.current = null;
       setPlayingId(null);
       return;
     }
-    if (audioRef.current) {
-      audioRef.current.pause();
-    }
-    const audio = new Audio(convertFileSrc(filePath));
-    audio.onended = () => setPlayingId(null);
-    audio.play();
-    audioRef.current = audio;
+
+    playHandleRef.current?.stop();
+    playHandleRef.current = null;
     setPlayingId(id);
+
+    playRecordingWithGain(filePath, () => {
+      setPlayingId((prev) => (prev === id ? null : prev));
+      playHandleRef.current = null;
+    }).then((handle) => {
+      playHandleRef.current = handle;
+    }).catch(() => {
+      setPlayingId((prev) => (prev === id ? null : prev));
+    });
   };
 
   const handleABPlay = (filePath: string, id: string, lineId: string) => {
@@ -75,12 +83,13 @@ export function RecordingsBar({ songId, activeLineId, activeLineOrder, sections,
 
     // Stop any solo playback
     if (playingId) {
-      audioRef.current?.pause();
+      playHandleRef.current?.stop();
+      playHandleRef.current = null;
       setPlayingId(null);
     }
     // Stop previous A/B
     if (abPlayingId) {
-      audioRef.current?.pause();
+      abAudioRef.current?.pause();
       onABStop?.();
     }
 
@@ -95,7 +104,7 @@ export function RecordingsBar({ songId, activeLineId, activeLineOrder, sections,
       onABStop?.();
     };
     audio.play();
-    audioRef.current = audio;
+    abAudioRef.current = audio;
     setAbPlayingId(id);
 
     // Start backing track from the same position
@@ -103,7 +112,7 @@ export function RecordingsBar({ songId, activeLineId, activeLineOrder, sections,
   };
 
   const handleABStop = () => {
-    audioRef.current?.pause();
+    abAudioRef.current?.pause();
     setAbPlayingId(null);
     onABStop?.();
   };
@@ -171,7 +180,7 @@ export function RecordingsBar({ songId, activeLineId, activeLineOrder, sections,
 
               {/* A/B Compare button */}
               <button
-                onClick={() => handleABPlay(rec.file_path, rec.id, rec.line_id)}
+                onClick={() => rec.line_id && handleABPlay(rec.file_path, rec.id, rec.line_id)}
                 title={abPlayingId === rec.id ? "Stop A/B comparison" : "A/B compare with backing track"}
                 className={`text-[9px] font-bold px-[6px] py-[2px] rounded-[4px] border cursor-pointer transition-all flex-shrink-0 ${
                   abPlayingId === rec.id
