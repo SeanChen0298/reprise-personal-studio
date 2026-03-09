@@ -208,8 +208,10 @@ export function useLinePlayer(opts: Options): UseLinePlayerReturn {
               setCurrentLineIndex(nextIdx);
               st.onLineChange?.(nextIdx);
             } else if (st.loopCount < st.maxLoops) {
-              // Completed all lines in range, but more loops to go — restart range
+              // Completed all lines in range, but more loops to go — restart range.
+              // skipSeekRef prevents the currentLineIndex useEffect from resetting loopCount to 1.
               setLoopCount((c) => c + 1);
+              skipSeekRef.current = true;
               setCurrentLineIndex(rangeStart);
               st.onLineChange?.(rangeStart);
               const startLine = st.lines[rangeStart];
@@ -297,6 +299,7 @@ export function useLinePlayer(opts: Options): UseLinePlayerReturn {
       const line = lines[index];
       if (audio && line?.start_ms != null) {
         audio.currentTime = line.start_ms / 1000;
+        setCurrentTime(line.start_ms / 1000);
         if (autoPlay) {
           audio.play().then(() => setIsPlaying(true)).catch(() => {});
         }

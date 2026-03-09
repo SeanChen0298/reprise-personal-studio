@@ -1,9 +1,7 @@
-import { useEffect, useRef } from "react";
 import type { HighlightType } from "../lib/highlight-config";
 import type { VocalSymbol } from "../lib/symbol-config";
 
 interface Props {
-  position: { x: number; y: number };
   highlights: HighlightType[];
   symbols: VocalSymbol[];
   onHighlight: (typeId: string) => void;
@@ -13,39 +11,11 @@ interface Props {
 }
 
 export function FloatingToolbar({
-  position, highlights, symbols, onHighlight, onInsertSymbol, onRemoveAnnotation, onClose,
+  highlights, symbols, onHighlight, onInsertSymbol, onRemoveAnnotation,
 }: Props) {
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        onClose();
-      }
-    };
-    const escHandler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("mousedown", handler);
-    document.addEventListener("keydown", escHandler);
-    return () => {
-      document.removeEventListener("mousedown", handler);
-      document.removeEventListener("keydown", escHandler);
-    };
-  }, [onClose]);
-
-  // Clamp position to stay within viewport
-  const style: React.CSSProperties = {
-    position: "fixed",
-    left: position.x,
-    top: position.y - 8,
-    transform: "translate(-50%, -100%)",
-    zIndex: 50,
-  };
-
   return (
-    <div ref={ref} style={style}>
-      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[8px] shadow-lg px-2 py-[6px] flex flex-col gap-[4px]">
+    <div className="flex justify-center mt-3">
+      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[8px] px-2 py-[6px] flex flex-col gap-[4px]">
         {/* Highlights row */}
         <div className="flex items-center gap-[4px]">
           {highlights.map((hl) => (
@@ -90,10 +60,6 @@ export function FloatingToolbar({
             ))}
           </div>
         )}
-      </div>
-      {/* Arrow pointing down */}
-      <div className="flex justify-center">
-        <div className="w-[8px] h-[8px] bg-[var(--surface)] border-r border-b border-[var(--border)] transform rotate-45 -mt-[5px]" />
       </div>
     </div>
   );

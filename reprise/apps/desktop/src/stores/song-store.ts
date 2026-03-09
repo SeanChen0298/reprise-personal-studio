@@ -401,29 +401,47 @@ export const useSongStore = create<SongStore>()((set, get) => ({
 
   setLinesForLanguage: async (songId, language, lines) => {
     const userId = await getUserId();
+    const song = get().songs.find((s) => s.id === songId);
+    const translationLang = song?.translation_language ?? null;
+    // A "translation save" is when we're explicitly saving the song's translation language.
+    // Everything else (primary language, language change, etc.) is a "primary save".
+    const isTranslationSave = translationLang != null && language === translationLang;
 
-    // Optimistic: keep lines of OTHER languages, replace matching-language lines
+    // Optimistic: for primary saves keep only translation lines; for translation saves keep other-language lines
     set((s) => ({
       lines: {
         ...s.lines,
         [songId]: [
-          ...(s.lines[songId] ?? []).filter(
-            (l) => l.language != null && l.language !== language
+          ...(s.lines[songId] ?? []).filter((l) =>
+            isTranslationSave
+              ? l.language != null && l.language !== language
+              : translationLang != null && l.language === translationLang
           ),
           ...lines,
         ],
       },
     }));
 
-    // Delete: lines matching this language + null-language legacy lines (both treated as primary)
-    const orFilter = language
-      ? `language.eq.${language},language.is.null`
-      : `language.is.null`;
-    const { error: delError } = await db
-      .from("lines")
-      .delete()
-      .eq("song_id", songId)
-      .or(orFilter);
+    // DB delete
+    let delError: unknown;
+    if (isTranslationSave) {
+      // Translation save: delete only lines matching this language (+ null-language legacy)
+      const orFilter = language
+        ? `language.eq.${language},language.is.null`
+        : `language.is.null`;
+      ({ error: delError } = await db
+        .from("lines")
+        .delete()
+        .eq("song_id", songId)
+        .or(orFilter));
+    } else {
+      // Primary save: delete ALL lines except the translation language, so a language
+      // change (e.g. "ja" → "ja-Hira") never leaves stale lines behind.
+      const deleteQuery = translationLang
+        ? db.from("lines").delete().eq("song_id", songId).neq("language", translationLang)
+        : db.from("lines").delete().eq("song_id", songId);
+      ({ error: delError } = await deleteQuery);
+    }
 
     if (delError) {
       await get().loadAllData();

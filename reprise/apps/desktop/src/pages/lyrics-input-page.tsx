@@ -414,19 +414,17 @@ export function LyricsInputPage() {
       setPendingTranslationPairs([]);
     }
 
-    // Trigger furigana generation for Japanese lyrics
-    if (lyricsLang?.startsWith("ja")) {
-      generateFuriganaForSong(id!).catch(() => {});
-    }
-
-    // Remap section boundaries to new line orders
+    // Remap section boundaries to new line orders.
+    // Must use mainStoredLines (not storedLines) — translation lines share the same
+    // order values as main lines, so storedLines.find(order) could return a translation
+    // line whose ID is not in newOrderById, causing sections to be wrongly deleted.
     const newOrderById = new Map<string, number>();
     for (const nl of newLines) newOrderById.set(nl.id, nl.order);
 
     for (const sec of sections) {
       // Find the stored lines at section boundaries
-      const startLine = storedLines.find((sl) => sl.order === sec.start_line_order);
-      const endLine = storedLines.find((sl) => sl.order === sec.end_line_order);
+      const startLine = mainStoredLines.find((sl) => sl.order === sec.start_line_order);
+      const endLine = mainStoredLines.find((sl) => sl.order === sec.end_line_order);
       if (!startLine || !endLine) {
         removeSection(id!, sec.id);
         continue;
@@ -441,6 +439,11 @@ export function LyricsInputPage() {
       if (newStart !== sec.start_line_order || newEnd !== sec.end_line_order) {
         updateSection(id!, sec.id, { start_line_order: newStart, end_line_order: newEnd });
       }
+    }
+
+    // Fire furigana generation AFTER section remapping so it never races with sections
+    if (lyricsLang?.startsWith("ja")) {
+      generateFuriganaForSong(id!).catch(() => {});
     }
 
     setSaved(true);
@@ -972,10 +975,10 @@ export function LyricsInputPage() {
             )}
           </div>
         </main>
-      </div>
 
-      {/* Audio player */}
-      {song.audio_path && <AudioPlayer audioPath={song.audio_path} />}
+        {/* Audio player — footer, full width, bottom of content column */}
+        {song.audio_path && <AudioPlayer audioPath={song.audio_path} />}
+      </div>
 
       {/* Save toast */}
       {saved && (

@@ -94,14 +94,15 @@ export function PracticeCenter({
   const [countdownActive, setCountdownActive] = useState(false);
   const [countdownBeat, setCountdownBeat] = useState(0);
   const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const preRollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const [editText, setEditText] = useState("");
   const [editAnnotations, setEditAnnotations] = useState<Annotation[]>([]);
   const editableRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Floating toolbar position for inline editing
-  const [toolbarPos, setToolbarPos] = useState<{ x: number; y: number } | null>(null);
+  // Tracks whether toolbar was triggered by a text selection (unused for visibility now that toolbar is always shown)
+  const [, setToolbarPos] = useState<{ x: number; y: number } | null>(null);
   const [hasSelectionOverAnnotation, setHasSelectionOverAnnotation] = useState(false);
   const editWrapperRef = useRef<HTMLDivElement>(null);
 
@@ -404,37 +405,58 @@ export function PracticeCenter({
         setCountdownActive(false);
         setCountdownBeat(0);
 
-        player.setAdvancePaused(true);
-        recordingLineIdRef.current = lineId;
-        recordingSectionRef.current = section ?? null;
-        recordingEndLineIdx.current = endLineIdx;
-        setLastRecordingScope({ lineId, startIdx: startLineIdx, endIdx: endLineIdx, section });
+        // Pre-roll: seek to 3 s before start_ms, play backing for context, then start recording.
+        const startMs = lines[startLineIdx]?.start_ms ?? 0;
+        const preRollAudioStart = Math.max(0, startMs - 3000); // audio position to seek to (ms)
+        const preRollAudioDuration = startMs - preRollAudioStart; // audio ms to play before recording
+        const preRollRealMs = preRollAudioDuration / (player.speed || 1); // wall-clock ms to wait
 
-        recorder.startRecording(lineId, songFolder, inputDeviceId || undefined).then(() => {
-          if (playBacking) player.play();
-        });
+        player.setAdvancePaused(true);
+        const audio = player.audioRef.current;
+        if (audio) audio.currentTime = preRollAudioStart / 1000;
+        player.play(); // start backing for context regardless of playBacking flag
+
+        preRollTimerRef.current = setTimeout(() => {
+          preRollTimerRef.current = null;
+          recordingLineIdRef.current = lineId;
+          recordingSectionRef.current = section ?? null;
+          recordingEndLineIdx.current = endLineIdx;
+          setLastRecordingScope({ lineId, startIdx: startLineIdx, endIdx: endLineIdx, section });
+
+          recorder.startRecording(lineId, songFolder, inputDeviceId || undefined).then(() => {
+            // Audio is already playing from pre-roll; pause it now if backing is unwanted
+            if (!playBacking) player.pause();
+          });
+        }, preRollRealMs);
       } else {
         const remaining = totalBeats - beat;
         setCountdownBeat(remaining);
         playTick(remaining % 4 === 0);
       }
     }, beatInterval);
-  }, [bpm, player, playTick, recorder, songFolder, inputDeviceId, playBacking, skipCountdown, startRecordingImmediate]);
+  }, [bpm, lines, player, playTick, recorder, songFolder, inputDeviceId, playBacking, skipCountdown, startRecordingImmediate]);
 
-  // Cancel countdown
+  // Cancel countdown (and any in-progress pre-roll)
   const cancelCountdown = useCallback(() => {
     if (countdownTimerRef.current) {
       clearInterval(countdownTimerRef.current);
       countdownTimerRef.current = null;
     }
+    if (preRollTimerRef.current) {
+      clearTimeout(preRollTimerRef.current);
+      preRollTimerRef.current = null;
+      player.pause();
+      player.setAdvancePaused(false);
+    }
     setCountdownActive(false);
     setCountdownBeat(0);
-  }, []);
+  }, [player]);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+      if (preRollTimerRef.current) clearTimeout(preRollTimerRef.current);
       if (tailBufferRef.current) clearTimeout(tailBufferRef.current);
     };
   }, []);
@@ -503,6 +525,14 @@ export function PracticeCenter({
       cancelCountdown();
       return;
     }
+    // Cancel an in-progress pre-roll (post-countdown, pre-recording)
+    if (preRollTimerRef.current) {
+      clearTimeout(preRollTimerRef.current);
+      preRollTimerRef.current = null;
+      player.pause();
+      player.setAdvancePaused(false);
+      return;
+    }
     if (recorder.isRecording) {
       await saveRecording(recordingSectionRef.current?.id);
       return;
@@ -516,7 +546,7 @@ export function PracticeCenter({
     } else {
       startCountdownThenRecord(scope.lineId, scope.startIdx, scope.endIdx, scope.section);
     }
-  }, [countdownActive, cancelCountdown, recorder.isRecording, saveRecording, getRecordingScope, skipCountdown, startRecordingImmediate, startCountdownThenRecord]);
+  }, [countdownActive, cancelCountdown, player, recorder.isRecording, saveRecording, getRecordingScope, skipCountdown, startRecordingImmediate, startCountdownThenRecord]);
 
   // Feedback loop: play back the last recording with gain boost
   const handleFeedbackPlayback = useCallback(() => {
@@ -682,17 +712,14 @@ export function PracticeCenter({
                     >
                       ✓ Done
                     </button>
-                    {toolbarPos && (
-                      <FloatingToolbar
-                        position={toolbarPos}
-                        highlights={highlights}
-                        symbols={symbols}
-                        onHighlight={handleToolbarHighlight}
-                        onInsertSymbol={handleToolbarSymbol}
-                        onRemoveAnnotation={hasSelectionOverAnnotation ? handleRemoveSelectedAnnotation : undefined}
-                        onClose={handleToolbarClose}
-                      />
-                    )}
+                    <FloatingToolbar
+                      highlights={highlights}
+                      symbols={symbols}
+                      onHighlight={handleToolbarHighlight}
+                      onInsertSymbol={handleToolbarSymbol}
+                      onRemoveAnnotation={hasSelectionOverAnnotation ? handleRemoveSelectedAnnotation : undefined}
+                      onClose={handleToolbarClose}
+                    />
                   </div>
                 );
               }
@@ -842,18 +869,15 @@ export function PracticeCenter({
                 >
                   ✓ Done
                 </button>
-                {/* Floating toolbar */}
-                {toolbarPos && (
-                  <FloatingToolbar
-                    position={toolbarPos}
-                    highlights={highlights}
-                    symbols={symbols}
-                    onHighlight={handleToolbarHighlight}
-                    onInsertSymbol={handleToolbarSymbol}
-                    onRemoveAnnotation={hasSelectionOverAnnotation ? handleRemoveSelectedAnnotation : undefined}
-                    onClose={handleToolbarClose}
-                  />
-                )}
+                {/* Annotation toolbar */}
+                <FloatingToolbar
+                  highlights={highlights}
+                  symbols={symbols}
+                  onHighlight={handleToolbarHighlight}
+                  onInsertSymbol={handleToolbarSymbol}
+                  onRemoveAnnotation={hasSelectionOverAnnotation ? handleRemoveSelectedAnnotation : undefined}
+                  onClose={handleToolbarClose}
+                />
               </div>
             ) : (
               /* Normal lyrics display */
