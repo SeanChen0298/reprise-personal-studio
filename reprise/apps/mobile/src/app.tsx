@@ -1,4 +1,7 @@
-import { BrowserRouter, NavLink, Outlet, Route, Routes } from "react-router-dom";
+import { useEffect } from "react";
+import { BrowserRouter, Navigate, NavLink, Outlet, Route, Routes } from "react-router-dom";
+import { useAuthStore } from "./stores/auth-store";
+import AuthPage from "./pages/auth-page";
 import SongsPage from "./pages/songs-page";
 import PracticePage from "./pages/practice-page";
 import SettingsPage from "./pages/settings-page";
@@ -47,12 +50,10 @@ const TABS = [
 function TabLayout() {
   return (
     <div className="flex h-full flex-col bg-[var(--color-bg)]">
-      {/* Page content */}
       <main className="flex flex-1 flex-col overflow-y-auto">
         <Outlet />
       </main>
 
-      {/* Bottom tab bar — min 60px height, each button ≥ 44px touch target */}
       <nav
         className="flex shrink-0 border-t border-[var(--color-border)] bg-[var(--color-surface)]"
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
@@ -81,13 +82,34 @@ function TabLayout() {
   );
 }
 
+function LoadingScreen() {
+  return (
+    <div className="flex h-full items-center justify-center bg-[var(--color-bg)]">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--color-theme)] border-t-transparent" />
+    </div>
+  );
+}
+
 export default function App() {
+  const { user, loading, init } = useAuthStore();
+
+  useEffect(() => {
+    return init();
+  }, [init]);
+
+  if (loading) return <LoadingScreen />;
+
   return (
     <BrowserRouter>
       <Routes>
-        <Route element={<TabLayout />}>
+        <Route
+          path="/login"
+          element={user ? <Navigate to="/" replace /> : <AuthPage />}
+        />
+        <Route element={user ? <TabLayout /> : <Navigate to="/login" replace />}>
           <Route index element={<SongsPage />} />
           <Route path="practice" element={<PracticePage />} />
+          <Route path="practice/:id" element={<PracticePage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
       </Routes>

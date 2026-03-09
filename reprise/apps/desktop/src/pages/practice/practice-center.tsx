@@ -709,11 +709,15 @@ export function PracticeCenter({
                     onDoubleClick={isActive ? (e) => { e.stopPropagation(); enterEditMode(); } : undefined}
                     title={isActive ? "Click to preview · Double-click to edit" : "Click to preview this line"}
                   >
-                    <AnnotatedText
-                      text={lineDisplay}
-                      annotations={line.annotations}
-                      highlights={highlights}
-                    />
+                    {!line.custom_text && line.furigana_html ? (
+                      <span dangerouslySetInnerHTML={{ __html: line.furigana_html }} />
+                    ) : (
+                      <AnnotatedText
+                        text={lineDisplay}
+                        annotations={line.annotations}
+                        highlights={highlights}
+                      />
+                    )}
                   </div>
                   {showTranslation && translationByOrder.has(line.order) && (
                     <div className={`font-sans leading-relaxed text-[var(--text-muted)] ${isActive ? "text-[14px] opacity-65 mt-1" : "text-[12px] opacity-40 mt-0.5"}`}>
@@ -781,11 +785,15 @@ export function PracticeCenter({
           >
             <div className="font-serif text-[20px] tracking-[-0.3px] text-[var(--text-muted)] leading-relaxed">
               {prevLine ? (
-                <AnnotatedText
-                  text={prevLine.custom_text ?? prevLine.text}
-                  annotations={prevLine.annotations}
-                  highlights={highlights}
-                />
+                !prevLine.custom_text && prevLine.furigana_html ? (
+                  <span dangerouslySetInnerHTML={{ __html: prevLine.furigana_html }} />
+                ) : (
+                  <AnnotatedText
+                    text={prevLine.custom_text ?? prevLine.text}
+                    annotations={prevLine.annotations}
+                    highlights={highlights}
+                  />
+                )
               ) : "\u00A0"}
             </div>
             {prevLine && showTranslation && translationByOrder.has(prevLine.order) && (
@@ -861,11 +869,15 @@ export function PracticeCenter({
                   onDoubleClick={(e) => { e.stopPropagation(); enterEditMode(); }}
                   title="Click to preview · Double-click to edit"
                 >
-                  <AnnotatedText
-                    text={displayText}
-                    annotations={currentLine.annotations}
-                    highlights={highlights}
-                  />
+                  {!hasCustomText && currentLine.furigana_html ? (
+                    <span dangerouslySetInnerHTML={{ __html: currentLine.furigana_html }} />
+                  ) : (
+                    <AnnotatedText
+                      text={displayText}
+                      annotations={currentLine.annotations}
+                      highlights={highlights}
+                    />
+                  )}
                 </div>
                 {showTranslation && translationByOrder.has(currentLine.order) && (
                   <div className="text-[15px] text-[var(--text-muted)] font-sans leading-relaxed mt-2 opacity-70">
@@ -930,11 +942,15 @@ export function PracticeCenter({
           >
             <div className="font-serif text-[20px] tracking-[-0.3px] text-[var(--text-muted)] leading-relaxed">
               {nextLineData ? (
-                <AnnotatedText
-                  text={nextLineData.custom_text ?? nextLineData.text}
-                  annotations={nextLineData.annotations}
-                  highlights={highlights}
-                />
+                !nextLineData.custom_text && nextLineData.furigana_html ? (
+                  <span dangerouslySetInnerHTML={{ __html: nextLineData.furigana_html }} />
+                ) : (
+                  <AnnotatedText
+                    text={nextLineData.custom_text ?? nextLineData.text}
+                    annotations={nextLineData.annotations}
+                    highlights={highlights}
+                  />
+                )
               ) : "\u00A0"}
             </div>
             {nextLineData && showTranslation && translationByOrder.has(nextLineData.order) && (

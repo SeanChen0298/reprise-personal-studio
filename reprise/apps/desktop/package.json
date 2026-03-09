@@ -17,6 +17,8 @@
     "@tauri-apps/plugin-fs": "^2.4.5",
     "@tauri-apps/plugin-os": "^2.3.2",
     "@tauri-apps/plugin-shell": "^2.2.0",
+    "kuroshiro": "^1.2.0",
+    "kuroshiro-analyzer-kuromoji": "^1.1.0",
     "music-tempo": "^1.0.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -27,9 +29,11 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",
     "@tauri-apps/cli": "^2.2.0",
+    "@types/path-browserify": "^1.0.3",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",
+    "path-browserify": "^1.0.1",
     "tailwindcss": "^4.0.0",
     "typescript": "~5.7.0",
     "vite": "^6.0.0"

@@ -14,6 +14,26 @@ import type { Line, Section } from "../types/song";
 
 type Mode = "lines" | "bulk";
 
+interface TranslationPair {
+  mainOrder: number; // index into main lines array (= future line order)
+  text: string;
+}
+
+function parseBulkText(raw: string): { mainLines: string[]; translationPairs: TranslationPair[] } {
+  const mainLines: string[] = [];
+  const translationPairs: TranslationPair[] = [];
+  for (const rawLine of raw.split("\n")) {
+    const trimmed = rawLine.trim();
+    if (!trimmed) continue;
+    if (trimmed.startsWith("- ") && mainLines.length > 0) {
+      translationPairs.push({ mainOrder: mainLines.length - 1, text: trimmed.slice(2).trim() });
+    } else {
+      mainLines.push(trimmed);
+    }
+  }
+  return { mainLines, translationPairs };
+}
+
 /** Resolve a BCP-47 language code to a display name using the browser's Intl API */
 function getLangLabel(code: string): string {
   try {
@@ -34,6 +54,7 @@ export function LyricsInputPage() {
   const storedLines = rawLinesForSong ?? [];
   const setLinesForLanguage = useSongStore((s) => s.setLinesForLanguage);
   const updateSong = useSongStore((s) => s.updateSong);
+  const generateFuriganaForSong = useSongStore((s) => s.generateFuriganaForSong);
   const sections = useSongStore((s) => (id ? s.sections[id] : undefined)) ?? [];
   const addSection = useSongStore((s) => s.addSection);
   const updateSection = useSongStore((s) => s.updateSection);
@@ -43,6 +64,7 @@ export function LyricsInputPage() {
   const [mode, setMode] = useState<Mode>("lines");
   const [editLines, setEditLines] = useState<{ id: string; text: string; start_ms?: number; end_ms?: number }[]>([]);
   const [bulkText, setBulkText] = useState("");
+  const [pendingTranslationPairs, setPendingTranslationPairs] = useState<TranslationPair[]>([]);
   const [saved, setSaved] = useState(false);
 
   // Section management state
@@ -53,6 +75,13 @@ export function LyricsInputPage() {
 
   const [isDesktop, setIsDesktop] = useState(true);
   useEffect(() => { isDesktopPlatform().then(setIsDesktop); }, []);
+
+  const [generatingFurigana, setGeneratingFurigana] = useState(false);
+  async function handleGenerateFurigana() {
+    if (!id) return;
+    setGeneratingFurigana(true);
+    try { await generateFuriganaForSong(id); } finally { setGeneratingFurigana(false); }
+  }
 
   // Language fetch state
   const [lyricsLang, setLyricsLang] = useState<string>(song?.language ?? "en");
@@ -152,9 +181,8 @@ export function LyricsInputPage() {
     );
   }
 
-  const bulkLineCount = bulkText
-    .split("\n")
-    .filter((l) => l.trim()).length;
+  const { mainLines: bulkMainLines, translationPairs: bulkTranslationPairs } = parseBulkText(bulkText);
+  const bulkLineCount = bulkMainLines.length;
 
   function handleAddLine() {
     setEditLines((prev) => [
@@ -261,12 +289,10 @@ export function LyricsInputPage() {
   }
 
   function handleApplyBulk() {
-    const lines = bulkText
-      .split("\n")
-      .filter((l) => l.trim())
-      .map((text) => ({ id: crypto.randomUUID(), text: text.trim() }));
-    if (lines.length === 0) return;
-    setEditLines(lines);
+    const { mainLines, translationPairs } = parseBulkText(bulkText);
+    if (mainLines.length === 0) return;
+    setEditLines(mainLines.map((text) => ({ id: crypto.randomUUID(), text })));
+    setPendingTranslationPairs(translationPairs);
     setMode("lines");
   }
 
@@ -369,6 +395,28 @@ export function LyricsInputPage() {
     // Persist the primary language on the song if it changed
     if (lyricsLang && lyricsLang !== song!.language) {
       updateSong(id!, { language: lyricsLang });
+    }
+
+    // Save pending translation pairs from bulk paste
+    if (pendingTranslationPairs.length > 0 && translationLang) {
+      const transLines: Line[] = pendingTranslationPairs.map((tp) => ({
+        id: crypto.randomUUID(),
+        song_id: id!,
+        text: tp.text,
+        language: translationLang,
+        order: tp.mainOrder,
+        status: "new" as const,
+        created_at: now,
+        updated_at: now,
+      }));
+      setLinesForLanguage(id!, translationLang, transLines);
+      updateSong(id!, { translation_language: translationLang });
+      setPendingTranslationPairs([]);
+    }
+
+    // Trigger furigana generation for Japanese lyrics
+    if (lyricsLang?.startsWith("ja")) {
+      generateFuriganaForSong(id!).catch(() => {});
     }
 
     // Remap section boundaries to new line orders
@@ -589,6 +637,21 @@ export function LyricsInputPage() {
                   <option key={lang.code} value={lang.code}>{lang.label}</option>
                 ))}
               </select>
+              {lyricsLang?.startsWith("ja") && (
+                <button
+                  onClick={handleGenerateFurigana}
+                  disabled={generatingFurigana}
+                  title="Generate furigana ruby annotations for all Japanese lines"
+                  className="flex items-center gap-[5px] px-2.5 py-[4px] rounded-[6px] border border-[var(--border)] bg-transparent text-[12px] text-[var(--text-secondary)] hover:border-[#888] hover:text-[var(--text-primary)] transition-all disabled:opacity-50"
+                >
+                  {generatingFurigana ? (
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+                  ) : (
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5" /><path d="M2 12l10 5 10-5" /></svg>
+                  )}
+                  {generatingFurigana ? "Generating…" : "Generate furigana"}
+                </button>
+              )}
             </div>
 
             {/* Mode tabs */}
@@ -626,6 +689,24 @@ export function LyricsInputPage() {
             {/* Line by line mode */}
             {mode === "lines" && (
               <div>
+                {/* Pending translation notice */}
+                {pendingTranslationPairs.length > 0 && (
+                  <div className="flex items-center gap-2 px-3 py-2 mb-2 rounded-[8px] bg-[var(--surface)] border border-[var(--border-subtle)]">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-[var(--theme-text)] flex-shrink-0">
+                      <path d="M5 8l10 0M5 12l6 0" /><rect x="3" y="4" width="18" height="16" rx="2" />
+                    </svg>
+                    <span className="text-[11.5px] text-[var(--text-muted)] flex-1">
+                      {pendingTranslationPairs.length} translation{pendingTranslationPairs.length !== 1 ? "s" : ""} pending — will be saved on "Save lyrics".
+                    </span>
+                    <button
+                      onClick={() => setPendingTranslationPairs([])}
+                      className="text-[11px] text-[var(--text-muted)] bg-transparent border-none cursor-pointer hover:text-red-500 transition-colors flex-shrink-0"
+                    >
+                      Discard
+                    </button>
+                  </div>
+                )}
+
                 {/* Section note */}
                 {!selectedRange && storedLines.length > 1 && sections.length === 0 && (
                   <div className="flex items-center gap-2 px-3 py-2 mb-2 rounded-[8px] bg-[var(--surface)] border border-[var(--border-subtle)]">
@@ -822,19 +903,59 @@ export function LyricsInputPage() {
                 <textarea
                   value={bulkText}
                   onChange={(e) => setBulkText(e.target.value)}
-                  placeholder={"Paste full lyrics here...\n\nEach line will become a separate lyric line.\nEmpty lines will be ignored."}
+                  placeholder={"Paste full lyrics here...\n\nEach line becomes a separate lyric line.\nPrefix a line with \"- \" to mark it as a translation of the line above.\n\nExample:\n今日も晴れている\n- The sky is clear today\nEmpty lines are ignored."}
                   rows={14}
                   className="w-full min-h-[320px] p-4 rounded-[var(--radius)] border-[1.5px] border-[var(--border)] bg-[var(--surface)] text-[var(--text-primary)] font-sans text-[14px] leading-[1.8] outline-none resize-y focus:border-[var(--theme)] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.09)] transition-all placeholder:text-[var(--text-muted)]"
                 />
                 <p className="text-[11.5px] text-[var(--text-muted)] mt-2 leading-relaxed">
-                  Tip: Paste lyrics from a lyrics website. Each newline becomes a separate line. Empty lines are ignored.
+                  Tip: Prefix a line with <code className="font-mono bg-[var(--surface)] px-1 rounded">- </code> (dash + space) to mark it as a translation of the line above. Each non-prefixed line becomes a lyric segment.
                 </p>
-                <div className="flex items-center justify-between mt-4">
-                  <div className="flex items-center gap-[5px] text-[12.5px] text-[var(--text-secondary)]">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M4 6h16M4 12h16M4 18h10" />
+
+                {/* Translation language prompt — shown when translations are detected but no lang set */}
+                {bulkTranslationPairs.length > 0 && !translationLang && (
+                  <div className="flex items-center gap-2 mt-3 p-2.5 rounded-[8px] bg-amber-50 border border-amber-200">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#D97706" strokeWidth="2" className="flex-shrink-0">
+                      <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
                     </svg>
-                    {bulkLineCount} lines detected
+                    <span className="text-[12px] text-amber-800 flex-shrink-0">
+                      {bulkTranslationPairs.length} translation{bulkTranslationPairs.length !== 1 ? "s" : ""} detected — select language:
+                    </span>
+                    <select
+                      value={translationLang}
+                      onChange={(e) => setTranslationLang(e.target.value)}
+                      className="px-2 py-[4px] rounded-[6px] border border-amber-300 bg-white text-[12px] text-[var(--text-primary)] font-sans outline-none focus:border-amber-500 transition-colors cursor-pointer"
+                    >
+                      <option value="">— select —</option>
+                      {SUBTITLE_LANGUAGES.map((lang) => (
+                        <option key={lang.code} value={lang.code}>{lang.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* Translation language confirmed */}
+                {bulkTranslationPairs.length > 0 && translationLang && (
+                  <div className="flex items-center gap-2 mt-3 p-2.5 rounded-[8px] bg-green-50 border border-green-200">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#16A34A" strokeWidth="2" className="flex-shrink-0">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                    <span className="text-[12px] text-green-800">
+                      {bulkTranslationPairs.length} translation{bulkTranslationPairs.length !== 1 ? "s" : ""} will be saved as <strong>{getLangLabel(translationLang)}</strong>.
+                    </span>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between mt-4">
+                  <div className="flex items-center gap-3 text-[12.5px] text-[var(--text-secondary)]">
+                    <div className="flex items-center gap-[5px]">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M4 6h16M4 12h16M4 18h10" />
+                      </svg>
+                      {bulkLineCount} lines
+                    </div>
+                    {bulkTranslationPairs.length > 0 && (
+                      <span className="text-[var(--text-muted)]">+ {bulkTranslationPairs.length} translations</span>
+                    )}
                   </div>
                   <button
                     onClick={handleApplyBulk}

@@ -14,3 +14,4 @@ export type {
 } from "./types/song";
 export type { Json, Database } from "./lib/database.types";
 export { createSupabaseClient } from "./lib/supabase";
+export { generateFurigana } from "./lib/furigana";

@@ -1,5 +1,12 @@
 @import "tailwindcss";
 
+/* Furigana ruby annotation styling */
+ruby rt {
+  font-size: 0.5em;
+  text-align: center;
+  color: var(--text-muted);
+}
+
 @theme {
   --font-sans: "DM Sans", sans-serif;
   --font-serif: "DM Serif Display", serif;

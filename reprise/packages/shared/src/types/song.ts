@@ -51,6 +51,7 @@ export interface Line {
   end_ms?: number;
   status: LineStatus;
   play_count?: number;
+  furigana_html?: string; // HTML with <ruby> tags, auto-generated for language === "ja"
   language?: string; // e.g. "en", "ja" — null/undefined means primary/legacy
   created_at: string;
   updated_at: string;

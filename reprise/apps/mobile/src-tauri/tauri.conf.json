@@ -9,9 +9,11 @@
     "beforeBuildCommand": "pnpm --filter mobile build"
   },
   "app": {
-    "security": {
-      "csp": null
-    }
+  "security": {
+    "csp": null,
+    "dangerousDisableAssetCspModification": true
+  },
+  "withGlobalTauri": true
   },
   "bundle": {
     "active": true,

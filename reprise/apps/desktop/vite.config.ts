@@ -6,6 +6,13 @@ const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig(async () => ({
   plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: {
+      // kuromoji (used by kuroshiro-analyzer-kuromoji) calls path.join to build
+      // dictionary URLs — polyfill it for the browser/Tauri WebView bundle.
+      path: "path-browserify",
+    },
+  },
   clearScreen: false,
   server: {
     port: 5173,

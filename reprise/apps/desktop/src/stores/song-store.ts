@@ -83,6 +83,8 @@ interface SongStore {
   updateLineStatus: (songId: string, lineId: string, status: LineStatus) => Promise<void>;
   /** Increment play_count and auto-upgrade status (listened at 1, practiced at 10) */
   incrementPlayCount: (songId: string, lineId: string) => Promise<void>;
+  /** Generate furigana HTML for all Japanese lines of a song and persist it. Fire-and-forget safe. */
+  generateFuriganaForSong: (songId: string) => Promise<void>;
   updateLineCustomText: (songId: string, lineId: string, customText: string) => Promise<void>;
   updateLineAnnotations: (songId: string, lineId: string, annotations: Annotation[]) => Promise<void>;
   getLinesForSong: (songId: string) => Line[];
@@ -308,6 +310,9 @@ export const useSongStore = create<SongStore>()((set, get) => ({
             updated_at: now,
           }));
           await get().setLines(id, newLines);
+          if (song.language?.startsWith("ja")) {
+            get().generateFuriganaForSong(id).catch(() => {});
+          }
         }
       }
     } catch (err) {
@@ -433,6 +438,9 @@ export const useSongStore = create<SongStore>()((set, get) => ({
         await get().loadAllData();
         throw insError;
       }
+      if (language?.startsWith("ja") && lines.length > 0) {
+        get().generateFuriganaForSong(songId).catch(() => {});
+      }
     }
   },
 
@@ -516,6 +524,39 @@ export const useSongStore = create<SongStore>()((set, get) => ({
     let newStatus = upgradeStatus(line.status, "listened");
     if (newCount >= 10) newStatus = upgradeStatus(newStatus, "practiced");
     await get().updateLine(songId, lineId, { play_count: newCount, status: newStatus });
+  },
+
+  generateFuriganaForSong: async (songId) => {
+    console.log("[furigana] generateFuriganaForSong called for songId:", songId);
+    const song = get().songs.find((s) => s.id === songId);
+    if (!song) return;
+    const allLines = get().lines[songId] ?? [];
+    // Generate for lines explicitly tagged "ja", or untagged lines when the song language is "ja"
+    const targets = allLines.filter(
+      (l) => l.language?.startsWith("ja") || (!l.language && song.language?.startsWith("ja"))
+    );
+    console.log("[furigana] target line count:", targets.length);
+    if (targets.length === 0) return;
+
+    const { generateFurigana } = await import("@reprise/shared");
+
+    for (const line of targets) {
+      try {
+        const html = await generateFurigana(line.text);
+        // Write directly to DB (no updated_at bump) and update in-memory state
+        await supabase.from("lines").update({ furigana_html: html }).eq("id", line.id);
+        set((s) => ({
+          lines: {
+            ...s.lines,
+            [songId]: (s.lines[songId] ?? []).map((l) =>
+              l.id === line.id ? { ...l, furigana_html: html } : l
+            ),
+          },
+        }));
+      } catch (err) {
+        console.error("[furigana] failed for line:", line.id, line.text.slice(0, 30), err);
+      }
+    }
   },
 
   updateLineCustomText: async (songId, lineId, customText) => {
@@ -831,6 +872,7 @@ function dbRowToLine(row: Record<string, unknown>): Line {
     end_ms: row.end_ms as number | undefined,
     status: row.status as LineStatus,
     play_count: (row.play_count as number | undefined) ?? 0,
+    furigana_html: (row.furigana_html as string | undefined) ?? undefined,
     language: row.language as string | undefined,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
@@ -850,6 +892,7 @@ function lineToDbRow(line: Line, userId: string): Record<string, unknown> {
     end_ms: line.end_ms ?? null,
     status: line.status,
     play_count: line.play_count ?? 0,
+    furigana_html: line.furigana_html ?? null,
     language: line.language ?? null,
     created_at: line.created_at,
     updated_at: line.updated_at,
