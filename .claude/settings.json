@@ -32,7 +32,8 @@
       "Bash(python -c \":*)",
       "Read(//c/Users/cheny/.claude/projects/c--Repo-reprise-personal-studio/022527cf-c6f6-4259-8825-f751429d9c32/tool-results/**)",
       "Bash(pnpm add music-tempo)",
-      "Bash(pnpm exec tsc --noEmit)"
+      "Bash(pnpm exec tsc --noEmit)",
+      "Bash(grep -v \"\\\\.gradle$\")"
     ],
     "additionalDirectories": [
       "C:\\Repo\\reprise-personal-studio\\separated",

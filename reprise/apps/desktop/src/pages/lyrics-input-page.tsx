@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { isDesktopPlatform } from "../lib/platform";
 import { useNavigate, useParams } from "react-router-dom";
 import { Sidebar } from "../components/sidebar";
 import { AudioPlayer } from "../components/audio-player";
@@ -49,6 +50,9 @@ export function LyricsInputPage() {
   const [newSectionName, setNewSectionName] = useState("");
   const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
   const [editSectionName, setEditSectionName] = useState("");
+
+  const [isDesktop, setIsDesktop] = useState(true);
+  useEffect(() => { isDesktopPlatform().then(setIsDesktop); }, []);
 
   // Language fetch state
   const [lyricsLang, setLyricsLang] = useState<string>(song?.language ?? "en");
@@ -453,8 +457,8 @@ export function LyricsInputPage() {
               Add lyrics line by line. Each line will become a separate practice segment you can drill individually.
             </p>
 
-            {/* Import from YouTube section */}
-            {song.youtube_url && (
+            {/* Import from YouTube section — desktop only (requires yt-dlp sidecar) */}
+            {isDesktop && song.youtube_url && (
               <div className="flex flex-col gap-2 p-3 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)] mb-5">
                 {/* Row 1: main lyrics fetch */}
                 <div className="flex items-center gap-2 flex-wrap">

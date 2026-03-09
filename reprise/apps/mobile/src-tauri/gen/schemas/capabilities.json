@@ -1,0 +1,1 @@
+{"mobile-default":{"identifier":"mobile-default","description":"Default capabilities for the mobile app (Android / iOS)","local":true,"windows":["main"],"permissions":["os:default","core:default"],"platforms":["android","iOS"]}}

@@ -1,0 +1,12 @@
+{
+  "bundle": {
+    "externalBin": []
+  },
+  "app": {
+    "security": {
+      "assetProtocol": {
+        "enable": false
+      }
+    }
+  }
+}

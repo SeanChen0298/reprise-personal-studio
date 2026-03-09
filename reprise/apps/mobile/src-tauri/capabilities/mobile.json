@@ -1,0 +1,10 @@
+{
+  "identifier": "mobile-default",
+  "description": "Default capabilities for the mobile app (Android / iOS)",
+  "platforms": ["android", "iOS"],
+  "windows": ["main"],
+  "permissions": [
+    "os:default",
+    "core:default"
+  ]
+}

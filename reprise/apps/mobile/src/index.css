@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+@theme {
+  --color-theme: #6c63ff;
+  --color-theme-light: #8f88ff;
+  --color-bg: #0f0f1a;
+  --color-surface: #1a1a2e;
+  --color-border: #2a2a40;
+  --color-text: #e8e8f0;
+  --color-text-muted: #8888a8;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: "DM Sans", system-ui, sans-serif;
+}

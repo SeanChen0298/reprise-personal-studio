@@ -11,9 +11,11 @@
     "tauri:build": "tauri build --bundles msi"
   },
   "dependencies": {
+    "@reprise/shared": "workspace:*",
     "@supabase/supabase-js": "^2.49.1",
     "@tauri-apps/api": "^2.2.0",
     "@tauri-apps/plugin-fs": "^2.4.5",
+    "@tauri-apps/plugin-os": "^2.3.2",
     "@tauri-apps/plugin-shell": "^2.2.0",
     "music-tempo": "^1.0.3",
     "react": "^19.0.0",
