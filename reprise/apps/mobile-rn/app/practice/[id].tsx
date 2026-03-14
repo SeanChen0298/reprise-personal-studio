@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
   View,
@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Pressable,
+  ScrollView,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import type { Song, Line } from "@reprise/shared";
@@ -14,23 +15,28 @@ import { fetchSong, fetchLines } from "../../src/lib/supabase";
 import { useSongFilesStore } from "../../src/stores/song-files-store";
 import { useLinePlayer } from "../../src/hooks/use-line-player";
 import { AnnotatedText } from "../../src/components/annotated-text";
-import { STATUS_CONFIG, formatMs } from "../../src/lib/line-status-config";
+import { formatMs } from "../../src/lib/line-status-config";
+import { C, lineOpacity } from "../../src/lib/theme";
+import {
+  IconPlay,
+  IconPause,
+  IconSkipBack,
+  IconSkipForward,
+  IconRepeat,
+  IconChevronLeft,
+} from "../../src/components/icons";
 
 type TrackMode = "audio" | "vocals" | "instr";
 
 // ─── Furigana renderer ────────────────────────────────────────────────────────
 
-interface RubySegment {
-  base: string;
-  rt?: string;
-}
+interface RubySegment { base: string; rt?: string }
 
 function parseRubyHtml(html: string): RubySegment[] {
   const cleaned = html.replace(/<rp>[^<]*<\/rp>/g, "");
   const segments: RubySegment[] = [];
   const re = /<ruby>(.*?)<rt>(.*?)<\/rt><\/ruby>/g;
-  let last = 0;
-  let m: RegExpExecArray | null;
+  let last = 0, m: RegExpExecArray | null;
   while ((m = re.exec(cleaned)) !== null) {
     if (m.index > last) segments.push({ base: cleaned.slice(last, m.index) });
     segments.push({ base: m[1], rt: m[2] });
@@ -40,46 +46,30 @@ function parseRubyHtml(html: string): RubySegment[] {
   return segments;
 }
 
-function RubyText({
-  html,
-  baseFontSize = 14,
-  color = "#475569",
-}: {
-  html: string;
-  baseFontSize?: number;
-  color?: string;
-}) {
+function RubyText({ html, baseFontSize = 18 }: { html: string; baseFontSize?: number }) {
   const segments = parseRubyHtml(html);
   return (
     <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "flex-end", justifyContent: "center" }}>
       {segments.map((seg, i) =>
         seg.rt ? (
           <View key={i} style={{ alignItems: "center" }}>
-            <Text style={{ fontSize: baseFontSize * 0.5, color }}>{seg.rt}</Text>
-            <Text style={{ fontSize: baseFontSize, color }}>{seg.base}</Text>
+            <Text style={{ fontSize: baseFontSize * 0.5, color: C.muted }}>{seg.rt}</Text>
+            <Text style={{ fontSize: baseFontSize, color: C.text }}>{seg.base}</Text>
           </View>
         ) : (
-          <Text key={i} style={{ fontSize: baseFontSize, color }}>
-            {seg.base}
-          </Text>
+          <Text key={i} style={{ fontSize: baseFontSize, color: C.text }}>{seg.base}</Text>
         )
       )}
     </View>
   );
 }
 
-// ─── Track selector button ────────────────────────────────────────────────────
+// ─── Track selector ───────────────────────────────────────────────────────────
 
 function TrackBtn({
-  label,
-  mode,
-  current,
-  onPress,
+  label, mode, current, onPress,
 }: {
-  label: string;
-  mode: TrackMode;
-  current: TrackMode;
-  onPress: (m: TrackMode) => void;
+  label: string; mode: TrackMode; current: TrackMode; onPress: (m: TrackMode) => void;
 }) {
   const active = mode === current;
   return (
@@ -91,62 +81,6 @@ function TrackBtn({
       <Text style={[s.trackBtnText, active && s.trackBtnTextActive]}>{label}</Text>
     </TouchableOpacity>
   );
-}
-
-// ─── Line display (prev/active/next) ─────────────────────────────────────────
-
-function LineRow({
-  line,
-  role,
-  translation,
-  showTranslation,
-  onPress,
-}: {
-  line: Line | undefined;
-  role: "prev" | "active" | "next";
-  translation?: string;
-  showTranslation?: boolean;
-  onPress?: () => void;
-}) {
-  if (!line) return <View style={s.lineRowPlaceholder} />;
-
-  const isActive = role === "active";
-  const opacity = role === "prev" ? 0.35 : role === "next" ? 0.5 : 1;
-  const fontSize = isActive ? 26 : 16;
-  const textColor = isActive ? "#0F172A" : "#475569";
-
-  const displayText = line.custom_text ?? line.text;
-
-  const content = (
-    <View style={[s.lineRowInner, { opacity }]}>
-      {line.furigana_html ? (
-        <RubyText html={line.furigana_html} baseFontSize={fontSize} color={textColor} />
-      ) : line.annotations && line.annotations.length > 0 ? (
-        <AnnotatedText
-          text={displayText}
-          annotations={line.annotations}
-          fontSize={fontSize}
-          color={textColor}
-        />
-      ) : (
-        <Text style={{ fontSize, color: textColor, textAlign: "center", lineHeight: fontSize * 1.4 }}>
-          {displayText}
-        </Text>
-      )}
-      {isActive && showTranslation && translation ? (
-        <Text style={s.translationText}>{translation}</Text>
-      ) : null}
-    </View>
-  );
-
-  if (onPress) {
-    return (
-      <Pressable onPress={onPress} style={s.lineRowPressable} android_ripple={{ color: "#E2E8F020" }}>
-        {content}
-      </Pressable>
-    );
-  }
-  return <View style={s.lineRowPressable}>{content}</View>;
 }
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
@@ -165,21 +99,18 @@ export default function PracticeScreen() {
   const hasVocals = !!localFiles.vocalsPath;
   const hasInstr = !!localFiles.instrPath;
 
-  // Derive audio path from track mode
   const audioPath = useMemo(() => {
     if (trackMode === "vocals" && localFiles.vocalsPath) return localFiles.vocalsPath;
     if (trackMode === "instr" && localFiles.instrPath) return localFiles.instrPath;
     return localFiles.audioPath;
   }, [trackMode, localFiles]);
 
-  // Split primary vs translation lines
   const { primaryLines, translationByOrder } = useMemo(() => {
     const translationLang = song?.translation_language;
     const primary = translationLang
       ? allLines.filter((l) => !l.language || l.language !== translationLang)
       : allLines.filter((l) => !l.language);
     const finalPrimary = primary.length > 0 ? primary : allLines;
-
     const byOrder = new Map<number, string>(
       allLines
         .filter((l) => l.language === translationLang)
@@ -188,55 +119,46 @@ export default function PracticeScreen() {
     return { primaryLines: finalPrimary, translationByOrder: byOrder };
   }, [allLines, song]);
 
-  // Load song & lines
   useEffect(() => {
     if (!id) return;
     Promise.all([fetchSong(id), fetchLines(id)])
-      .then(([s, lines]) => {
-        setSong(s);
-        setAllLines(lines);
-      })
+      .then(([s, lines]) => { setSong(s); setAllLines(lines); })
       .finally(() => setLoading(false));
   }, [id]);
 
   const player = useLinePlayer({ audioPath, lines: primaryLines });
-
   const {
-    positionMs,
-    durationMs,
-    isPlaying,
-    lineProgress,
-    currentLineIndex,
-    loopEnabled,
-    toggleLoop,
-    loopCount,
-    maxLoops,
-    cycleMaxLoops,
-    speed,
-    incrementSpeed,
-    decrementSpeed,
-    togglePlay,
-    goToLine,
-    nextLine,
-    prevLine,
-    audioReady,
-    audioError,
+    positionMs, durationMs, isPlaying, lineProgress,
+    currentLineIndex, loopEnabled, toggleLoop, loopCount, maxLoops,
+    cycleMaxLoops, speed, incrementSpeed, decrementSpeed,
+    togglePlay, goToLine, nextLine, prevLine, audioReady, audioError,
   } = player;
 
+  // ── Scroll-to-active-line ───────────────────────────────────────────────────
+  const scrollRef = useRef<ScrollView>(null);
+  const itemYsRef = useRef<Map<number, number>>(new Map());
+  const [scrollHeight, setScrollHeight] = useState(400);
+
+  useEffect(() => {
+    const y = itemYsRef.current.get(currentLineIndex);
+    if (y == null) return;
+    scrollRef.current?.scrollTo({
+      y: Math.max(0, y - scrollHeight / 2 + 44),
+      animated: true,
+    });
+  }, [currentLineIndex, scrollHeight]);
+
+  // ── Derived ─────────────────────────────────────────────────────────────────
   const hasAudio = !!audioPath;
-  const currentLine = primaryLines[currentLineIndex];
-  const prevLine_ = primaryLines[currentLineIndex - 1];
-  const nextLine_ = primaryLines[currentLineIndex + 1];
-  const statusCfg = currentLine ? STATUS_CONFIG[currentLine.status] : null;
-  const currentTranslation = currentLine ? translationByOrder.get(currentLine.order) : undefined;
   const overallProgress = durationMs > 0 ? positionMs / durationMs : 0;
-
   const maxLoopsLabel = maxLoops === 0 ? "∞" : String(maxLoops);
+  const speedLabel = `${Math.round(speed * 100)}%`;
 
+  // ── Loading / not-found ─────────────────────────────────────────────────────
   if (loading) {
     return (
       <View style={s.center}>
-        <ActivityIndicator size="large" color="#3B82F6" />
+        <ActivityIndicator size="large" color={C.theme} />
       </View>
     );
   }
@@ -246,7 +168,7 @@ export default function PracticeScreen() {
       <View style={s.center}>
         <Text style={s.errorText}>Song not found.</Text>
         <TouchableOpacity onPress={() => router.back()} style={s.textBtn}>
-          <Text style={s.textBtnLabel}>← Go Back</Text>
+          <Text style={s.textBtnLabel}>Go Back</Text>
         </TouchableOpacity>
       </View>
     );
@@ -254,33 +176,48 @@ export default function PracticeScreen() {
 
   return (
     <View style={s.container}>
+
       {/* ── Top bar ── */}
       <View style={s.topBar}>
-        <TouchableOpacity onPress={() => router.back()} style={s.backTouch}>
-          <Text style={s.backArrow}>‹</Text>
+        <TouchableOpacity onPress={() => router.back()} style={s.backTouch} activeOpacity={0.6}>
+          <IconChevronLeft size={24} color={C.text} />
         </TouchableOpacity>
+
         <View style={s.topCenter}>
           <Text style={s.topTitle} numberOfLines={1}>{song.title}</Text>
           <Text style={s.topArtist} numberOfLines={1}>{song.artist}</Text>
         </View>
+
+        {/* Translation toggle */}
+        {translationByOrder.size > 0 && (
+          <TouchableOpacity
+            onPress={() => setShowTranslation((v) => !v)}
+            style={[s.headerBtn, showTranslation && s.headerBtnActive]}
+            activeOpacity={0.7}
+          >
+            <Text style={[s.headerBtnText, showTranslation && s.headerBtnTextActive]}>TL</Text>
+          </TouchableOpacity>
+        )}
+
         {/* Loop toggle */}
         <TouchableOpacity
           onPress={toggleLoop}
-          style={[s.iconBtn, loopEnabled && s.iconBtnActive]}
+          style={[s.headerBtn, loopEnabled && s.headerBtnActive]}
+          activeOpacity={0.7}
         >
-          <Text style={[s.iconBtnText, loopEnabled && s.iconBtnTextActive]}>⟲</Text>
+          <IconRepeat size={16} color={loopEnabled ? C.theme : C.muted} />
         </TouchableOpacity>
-        {/* Max-loops badge */}
+
         {loopEnabled && (
-          <TouchableOpacity onPress={cycleMaxLoops} style={s.loopCountBtn}>
-            <Text style={s.loopCountText}>×{maxLoopsLabel}</Text>
+          <TouchableOpacity onPress={cycleMaxLoops} style={s.loopBadge} activeOpacity={0.7}>
+            <Text style={s.loopBadgeText}>×{maxLoopsLabel}</Text>
           </TouchableOpacity>
         )}
       </View>
 
       {/* ── Track selector ── */}
       {(hasVocals || hasInstr) && (
-        <View style={s.trackSelector}>
+        <View style={s.trackRow}>
           <TrackBtn label="Full Audio" mode="audio" current={trackMode} onPress={setTrackMode} />
           {hasVocals && <TrackBtn label="Vocals" mode="vocals" current={trackMode} onPress={setTrackMode} />}
           {hasInstr && <TrackBtn label="Instr" mode="instr" current={trackMode} onPress={setTrackMode} />}
@@ -296,7 +233,7 @@ export default function PracticeScreen() {
               ? "Go to Song Detail to download audio from Google Drive."
               : "Sync this song from the desktop app first."}
           </Text>
-          <TouchableOpacity onPress={() => router.back()} style={s.goBackBtn}>
+          <TouchableOpacity onPress={() => router.back()} style={s.goBackBtn} activeOpacity={0.8}>
             <Text style={s.goBackBtnText}>Go to Song Detail</Text>
           </TouchableOpacity>
         </View>
@@ -310,79 +247,90 @@ export default function PracticeScreen() {
         </View>
       )}
 
-      {/* ── Player UI ── */}
+      {/* ── Lyrics stream + player ── */}
       {hasAudio && !audioError && (
         <>
-          {/* 3-line karaoke view */}
-          <View style={s.karaokeArea}>
-            {/* Prev line */}
-            <LineRow
-              line={prevLine_}
-              role="prev"
-              onPress={prevLine_ ? () => goToLine(currentLineIndex - 1) : undefined}
-            />
+          {/* Scrollable lyrics */}
+          <ScrollView
+            ref={scrollRef}
+            style={s.lyricsScroll}
+            contentContainerStyle={s.lyricsContent}
+            showsVerticalScrollIndicator={false}
+            onLayout={(e) => setScrollHeight(e.nativeEvent.layout.height)}
+          >
+            <View style={{ height: 140 }} />
 
-            {/* Active line */}
-            <View style={s.activeLineWrap}>
-              <LineRow
-                line={currentLine}
-                role="active"
-                translation={currentTranslation}
-                showTranslation={showTranslation}
-              />
-              {/* Status row */}
-              <View style={s.statusRow}>
-                {statusCfg && (
-                  <View style={[s.statusBadge, { backgroundColor: statusCfg.tagBg }]}>
-                    <Text style={[s.statusBadgeText, { color: statusCfg.tagColor }]}>
-                      {statusCfg.label}
-                    </Text>
-                  </View>
-                )}
-                {primaryLines.length > 0 && (
-                  <Text style={s.lineCounter}>
-                    {currentLineIndex + 1}/{primaryLines.length}
-                  </Text>
-                )}
-                {currentLine?.start_ms != null && currentLine?.end_ms != null && (
-                  <Text style={s.timeBadge}>
-                    {formatMs(currentLine.start_ms)}–{formatMs(currentLine.end_ms)}
-                  </Text>
-                )}
-                {/* Translation toggle */}
-                {translationByOrder.size > 0 && (
-                  <TouchableOpacity
-                    onPress={() => setShowTranslation((v) => !v)}
-                    style={[s.translationBtn, showTranslation && s.translationBtnActive]}
-                  >
-                    <Text style={[s.translationBtnText, showTranslation && s.translationBtnTextActive]}>
-                      T
-                    </Text>
-                  </TouchableOpacity>
-                )}
-                {/* Loop count indicator */}
-                {loopEnabled && maxLoops > 0 && (
-                  <Text style={s.loopIndicator}>{loopCount}/{maxLoops}</Text>
-                )}
+            {primaryLines.length === 0 ? (
+              <View style={{ alignItems: "center", padding: 40 }}>
+                <Text style={{ color: C.muted, fontSize: 14 }}>No lyrics added yet.</Text>
               </View>
-            </View>
+            ) : (
+              primaryLines.map((line, idx) => {
+                const isActive = idx === currentLineIndex;
+                const opacity = lineOpacity(idx - currentLineIndex);
+                const displayText = line.custom_text ?? line.text;
+                const translation = translationByOrder.get(line.order);
 
-            {/* Next line */}
-            <LineRow
-              line={nextLine_}
-              role="next"
-              onPress={nextLine_ ? () => goToLine(currentLineIndex + 1) : undefined}
-            />
+                return (
+                  <Pressable
+                    key={line.id}
+                    onLayout={(e) => itemYsRef.current.set(idx, e.nativeEvent.layout.y)}
+                    onPress={() => goToLine(idx, true)}
+                    style={{ opacity, paddingVertical: 10, paddingHorizontal: 28 }}
+                    android_ripple={{ color: "rgba(0,0,0,0.04)" }}
+                  >
+                    {line.furigana_html ? (
+                      <RubyText html={line.furigana_html} baseFontSize={18} />
+                    ) : line.annotations && line.annotations.length > 0 ? (
+                      <AnnotatedText
+                        text={displayText}
+                        annotations={line.annotations}
+                        fontSize={18}
+                        color={C.text}
+                      />
+                    ) : (
+                      <Text
+                        style={{
+                          fontSize: 18,
+                          fontWeight: isActive ? "500" : "400",
+                          color: C.text,
+                          lineHeight: 28,
+                          textAlign: "center",
+                        }}
+                      >
+                        {displayText}
+                      </Text>
+                    )}
+
+                    {isActive && showTranslation && translation && (
+                      <Text style={s.translationText}>{translation}</Text>
+                    )}
+                  </Pressable>
+                );
+              })
+            )}
+
+            <View style={{ height: 140 }} />
+          </ScrollView>
+
+          {/* Status strip */}
+          <View style={s.statusStrip}>
+            {primaryLines.length > 0 && (
+              <Text style={s.statusStripText}>
+                {currentLineIndex + 1} / {primaryLines.length}
+                {loopEnabled && maxLoops > 0 ? `  ·  ${loopCount}/${maxLoops}` : ""}
+              </Text>
+            )}
           </View>
 
-          {/* ── Line progress bar ── */}
+          {/* Line progress bar */}
           <View style={s.lineProgressWrap}>
             <View style={s.lineProgressTrack}>
               <View style={[s.lineProgressFill, { width: `${lineProgress * 100}%` as any }]} />
             </View>
           </View>
 
-          {/* ── Overall progress bar ── */}
+          {/* Overall progress */}
           <View style={s.progressWrap}>
             <Text style={s.timeLabel}>{formatMs(positionMs)}</Text>
             <View style={s.progressTrack}>
@@ -391,58 +339,70 @@ export default function PracticeScreen() {
             <Text style={s.timeLabel}>{formatMs(durationMs)}</Text>
           </View>
 
-          {/* ── Controls ── */}
+          {/* Controls */}
           <View style={s.controls}>
-            {/* Prev line */}
-            <TouchableOpacity
-              style={s.navBtn}
-              onPress={prevLine}
-              disabled={currentLineIndex === 0}
-            >
-              <Text style={[s.navBtnText, currentLineIndex === 0 && s.dimmed]}>⏮</Text>
-            </TouchableOpacity>
 
-            {/* Speed − */}
-            <TouchableOpacity style={s.speedBtn} onPress={decrementSpeed} disabled={speed <= 0.5}>
-              <Text style={[s.speedBtnText, speed <= 0.5 && s.dimmed]}>−</Text>
-            </TouchableOpacity>
+            {/* Speed row */}
+            <View style={s.speedRow}>
+              <TouchableOpacity
+                style={s.speedBtn}
+                onPress={decrementSpeed}
+                disabled={speed <= 0.5}
+                activeOpacity={0.6}
+              >
+                <Text style={[s.speedBtnText, speed <= 0.5 && s.dimmed]}>−</Text>
+              </TouchableOpacity>
 
-            {/* Speed display */}
-            <View style={s.speedDisplay}>
-              <Text style={s.speedText}>{Math.round(speed * 100)}%</Text>
+              <View style={s.speedDisplay}>
+                <Text style={s.speedText}>{speedLabel}</Text>
+              </View>
+
+              <TouchableOpacity
+                style={s.speedBtn}
+                onPress={incrementSpeed}
+                disabled={speed >= 1.0}
+                activeOpacity={0.6}
+              >
+                <Text style={[s.speedBtnText, speed >= 1.0 && s.dimmed]}>+</Text>
+              </TouchableOpacity>
             </View>
 
-            {/* Speed + */}
-            <TouchableOpacity style={s.speedBtn} onPress={incrementSpeed} disabled={speed >= 1.0}>
-              <Text style={[s.speedBtnText, speed >= 1.0 && s.dimmed]}>+</Text>
-            </TouchableOpacity>
-
-            {/* Play/Pause */}
-            <TouchableOpacity
-              style={[s.playBtn, !audioReady && s.playBtnLoading]}
-              onPress={() => void togglePlay()}
-              disabled={!audioReady}
-              activeOpacity={0.8}
-            >
-              {!audioReady ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Text style={s.playBtnText}>{isPlaying ? "⏸" : "▶"}</Text>
-              )}
-            </TouchableOpacity>
-
-            {/* Next line */}
-            <TouchableOpacity
-              style={s.navBtn}
-              onPress={nextLine}
-              disabled={currentLineIndex >= primaryLines.length - 1}
-            >
-              <Text
-                style={[s.navBtnText, currentLineIndex >= primaryLines.length - 1 && s.dimmed]}
+            {/* Nav row */}
+            <View style={s.navRow}>
+              <TouchableOpacity
+                style={s.navBtn}
+                onPress={prevLine}
+                disabled={currentLineIndex === 0}
+                activeOpacity={0.6}
               >
-                ⏭
-              </Text>
-            </TouchableOpacity>
+                <IconSkipBack size={22} color={currentLineIndex === 0 ? C.border : C.text} />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[s.playBtn, !audioReady && s.playBtnLoading]}
+                onPress={() => void togglePlay()}
+                disabled={!audioReady}
+                activeOpacity={0.85}
+              >
+                {!audioReady ? (
+                  <ActivityIndicator size="small" color={C.theme} />
+                ) : isPlaying ? (
+                  <IconPause size={22} color="#fff" />
+                ) : (
+                  <IconPlay size={22} color="#fff" />
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={s.navBtn}
+                onPress={nextLine}
+                disabled={currentLineIndex >= primaryLines.length - 1}
+                activeOpacity={0.6}
+              >
+                <IconSkipForward size={22} color={currentLineIndex >= primaryLines.length - 1 ? C.border : C.text} />
+              </TouchableOpacity>
+            </View>
+
           </View>
         </>
       )}
@@ -453,11 +413,11 @@ export default function PracticeScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F8FAFC" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, backgroundColor: "#F8FAFC" },
-  errorText: { fontSize: 14, color: "#64748B" },
-  textBtn: { padding: 8 },
-  textBtnLabel: { fontSize: 14, color: "#3B82F6" },
+  container: { flex: 1, backgroundColor: C.bg },
+  center:    { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, backgroundColor: C.bg },
+  errorText: { fontSize: 14, color: C.muted },
+  textBtn:   { paddingVertical: 8, paddingHorizontal: 16, marginTop: 4 },
+  textBtnLabel: { fontSize: 14, color: C.theme },
 
   // Top bar
   topBar: {
@@ -466,223 +426,164 @@ const s = StyleSheet.create({
     paddingTop: 52,
     paddingBottom: 12,
     paddingHorizontal: 16,
-    backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#E2E8F0",
+    backgroundColor: C.surface,
     gap: 8,
   },
-  backTouch: { padding: 4 },
-  backArrow: { fontSize: 28, color: "#3B82F6", lineHeight: 32 },
+  backTouch: { padding: 4, marginRight: 2 },
   topCenter: { flex: 1 },
-  topTitle: { fontSize: 15, fontWeight: "700", color: "#0F172A" },
-  topArtist: { fontSize: 12, color: "#64748B", marginTop: 1 },
+  topTitle:  { fontSize: 14, fontWeight: "600", color: C.text },
+  topArtist: { fontSize: 12, color: C.muted, marginTop: 1 },
 
-  iconBtn: {
-    width: 36,
-    height: 36,
+  headerBtn: {
+    width: 36, height: 36,
     borderRadius: 8,
-    borderWidth: 1.5,
-    borderColor: "#CBD5E1",
+    borderWidth: 1,
+    borderColor: C.border,
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: C.surface,
   },
-  iconBtnActive: { borderColor: "#3B82F6", backgroundColor: "#EFF6FF" },
-  iconBtnText: { fontSize: 18, color: "#94A3B8" },
-  iconBtnTextActive: { color: "#2563EB" },
+  headerBtnActive:     { borderColor: C.theme, backgroundColor: "#EEEEFF" },
+  headerBtnText:       { fontSize: 13, fontWeight: "500", color: C.muted },
+  headerBtnTextActive: { color: C.theme },
 
-  loopCountBtn: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-    backgroundColor: "#EFF6FF",
-    borderWidth: 1.5,
-    borderColor: "#3B82F6",
+  loopBadge: {
+    paddingHorizontal: 8, paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: "#EEEEFF",
+    borderWidth: 1,
+    borderColor: C.theme,
   },
-  loopCountText: { fontSize: 12, fontWeight: "700", color: "#2563EB" },
+  loopBadgeText: { fontSize: 11, fontWeight: "600", color: C.theme },
 
   // Track selector
-  trackSelector: {
+  trackRow: {
     flexDirection: "row",
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingHorizontal: 16, paddingVertical: 8,
     gap: 8,
-    backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#E2E8F0",
+    backgroundColor: C.surface,
+    borderBottomWidth: 0.5,
+    borderBottomColor: C.border,
   },
   trackBtn: {
-    flex: 1,
-    paddingVertical: 7,
-    borderRadius: 8,
-    borderWidth: 1.5,
-    borderColor: "#E2E8F0",
+    flex: 1, paddingVertical: 7,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: C.border,
     alignItems: "center",
+    backgroundColor: C.surface,
   },
-  trackBtnActive: { borderColor: "#3B82F6", backgroundColor: "#EFF6FF" },
-  trackBtnText: { fontSize: 12.5, fontWeight: "500", color: "#64748B" },
-  trackBtnTextActive: { color: "#2563EB", fontWeight: "600" },
+  trackBtnActive:     { borderColor: C.theme, backgroundColor: "#EEEEFF" },
+  trackBtnText:       { fontSize: 12, fontWeight: "500", color: C.muted },
+  trackBtnTextActive: { color: C.theme },
 
-  // Empty / error states
+  // Empty / error
   emptyCard: {
-    margin: 20,
-    padding: 24,
-    backgroundColor: "#fff",
-    borderRadius: 16,
+    margin: 20, padding: 24,
+    backgroundColor: C.surface,
+    borderRadius: 14,
     alignItems: "center",
-    borderWidth: 1.5,
-    borderColor: "#E2E8F0",
+    shadowColor: "#000",
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
-  emptyTitle: { fontSize: 15, fontWeight: "600", color: "#475569", marginBottom: 6 },
-  emptySub: { fontSize: 13, color: "#94A3B8", textAlign: "center", lineHeight: 20 },
+  emptyTitle: { fontSize: 15, fontWeight: "500", color: C.text, marginBottom: 6 },
+  emptySub:   { fontSize: 13, color: C.muted, textAlign: "center", lineHeight: 20 },
   goBackBtn: {
-    marginTop: 16,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    backgroundColor: "#3B82F6",
-    borderRadius: 8,
+    marginTop: 16, paddingHorizontal: 20, paddingVertical: 10,
+    backgroundColor: C.theme, borderRadius: 8,
   },
   goBackBtnText: { fontSize: 13, fontWeight: "600", color: "#fff" },
 
-  // Karaoke area
-  karaokeArea: {
-    flex: 1,
-    justifyContent: "center",
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    gap: 8,
-    backgroundColor: "#F8FAFC",
-  },
-  lineRowPlaceholder: { minHeight: 44 },
-  lineRowPressable: { paddingVertical: 8, paddingHorizontal: 4 },
-  lineRowInner: { alignItems: "center" },
+  // Lyrics
+  lyricsScroll:  { flex: 1, backgroundColor: C.bg },
+  lyricsContent: {},
   translationText: {
-    marginTop: 8,
-    fontSize: 14,
-    color: "#64748B",
-    textAlign: "center",
-    fontStyle: "italic",
+    marginTop: 6, fontSize: 13,
+    color: C.muted, textAlign: "center", fontStyle: "italic",
   },
 
-  activeLineWrap: {
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: "#E2E8F0",
-    paddingVertical: 16,
-    paddingHorizontal: 4,
-    gap: 12,
-    backgroundColor: "#fff",
-    borderRadius: 12,
-  },
+  // Status strip
+  statusStrip:     { alignItems: "center", paddingVertical: 4, backgroundColor: C.bg },
+  statusStripText: { fontSize: 11, color: C.muted, letterSpacing: 0.4 },
 
-  // Status row
-  statusRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    flexWrap: "wrap",
-  },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  statusBadgeText: { fontSize: 11, fontWeight: "600" },
-  lineCounter: { fontSize: 12, color: "#94A3B8" },
-  timeBadge: { fontSize: 11, color: "#94A3B8" },
-  loopIndicator: { fontSize: 11, color: "#2563EB" },
+  // Line progress
+  lineProgressWrap:  { paddingHorizontal: 20, paddingVertical: 3, backgroundColor: C.bg },
+  lineProgressTrack: { height: 2, backgroundColor: C.border, borderRadius: 1, overflow: "hidden" },
+  lineProgressFill:  { height: "100%", backgroundColor: C.theme },
 
-  // Translation toggle
-  translationBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 6,
-    borderWidth: 1.5,
-    borderColor: "#CBD5E1",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  translationBtnActive: { borderColor: "#3B82F6", backgroundColor: "#EFF6FF" },
-  translationBtnText: { fontSize: 13, fontWeight: "700", color: "#94A3B8" },
-  translationBtnTextActive: { color: "#2563EB" },
-
-  // Line progress bar (within current line)
-  lineProgressWrap: {
-    paddingHorizontal: 20,
-    paddingVertical: 4,
-    backgroundColor: "#F8FAFC",
-  },
-  lineProgressTrack: {
-    height: 3,
-    backgroundColor: "#E2E8F0",
-    borderRadius: 2,
-    overflow: "hidden",
-  },
-  lineProgressFill: { height: "100%", backgroundColor: "#3B82F6" },
-
-  // Overall progress bar
+  // Overall progress
   progressWrap: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    gap: 8,
-    backgroundColor: "#F8FAFC",
+    flexDirection: "row", alignItems: "center",
+    paddingHorizontal: 16, paddingVertical: 8,
+    gap: 8, backgroundColor: C.surface,
+    borderTopWidth: 0.5,
+    borderTopColor: C.border,
   },
-  timeLabel: { fontSize: 11, color: "#94A3B8", width: 36, textAlign: "center" },
-  progressTrack: {
-    flex: 1,
-    height: 3,
-    backgroundColor: "#E2E8F0",
-    borderRadius: 2,
-    overflow: "hidden",
-  },
-  progressFill: { height: "100%", backgroundColor: "#3B82F6" },
+  timeLabel:     { fontSize: 11, color: C.muted, width: 36, textAlign: "center" },
+  progressTrack: { flex: 1, height: 2, backgroundColor: C.border, borderRadius: 1, overflow: "hidden" },
+  progressFill:  { height: "100%", backgroundColor: C.theme },
 
   // Controls
   controls: {
+    flexDirection: "column",
+    alignItems: "center",
+    paddingHorizontal: 24,
+    paddingTop: 12,
+    paddingBottom: 36,
+    gap: 14,
+    backgroundColor: C.surface,
+  },
+
+  // Speed row
+  speedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  speedBtn:     { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
+  speedBtnText: { fontSize: 22, fontWeight: "300", color: C.text },
+  speedDisplay: {
+    width: 56, height: 32,
+    alignItems: "center", justifyContent: "center",
+    borderRadius: 8,
+    backgroundColor: C.bg,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  speedText: { fontSize: 12, fontWeight: "600", color: C.muted },
+  dimmed:    { opacity: 0.2 },
+
+  // Nav row
+  navRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 36,
-    gap: 12,
-    backgroundColor: "#fff",
-    borderTopWidth: 1,
-    borderTopColor: "#E2E8F0",
+    gap: 36,
   },
-  navBtn: { padding: 10 },
-  navBtnText: { fontSize: 26, color: "#475569" },
-  dimmed: { opacity: 0.25 },
-
-  speedBtn: { padding: 10 },
-  speedBtnText: { fontSize: 22, fontWeight: "300", color: "#475569" },
-  speedDisplay: {
-    width: 52,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: "#F1F5F9",
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
+  navBtn: {
+    width: 44, height: 44,
+    alignItems: "center", justifyContent: "center",
   },
-  speedText: { fontSize: 13, fontWeight: "600", color: "#0F172A" },
-
   playBtn: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: "#3B82F6",
+    width: 56, height: 56,
+    borderRadius: 28,
+    backgroundColor: C.theme,
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#3B82F6",
-    shadowOpacity: 0.3,
+    shadowColor: C.theme,
+    shadowOpacity: 0.25,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
     elevation: 4,
   },
-  playBtnLoading: { backgroundColor: "#93C5FD" },
-  playBtnText: { fontSize: 24, color: "#fff" },
+  playBtnLoading: {
+    backgroundColor: C.surface,
+    borderWidth: 1,
+    borderColor: C.border,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
 });

@@ -48,6 +48,8 @@ export function SettingsPage() {
   const setShowWaveforms = usePreferencesStore((s) => s.setShowWaveform);
   const recordingPlaybackGain = usePreferencesStore((s) => s.recordingPlaybackGain);
   const setRecordingPlaybackGain = usePreferencesStore((s) => s.setRecordingPlaybackGain);
+  const autoSyncDrive = usePreferencesStore((s) => s.autoSyncDrive);
+  const setAutoSyncDrive = usePreferencesStore((s) => s.setAutoSyncDrive);
   const [confirmDelete, setConfirmDelete] = useState(true);
   const [autoSync, setAutoSync] = useState(true);
 
@@ -730,6 +732,12 @@ export function SettingsPage() {
                     "Confirm before deleting songs",
                     "Show a confirmation dialog when removing songs",
                     toggle(confirmDelete, setConfirmDelete),
+                  )}
+
+                  {settingRow(
+                    "Auto-sync audio to Google Drive",
+                    "Automatically upload audio files to Drive when a song finishes downloading or processing. Requires Google Drive to be connected in the song setup page.",
+                    toggle(autoSyncDrive, setAutoSyncDrive),
                   )}
 
                   {settingRow(

@@ -20,6 +20,8 @@ import {
   localPathForFile,
   type DownloadProgress,
 } from "../../src/lib/google-drive-download";
+import { C } from "../../src/lib/theme";
+import { IconChevronLeft, IconMusic, IconDownload, IconPlay } from "../../src/components/icons";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -27,7 +29,7 @@ type DownloadState = "idle" | "checking" | "downloading" | "done" | "error";
 
 interface FileDownloadStatus {
   state: DownloadState;
-  progress: number; // 0–100
+  progress: number;
   error?: string;
 }
 
@@ -49,24 +51,18 @@ export default function SongDetailScreen() {
   const [vocalsStatus, setVocalsStatus] = useState<FileDownloadStatus>({ state: "idle", progress: 0 });
   const [instrStatus, setInstrStatus] = useState<FileDownloadStatus>({ state: "idle", progress: 0 });
 
-  // ── Load song data ────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!id) return;
     Promise.all([fetchSong(id), fetchLines(id)])
-      .then(([s, l]) => {
-        setSong(s);
-        setLines(l);
-      })
+      .then(([s, l]) => { setSong(s); setLines(l); })
       .finally(() => setLoading(false));
   }, [id]);
 
-  // ── Check which files already exist locally ──────────────────────────────────
   useEffect(() => {
     if (!id || !song) return;
 
     const checkFile = async (
       path: string | undefined,
-      fileName: string,
       setter: (s: FileDownloadStatus) => void
     ) => {
       if (!path) return;
@@ -78,12 +74,11 @@ export default function SongDetailScreen() {
     const vocalsPath = localFiles.vocalsPath ?? localPathForFile(id, "vocals.wav");
     const instrPath = localFiles.instrPath ?? localPathForFile(id, "no_vocals.wav");
 
-    checkFile(audioPath, "audio.m4a", setAudioStatus);
-    if (song.drive_vocals_file_id) checkFile(vocalsPath, "vocals.wav", setVocalsStatus);
-    if (song.drive_instrumental_file_id) checkFile(instrPath, "no_vocals.wav", setInstrStatus);
+    checkFile(audioPath, setAudioStatus);
+    if (song.drive_vocals_file_id) checkFile(vocalsPath, setVocalsStatus);
+    if (song.drive_instrumental_file_id) checkFile(instrPath, setInstrStatus);
   }, [id, song, localFiles]);
 
-  // ── Download a single file ────────────────────────────────────────────────────
   const downloadFile = useCallback(
     async (
       fileId: string,
@@ -96,20 +91,17 @@ export default function SongDetailScreen() {
       try {
         const accessToken = await getValidDriveToken();
         const destPath = localPathForFile(id, fileName);
-
         await downloadDriveFile(
           fileId,
           destPath,
           accessToken,
           (p: DownloadProgress) => {
-            const pct =
-              p.totalBytesExpected > 0
-                ? Math.round((p.bytesWritten / p.totalBytesExpected) * 100)
-                : 0;
+            const pct = p.totalBytesExpected > 0
+              ? Math.round((p.bytesWritten / p.totalBytesExpected) * 100)
+              : 0;
             setter({ state: "downloading", progress: pct });
           }
         );
-
         await setLocalFiles(id, { [localKey]: destPath });
         setter({ state: "done", progress: 100 });
       } catch (err) {
@@ -121,44 +113,25 @@ export default function SongDetailScreen() {
     [id, setLocalFiles]
   );
 
-  // ── Download all available Drive files ───────────────────────────────────────
   const downloadAll = useCallback(async () => {
     if (!song || !driveToken) {
-      Alert.alert(
-        "Drive Not Connected",
-        "Connect Google Drive in Settings to download audio files."
-      );
+      Alert.alert("Drive Not Connected", "Connect Google Drive in Settings to download audio files.");
       return;
     }
-
     const tasks: Promise<void>[] = [];
-
-    if (song.drive_audio_file_id && audioStatus.state !== "done") {
-      tasks.push(
-        downloadFile(song.drive_audio_file_id, "audio.m4a", "audioPath", setAudioStatus)
-      );
-    }
-    if (song.drive_vocals_file_id && vocalsStatus.state !== "done") {
-      tasks.push(
-        downloadFile(song.drive_vocals_file_id, "vocals.wav", "vocalsPath", setVocalsStatus)
-      );
-    }
-    if (song.drive_instrumental_file_id && instrStatus.state !== "done") {
-      tasks.push(
-        downloadFile(song.drive_instrumental_file_id, "no_vocals.wav", "instrPath", setInstrStatus)
-      );
-    }
-
-    // Run downloads in parallel
+    if (song.drive_audio_file_id && audioStatus.state !== "done")
+      tasks.push(downloadFile(song.drive_audio_file_id, "audio.m4a", "audioPath", setAudioStatus));
+    if (song.drive_vocals_file_id && vocalsStatus.state !== "done")
+      tasks.push(downloadFile(song.drive_vocals_file_id, "vocals.wav", "vocalsPath", setVocalsStatus));
+    if (song.drive_instrumental_file_id && instrStatus.state !== "done")
+      tasks.push(downloadFile(song.drive_instrumental_file_id, "no_vocals.wav", "instrPath", setInstrStatus));
     await Promise.allSettled(tasks);
   }, [song, driveToken, audioStatus, vocalsStatus, instrStatus, downloadFile]);
-
-  // ─────────────────────────────────────────────────────────────────────────────
 
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" color="#3B82F6" />
+        <ActivityIndicator size="large" color={C.theme} />
       </View>
     );
   }
@@ -167,8 +140,8 @@ export default function SongDetailScreen() {
     return (
       <View style={styles.center}>
         <Text style={styles.errorText}>Song not found.</Text>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Text style={styles.backBtnText}>← Go Back</Text>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} activeOpacity={0.7}>
+          <Text style={styles.backBtnText}>Go Back</Text>
         </TouchableOpacity>
       </View>
     );
@@ -192,8 +165,8 @@ export default function SongDetailScreen() {
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       {/* Back button */}
-      <TouchableOpacity style={styles.headerBack} onPress={() => router.back()}>
-        <Text style={styles.backArrow}>‹</Text>
+      <TouchableOpacity style={styles.headerBack} onPress={() => router.back()} activeOpacity={0.6}>
+        <IconChevronLeft size={22} color={C.theme} />
         <Text style={styles.backLabel}>Songs</Text>
       </TouchableOpacity>
 
@@ -204,7 +177,7 @@ export default function SongDetailScreen() {
             <Image source={{ uri: song.thumbnail_url }} style={styles.thumbImg} />
           ) : (
             <View style={styles.thumbPlaceholder}>
-              <Text style={{ fontSize: 28 }}>♫</Text>
+              <IconMusic size={32} color={C.muted} />
             </View>
           )}
         </View>
@@ -228,13 +201,7 @@ export default function SongDetailScreen() {
                 status={audioStatus}
                 onDownload={
                   audioStatus.state !== "done"
-                    ? () =>
-                        downloadFile(
-                          song.drive_audio_file_id!,
-                          "audio.m4a",
-                          "audioPath",
-                          setAudioStatus
-                        )
+                    ? () => downloadFile(song.drive_audio_file_id!, "audio.m4a", "audioPath", setAudioStatus)
                     : undefined
                 }
               />
@@ -246,13 +213,7 @@ export default function SongDetailScreen() {
                 status={vocalsStatus}
                 onDownload={
                   vocalsStatus.state !== "done"
-                    ? () =>
-                        downloadFile(
-                          song.drive_vocals_file_id!,
-                          "vocals.wav",
-                          "vocalsPath",
-                          setVocalsStatus
-                        )
+                    ? () => downloadFile(song.drive_vocals_file_id!, "vocals.wav", "vocalsPath", setVocalsStatus)
                     : undefined
                 }
               />
@@ -264,20 +225,13 @@ export default function SongDetailScreen() {
                 status={instrStatus}
                 onDownload={
                   instrStatus.state !== "done"
-                    ? () =>
-                        downloadFile(
-                          song.drive_instrumental_file_id!,
-                          "no_vocals.wav",
-                          "instrPath",
-                          setInstrStatus
-                        )
+                    ? () => downloadFile(song.drive_instrumental_file_id!, "no_vocals.wav", "instrPath", setInstrStatus)
                     : undefined
                 }
               />
             )}
           </View>
 
-          {/* Download All / Re-download button */}
           {!allDownloaded && (
             <TouchableOpacity
               style={[styles.primaryBtn, isDownloading && styles.primaryBtnDisabled]}
@@ -297,13 +251,13 @@ export default function SongDetailScreen() {
 
           {allDownloaded && (
             <View style={styles.allDoneRow}>
-              <Text style={styles.allDoneText}>✓ All audio files downloaded</Text>
+              <Text style={styles.allDoneText}>All audio files downloaded</Text>
             </View>
           )}
 
           {!driveToken && hasDriveFiles && (
             <Text style={styles.hint}>
-              Connect Google Drive in Settings → Google Drive Sync to download audio files.
+              Connect Google Drive in Settings to download audio files.
             </Text>
           )}
         </View>
@@ -326,9 +280,10 @@ export default function SongDetailScreen() {
           <TouchableOpacity
             style={styles.practiceBtn}
             onPress={() => router.push(`/practice/${id}`)}
-            activeOpacity={0.8}
+            activeOpacity={0.85}
           >
-            <Text style={styles.practiceBtnText}>▶  Start Practicing</Text>
+            <IconPlay size={16} color="#fff" />
+            <Text style={styles.practiceBtnText}>Start Practicing</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -353,10 +308,7 @@ export default function SongDetailScreen() {
 // ─── FileRow component ────────────────────────────────────────────────────────
 
 function FileRow({
-  label,
-  sublabel,
-  status,
-  onDownload,
+  label, sublabel, status, onDownload,
 }: {
   label: string;
   sublabel: string;
@@ -364,13 +316,10 @@ function FileRow({
   onDownload?: () => void;
 }) {
   const dotColor =
-    status.state === "done"
-      ? "#22C55E"
-      : status.state === "downloading"
-      ? "#F59E0B"
-      : status.state === "error"
-      ? "#EF4444"
-      : "#CBD5E1";
+    status.state === "done"       ? "#16A34A" :
+    status.state === "downloading" ? "#F59E0B" :
+    status.state === "error"      ? "#EF4444" :
+    C.border;
 
   return (
     <View style={fileStyles.row}>
@@ -388,13 +337,13 @@ function FileRow({
         </Text>
         {status.state === "downloading" && (
           <View style={fileStyles.progressTrack}>
-            <View style={[fileStyles.progressFill, { width: `${status.progress}%` }]} />
+            <View style={[fileStyles.progressFill, { width: `${status.progress}%` as any }]} />
           </View>
         )}
       </View>
       {onDownload && status.state !== "downloading" && (
-        <TouchableOpacity style={fileStyles.btn} onPress={onDownload}>
-          <Text style={fileStyles.btnText}>↓</Text>
+        <TouchableOpacity style={fileStyles.btn} onPress={onDownload} activeOpacity={0.7}>
+          <IconDownload size={18} color={C.theme} />
         </TouchableOpacity>
       )}
     </View>
@@ -408,39 +357,35 @@ const fileStyles = StyleSheet.create({
     paddingVertical: 10,
     gap: 10,
   },
-  dot: { width: 8, height: 8, borderRadius: 4, marginTop: 5, flexShrink: 0 },
-  info: { flex: 1 },
-  label: { fontSize: 13.5, fontWeight: "600", color: "#0F172A" },
-  sublabel: { fontSize: 11.5, color: "#64748B", marginTop: 1 },
+  dot:     { width: 7, height: 7, borderRadius: 4, marginTop: 5, flexShrink: 0 },
+  info:    { flex: 1 },
+  label:   { fontSize: 13.5, fontWeight: "600", color: C.text },
+  sublabel: { fontSize: 11.5, color: C.muted, marginTop: 1 },
   progressTrack: {
-    marginTop: 6,
-    height: 3,
-    backgroundColor: "#E2E8F0",
-    borderRadius: 2,
-    overflow: "hidden",
+    marginTop: 6, height: 2,
+    backgroundColor: C.border,
+    borderRadius: 1, overflow: "hidden",
   },
-  progressFill: { height: "100%", backgroundColor: "#3B82F6" },
+  progressFill: { height: "100%", backgroundColor: C.theme },
   btn: {
-    width: 30,
-    height: 30,
-    borderRadius: 6,
-    backgroundColor: "#EFF6FF",
+    width: 32, height: 32,
+    borderRadius: 8,
+    backgroundColor: "#EEEEFF",
     alignItems: "center",
     justifyContent: "center",
     flexShrink: 0,
   },
-  btnText: { fontSize: 16, color: "#3B82F6", fontWeight: "700" },
 });
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F8FAFC" },
-  content: { paddingBottom: 40 },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
-  errorText: { fontSize: 14, color: "#64748B" },
-  backBtn: { padding: 8 },
-  backBtnText: { fontSize: 14, color: "#3B82F6" },
+  container: { flex: 1, backgroundColor: C.bg },
+  content:   { paddingBottom: 48 },
+  center:    { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, backgroundColor: C.bg },
+  errorText: { fontSize: 14, color: C.muted },
+  backBtn:   { padding: 8 },
+  backBtnText: { fontSize: 14, color: C.theme },
 
   headerBack: {
     flexDirection: "row",
@@ -450,52 +395,49 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
     gap: 4,
   },
-  backArrow: { fontSize: 24, color: "#3B82F6", lineHeight: 28 },
-  backLabel: { fontSize: 15, color: "#3B82F6" },
+  backLabel: { fontSize: 15, color: C.theme },
 
   songHeader: { alignItems: "center", paddingVertical: 24, paddingHorizontal: 20 },
   thumb: {
-    width: 88,
-    height: 88,
+    width: 88, height: 88,
     borderRadius: 16,
     overflow: "hidden",
     marginBottom: 14,
     shadowColor: "#000",
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
     elevation: 4,
   },
   thumbImg: { width: "100%", height: "100%" },
   thumbPlaceholder: {
-    width: "100%",
-    height: "100%",
-    backgroundColor: "#DBEAFE",
+    width: "100%", height: "100%",
+    backgroundColor: C.surface,
     alignItems: "center",
     justifyContent: "center",
   },
-  songTitle: { fontSize: 22, fontWeight: "700", color: "#0F172A", textAlign: "center" },
-  songArtist: { fontSize: 14, color: "#64748B", marginTop: 4, textAlign: "center" },
+  songTitle:  { fontSize: 20, fontWeight: "700", color: C.text, textAlign: "center" },
+  songArtist: { fontSize: 13, color: C.muted, marginTop: 4, textAlign: "center" },
   masteryBadge: {
     marginTop: 10,
-    backgroundColor: "#EFF6FF",
+    backgroundColor: "#EEEEFF",
     paddingHorizontal: 12,
     paddingVertical: 5,
     borderRadius: 20,
   },
-  masteryText: { fontSize: 12.5, color: "#2563EB", fontWeight: "600" },
+  masteryText: { fontSize: 12, color: C.theme, fontWeight: "600" },
 
-  section: { paddingHorizontal: 16, marginBottom: 20 },
+  section:      { paddingHorizontal: 16, marginBottom: 20 },
   sectionLabel: {
-    fontSize: 10.5,
+    fontSize: 10,
     fontWeight: "600",
-    color: "#94A3B8",
-    letterSpacing: 0.8,
+    color: C.muted,
+    letterSpacing: 1.2,
     marginBottom: 8,
   },
   card: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
+    backgroundColor: C.surface,
+    borderRadius: 14,
     padding: 14,
     shadowColor: "#000",
     shadowOpacity: 0.04,
@@ -505,50 +447,47 @@ const styles = StyleSheet.create({
   },
   primaryBtn: {
     marginTop: 10,
-    backgroundColor: "#3B82F6",
+    backgroundColor: C.theme,
     borderRadius: 10,
     paddingVertical: 13,
     alignItems: "center",
   },
   primaryBtnDisabled: { opacity: 0.6 },
-  primaryBtnText: { fontSize: 14.5, fontWeight: "600", color: "#fff" },
-  allDoneRow: {
-    marginTop: 10,
-    alignItems: "center",
-    paddingVertical: 10,
-  },
+  primaryBtnText: { fontSize: 14, fontWeight: "600", color: "#fff" },
+
+  allDoneRow: { marginTop: 10, alignItems: "center", paddingVertical: 8 },
   allDoneText: { fontSize: 13, color: "#16A34A", fontWeight: "500" },
-  hint: { fontSize: 11.5, color: "#94A3B8", lineHeight: 17, marginTop: 8, paddingHorizontal: 2 },
+
+  hint: { fontSize: 12, color: C.muted, lineHeight: 17, marginTop: 8, paddingHorizontal: 2 },
 
   emptyDriveCard: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
+    backgroundColor: C.surface,
+    borderRadius: 14,
     padding: 20,
     alignItems: "center",
-    borderWidth: 1.5,
-    borderColor: "#E2E8F0",
+    borderWidth: 1,
+    borderColor: C.border,
     borderStyle: "dashed",
   },
-  emptyDriveTitle: { fontSize: 14, fontWeight: "600", color: "#475569", marginBottom: 6 },
-  emptyDriveSubtitle: {
-    fontSize: 12.5,
-    color: "#94A3B8",
-    textAlign: "center",
-    lineHeight: 19,
-  },
+  emptyDriveTitle:    { fontSize: 14, fontWeight: "600", color: C.muted, marginBottom: 6 },
+  emptyDriveSubtitle: { fontSize: 12.5, color: C.muted, textAlign: "center", lineHeight: 19 },
 
-  lyricLine: { fontSize: 14, color: "#1E293B", lineHeight: 22 },
+  lyricLine:    { fontSize: 14, color: C.text, lineHeight: 22 },
   lyricLineSep: { marginTop: 2 },
+
   practiceBtn: {
-    backgroundColor: '#1D4ED8',
-    borderRadius: 12,
-    paddingVertical: 15,
-    alignItems: 'center',
-    shadowColor: '#1D4ED8',
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 3,
+    backgroundColor: C.theme,
+    borderRadius: 14,
+    paddingVertical: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    shadowColor: C.theme,
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
   },
-  practiceBtnText: { fontSize: 16, fontWeight: '700', color: '#fff' },
+  practiceBtnText: { fontSize: 16, fontWeight: "700", color: "#fff" },
 });

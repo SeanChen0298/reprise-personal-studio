@@ -193,7 +193,8 @@ export interface DownloadResult {
 export async function downloadAudio(
   youtubeUrl: string,
   songFolder: string,
-  onProgress?: (line: string) => void
+  onProgress?: (line: string) => void,
+  prefLang?: string,
 ): Promise<DownloadResult> {
   const cleanUrl = sanitizeYouTubeUrl(youtubeUrl);
   console.log("[downloadAudio] Starting", { youtubeUrl, cleanUrl, songFolder });
@@ -274,25 +275,29 @@ export async function downloadAudio(
   const audioPath = await findAudioFile(songFolder);
   console.log("[downloadAudio] Audio file found:", audioPath);
 
-  // Try to parse subtitles for lyrics
-  const lyrics = await tryParseLyrics(songFolder);
+  // Try to parse subtitles for lyrics, preferring the song's language if known
+  const lyrics = await tryParseLyrics(songFolder, prefLang);
   console.log("[downloadAudio] Parsed lyrics:", lyrics?.length ?? 0, "lines");
 
   return { audioPath, lyrics };
 }
 
 /** Attempt to find and parse VTT subtitle files for lyrics */
-async function tryParseLyrics(songFolder: string): Promise<TimedLyricLine[] | undefined> {
+async function tryParseLyrics(songFolder: string, prefLang?: string): Promise<TimedLyricLine[] | undefined> {
   // yt-dlp writes subtitles as audio.{lang}.vtt
-  // We'll try to read any .vtt file in the folder
+  // We'll try to read any .vtt file in the folder, preferring prefLang if given
   try {
     const { readDir, readTextFile } = await import("@tauri-apps/plugin-fs");
     console.log("[tryParseLyrics] Reading dir:", songFolder);
     const entries = await readDir(songFolder);
     console.log("[tryParseLyrics] Entries:", entries.map((e) => ({ name: e.name, isFile: e.isFile })));
-    const vttFile = entries.find(
+    const vttFiles = entries.filter(
       (e) => e.name?.endsWith(".vtt") && e.isFile !== false
     );
+    // Prefer audio.{prefLang}.vtt (e.g. audio.ja.vtt) when a language is known
+    const vttFile =
+      (prefLang && vttFiles.find((e) => e.name?.includes(`.${prefLang}.`))) ||
+      vttFiles[0];
     if (!vttFile?.name) {
       console.warn("[tryParseLyrics] No .vtt file found in directory");
       return undefined;

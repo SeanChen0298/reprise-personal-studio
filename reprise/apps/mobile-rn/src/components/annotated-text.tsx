@@ -1,13 +1,12 @@
-import { Text, View } from "react-native";
+import { Text } from "react-native";
 import type { Annotation } from "@reprise/shared";
 
-// Hardcoded highlight colors (matches desktop highlight-config.ts defaults)
 const HIGHLIGHT_COLORS: Record<string, { bg: string; color: string }> = {
-  falsetto: { bg: "#DBEAFE", color: "#1D4ED8" },
-  whisper:  { bg: "#DCFCE7", color: "#15803D" },
-  accent:   { bg: "#FEE2E2", color: "#DC2626" },
-  vibrato:  { bg: "#F3E8FF", color: "#7E22CE" },
-  breath:   { bg: "#FFEDD5", color: "#C2410C" },
+  falsetto: { bg: "rgba(96,165,250,0.15)",  color: "#60A5FA" },
+  whisper:  { bg: "rgba(74,222,128,0.15)",  color: "#4ADE80" },
+  accent:   { bg: "rgba(248,113,113,0.15)", color: "#F87171" },
+  vibrato:  { bg: "rgba(167,139,250,0.15)", color: "#A78BFA" },
+  breath:   { bg: "rgba(251,146,60,0.15)",  color: "#FB923C" },
 };
 
 interface Segment {
@@ -51,23 +50,18 @@ interface Props {
   color?: string;
 }
 
-export function AnnotatedText({ text, annotations, fontSize = 26, color = "#0F172A" }: Props) {
+export function AnnotatedText({ text, annotations, fontSize = 18, color = "#e0e0ea" }: Props) {
   const segments = buildSegments(text, annotations);
 
   return (
-    <Text style={{ fontSize, color, lineHeight: fontSize * 1.4, textAlign: "center", flexWrap: "wrap" }}>
+    <Text style={{ fontSize, color, lineHeight: fontSize * 1.5, textAlign: "center", flexWrap: "wrap" }}>
       {segments.map((seg, i) => {
         const hl = seg.type ? HIGHLIGHT_COLORS[seg.type] : null;
         if (hl) {
           return (
             <Text
               key={i}
-              style={{
-                backgroundColor: hl.bg,
-                color: hl.color,
-                fontSize,
-                borderRadius: 3,
-              }}
+              style={{ backgroundColor: hl.bg, color: hl.color, fontSize, borderRadius: 3 }}
             >
               {seg.text}
             </Text>

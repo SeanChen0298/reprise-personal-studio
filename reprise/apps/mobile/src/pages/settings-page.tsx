@@ -59,13 +59,13 @@ export default function SettingsPage() {
   return (
     <div className="flex flex-1 flex-col">
       <header
-        className="px-4 pb-3"
-        style={{ paddingTop: "max(20px, env(safe-area-inset-top))" }}
+        className="px-5 pb-4"
+        style={{ paddingTop: "max(28px, env(safe-area-inset-top))" }}
       >
-        <h1 className="text-xl font-semibold text-[var(--color-text)]">Settings</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-[var(--color-text)]">Settings</h1>
       </header>
 
-      <div className="flex-1 overflow-y-auto px-4 pb-8 space-y-6">
+      <div className="flex-1 overflow-y-auto px-5 pb-8 space-y-6">
         {/* Audio output */}
         <section>
           <h2 className="mb-3 text-[12px] font-semibold uppercase tracking-widest text-[var(--color-text-muted)]">

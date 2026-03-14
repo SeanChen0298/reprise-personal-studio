@@ -12,11 +12,13 @@ import * as WebBrowser from "expo-web-browser";
 import { useAuthStore } from "../../src/stores/auth-store";
 import { useSongFilesStore } from "../../src/stores/song-files-store";
 import { buildDriveAuthUrl } from "../../src/lib/google-drive-download";
+import { C } from "../../src/lib/theme";
 
 export default function SettingsScreen() {
   const user = useAuthStore((s) => s.user);
   const signOut = useAuthStore((s) => s.signOut);
   const driveToken = useSongFilesStore((s) => s.driveToken);
+  const setDriveToken = useSongFilesStore((s) => s.setDriveToken);
   const [connectingDrive, setConnectingDrive] = useState(false);
 
   const connectDrive = async () => {
@@ -24,7 +26,6 @@ export default function SettingsScreen() {
     try {
       const state = Math.random().toString(36).substring(2);
       const authUrl = buildDriveAuthUrl(state);
-      // openAuthSessionAsync closes the browser automatically when reprise:// deep link fires
       await WebBrowser.openAuthSessionAsync(authUrl, "reprise://");
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -40,11 +41,7 @@ export default function SettingsScreen() {
       "This will remove your Drive credentials. Downloaded audio files will remain on device.",
       [
         { text: "Cancel", style: "cancel" },
-        {
-          text: "Disconnect",
-          style: "destructive",
-          onPress: () => setDriveToken(null),
-        },
+        { text: "Disconnect", style: "destructive", onPress: () => setDriveToken(null) },
       ]
     );
   };
@@ -57,55 +54,55 @@ export default function SettingsScreen() {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Settings</Text>
+    <ScrollView style={st.container} contentContainerStyle={st.content}>
+      <View style={st.header}>
+        <Text style={st.headerTitle}>Settings</Text>
       </View>
 
       {/* Account */}
-      <View style={styles.section}>
-        <Text style={styles.sectionLabel}>ACCOUNT</Text>
-        <View style={styles.card}>
-          <Text style={styles.rowLabel}>Signed in as</Text>
-          <Text style={styles.rowValue} numberOfLines={1}>{user?.email ?? "—"}</Text>
+      <View style={st.section}>
+        <Text style={st.sectionLabel}>ACCOUNT</Text>
+        <View style={st.card}>
+          <Text style={st.rowLabel}>Signed in as</Text>
+          <Text style={st.rowValue} numberOfLines={1}>{user?.email ?? "—"}</Text>
         </View>
-        <TouchableOpacity style={[styles.card, styles.danger]} onPress={handleSignOut}>
-          <Text style={styles.dangerText}>Sign Out</Text>
+        <TouchableOpacity style={[st.card, st.dangerCard]} onPress={handleSignOut} activeOpacity={0.7}>
+          <Text style={st.dangerText}>Sign Out</Text>
         </TouchableOpacity>
       </View>
 
       {/* Google Drive */}
-      <View style={styles.section}>
-        <Text style={styles.sectionLabel}>GOOGLE DRIVE SYNC</Text>
-        <View style={styles.card}>
-          <View style={styles.driveRow}>
-            <View style={styles.driveInfo}>
-              <Text style={styles.rowLabel}>Status</Text>
-              <Text style={[styles.rowValue, driveToken ? styles.connected : styles.disconnected]}>
+      <View style={st.section}>
+        <Text style={st.sectionLabel}>GOOGLE DRIVE SYNC</Text>
+        <View style={st.card}>
+          <View style={st.driveRow}>
+            <View style={st.driveInfo}>
+              <Text style={st.rowLabel}>Status</Text>
+              <Text style={[st.rowValue, driveToken ? st.connected : st.disconnected]}>
                 {driveToken ? "Connected" : "Not connected"}
               </Text>
             </View>
             {driveToken ? (
-              <TouchableOpacity style={styles.smallBtn} onPress={disconnectDrive}>
-                <Text style={styles.smallBtnText}>Disconnect</Text>
+              <TouchableOpacity style={st.smallBtn} onPress={disconnectDrive} activeOpacity={0.7}>
+                <Text style={st.smallBtnText}>Disconnect</Text>
               </TouchableOpacity>
             ) : (
               <TouchableOpacity
-                style={[styles.smallBtn, styles.primaryBtn]}
+                style={[st.smallBtn, st.primaryBtn]}
                 onPress={connectDrive}
                 disabled={connectingDrive}
+                activeOpacity={0.8}
               >
                 {connectingDrive ? (
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
-                  <Text style={[styles.smallBtnText, { color: "#fff" }]}>Connect</Text>
+                  <Text style={[st.smallBtnText, st.primaryBtnText]}>Connect</Text>
                 )}
               </TouchableOpacity>
             )}
           </View>
         </View>
-        <Text style={styles.hint}>
+        <Text style={st.hint}>
           Connect Google Drive to download audio files synced from the Reprise desktop app.
         </Text>
       </View>
@@ -113,54 +110,64 @@ export default function SettingsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F8FAFC" },
-  content: { paddingBottom: 40 },
+const st = StyleSheet.create({
+  container: { flex: 1, backgroundColor: C.bg },
+  content:   { paddingBottom: 48 },
   header: {
     paddingTop: 56,
-    paddingBottom: 14,
+    paddingBottom: 16,
     paddingHorizontal: 20,
-    backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#E2E8F0",
+    backgroundColor: C.bg,
   },
-  headerTitle: { fontSize: 22, fontWeight: "700", color: "#0F172A" },
-  section: { marginTop: 24, paddingHorizontal: 16 },
+  headerTitle: { fontSize: 24, fontWeight: "600", color: C.text, letterSpacing: -0.3 },
+
+  section:      { marginTop: 28, paddingHorizontal: 16 },
   sectionLabel: {
-    fontSize: 10.5,
+    fontSize: 10,
     fontWeight: "600",
-    color: "#94A3B8",
-    letterSpacing: 0.8,
-    marginBottom: 8,
+    color: C.muted,
+    letterSpacing: 1.2,
+    marginBottom: 10,
   },
+
   card: {
-    backgroundColor: "#fff",
+    backgroundColor: C.surface,
     borderRadius: 12,
-    padding: 14,
-    marginBottom: 6,
+    padding: 16,
+    marginBottom: 8,
     shadowColor: "#000",
     shadowOpacity: 0.04,
     shadowRadius: 4,
     shadowOffset: { width: 0, height: 1 },
     elevation: 1,
   },
-  rowLabel: { fontSize: 11.5, color: "#64748B", marginBottom: 2 },
-  rowValue: { fontSize: 13.5, fontWeight: "500", color: "#0F172A" },
-  danger: { alignItems: "center" },
-  dangerText: { fontSize: 14, fontWeight: "600", color: "#EF4444" },
-  driveRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  dangerCard:   { alignItems: "center" },
+  rowLabel:     { fontSize: 11, color: C.muted, marginBottom: 3 },
+  rowValue:     { fontSize: 14, fontWeight: "500", color: C.text },
+  dangerText:   { fontSize: 14, fontWeight: "500", color: "#EF4444" },
+
+  driveRow:  { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   driveInfo: { flex: 1 },
-  connected: { color: "#16A34A" },
-  disconnected: { color: "#94A3B8" },
+  connected:    { color: "#16A34A" },
+  disconnected: { color: C.muted },
+
   smallBtn: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: "#E2E8F0",
-    backgroundColor: "#F8FAFC",
+    borderColor: C.border,
+    backgroundColor: C.bg,
   },
-  primaryBtn: { backgroundColor: "#3B82F6", borderColor: "#3B82F6" },
-  smallBtnText: { fontSize: 12.5, fontWeight: "600", color: "#475569" },
-  hint: { fontSize: 11.5, color: "#94A3B8", lineHeight: 17, marginTop: 4, paddingHorizontal: 4 },
+  primaryBtn:     { backgroundColor: C.theme, borderColor: C.theme },
+  smallBtnText:   { fontSize: 13, fontWeight: "500", color: C.muted },
+  primaryBtnText: { color: "#fff" },
+
+  hint: {
+    fontSize: 12,
+    color: C.muted,
+    lineHeight: 18,
+    marginTop: 6,
+    paddingHorizontal: 4,
+  },
 });

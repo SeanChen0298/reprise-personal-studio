@@ -65,8 +65,8 @@ function TabLayout() {
             end={end}
             className={({ isActive }) =>
               [
-                "flex flex-1 flex-col items-center justify-center gap-1 py-3",
-                "min-h-[60px] text-xs font-medium transition-colors",
+                "flex flex-1 items-center justify-center",
+                "min-h-[52px] transition-colors",
                 isActive
                   ? "text-[var(--color-theme-light)]"
                   : "text-[var(--color-text-muted)] active:text-[var(--color-text)]",
@@ -74,7 +74,6 @@ function TabLayout() {
             }
           >
             {icon}
-            <span>{label}</span>
           </NavLink>
         ))}
       </nav>

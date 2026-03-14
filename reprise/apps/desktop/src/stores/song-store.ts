@@ -21,6 +21,24 @@ import MusicTempo from "music-tempo";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const db = supabase as any;
 
+/** Maps a user-facing language name (or code) to a yt-dlp language code. */
+function languageNameToCode(language?: string): string | undefined {
+  if (!language) return undefined;
+  const l = language.toLowerCase().trim();
+  const map: Record<string, string> = {
+    japanese: "ja", ja: "ja",
+    english: "en",  en: "en",
+    korean: "ko",   ko: "ko",
+    chinese: "zh",  zh: "zh",
+    spanish: "es",  es: "es",
+    french: "fr",   fr: "fr",
+    german: "de",   de: "de",
+    portuguese: "pt", pt: "pt",
+    italian: "it",  it: "it",
+  };
+  return map[l];
+}
+
 async function detectBpmFromFile(filePath: string): Promise<number | null> {
   try {
     const data = await readFile(filePath);
@@ -280,7 +298,8 @@ export const useSongStore = create<SongStore>()((set, get) => ({
     });
 
     try {
-      const result = await downloadAudio(song.youtube_url, songFolder);
+      const prefLang = languageNameToCode(song.language);
+      const result = await downloadAudio(song.youtube_url, songFolder, undefined, prefLang);
 
       await get().updateSong(id, {
         download_status: "done",

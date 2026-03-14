@@ -3,6 +3,11 @@ import { useNavigate } from "react-router-dom";
 import { Sidebar } from "../components/sidebar";
 import { useSongStore } from "../stores/song-store";
 
+/** Returns true if text contains any Hiragana, Katakana, or Kanji characters. */
+function containsJapanese(text: string): boolean {
+  return /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\uFF65-\uFF9F]/.test(text);
+}
+
 export function AddSongPage() {
   const navigate = useNavigate();
   const draft = useSongStore((s) => s.importDraft);
@@ -18,6 +23,7 @@ export function AddSongPage() {
   const [artist, setArtist] = useState(draft?.artist ?? "");
   const [bpm, setBpm] = useState(draft?.bpm ?? "");
   const [language, setLanguage] = useState(draft?.language ?? "");
+  const [languageAutoDetected, setLanguageAutoDetected] = useState(false);
   const [tags, setTags] = useState<string[]>(draft?.tags ?? []);
   const [tagInput, setTagInput] = useState("");
   const [notes, setNotes] = useState(draft?.notes ?? "");
@@ -37,6 +43,25 @@ export function AddSongPage() {
       setNotes(draft.notes);
     }
   }, [draft]);
+
+  // Auto-detect Japanese from title/artist and pre-fill the language field
+  useEffect(() => {
+    if (containsJapanese(title) || containsJapanese(artist)) {
+      setLanguage((prev) => {
+        // Only auto-fill if empty or was previously auto-detected ("Japanese")
+        if (prev === "" || prev === "Japanese") {
+          setLanguageAutoDetected(true);
+          return "Japanese";
+        }
+        return prev;
+      });
+    } else if (languageAutoDetected) {
+      // Title/artist no longer Japanese — clear the auto-filled value
+      setLanguage("");
+      setLanguageAutoDetected(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [title, artist]);
 
   function addTag(raw: string) {
     const tag = raw.trim();
@@ -280,13 +305,24 @@ export function AddSongPage() {
                   </div>
 
                   <div className="flex flex-col gap-[5px]">
-                    <label className="text-[12.5px] font-medium text-[var(--text-secondary)]">
+                    <label className="text-[12.5px] font-medium text-[var(--text-secondary)] flex items-center gap-[6px]">
                       Language
+                      {languageAutoDetected && (
+                        <span className="inline-flex items-center gap-[4px] px-[7px] py-[2px] rounded-full bg-[var(--theme-light)] text-[10.5px] font-medium text-[var(--theme-text)]">
+                          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                          Auto-detected
+                        </span>
+                      )}
                     </label>
                     <input
                       type="text"
                       value={language}
-                      onChange={(e) => setLanguage(e.target.value)}
+                      onChange={(e) => {
+                        setLanguageAutoDetected(false);
+                        setLanguage(e.target.value);
+                      }}
                       placeholder="e.g. Japanese"
                       className="w-full px-[13px] py-[9px] rounded-[7px] border-[1.5px] border-[var(--border)] bg-[var(--surface)] text-[var(--text-primary)] font-sans text-[13.5px] outline-none focus:border-[var(--theme)] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.09)] transition-all placeholder:text-[var(--text-muted)]"
                     />

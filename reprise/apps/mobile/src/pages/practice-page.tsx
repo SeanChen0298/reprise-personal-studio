@@ -93,18 +93,26 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+// ─── Opacity by distance from active line ────────────────────────────────────
+
+const OPACITY_BY_DISTANCE = [1, 0.5, 0.22, 0.08, 0.03] as const;
+
+function getLineOpacity(distance: number): number {
+  return OPACITY_BY_DISTANCE[Math.min(Math.abs(distance), OPACITY_BY_DISTANCE.length - 1)];
+}
+
 // ─── No-song placeholder ──────────────────────────────────────────────────────
 
 function NoSongSelected() {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 px-8 text-center">
-      <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[var(--color-surface)]">
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-muted)" strokeWidth="1.5">
+      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[var(--color-surface)]">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-muted)" strokeWidth="1.5">
           <circle cx="12" cy="12" r="10" />
           <polygon points="10,8 16,12 10,16" fill="var(--color-text-muted)" stroke="none" />
         </svg>
       </div>
-      <p className="text-base font-semibold text-[var(--color-text)]">No song selected</p>
+      <p className="text-base font-medium text-[var(--color-text)]">No song selected</p>
       <p className="text-sm leading-relaxed text-[var(--color-text-muted)]">
         Tap a song in your library to start practicing.
       </p>
@@ -262,7 +270,7 @@ export default function PracticePage() {
   if (loading) {
     return (
       <div className="flex flex-1 items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--color-theme)] border-t-transparent" />
+        <div className="h-6 w-6 animate-spin rounded-full border-[1.5px] border-[var(--color-theme)] border-t-transparent" />
       </div>
     );
   }
@@ -270,7 +278,7 @@ export default function PracticePage() {
   if (!song) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 px-8 text-center">
-        <p className="text-base font-semibold text-[var(--color-text)]">Song not found</p>
+        <p className="text-base font-medium text-[var(--color-text)]">Song not found</p>
         <button
           onClick={() => navigate("/")}
           className="min-h-[44px] rounded-lg px-5 py-2 text-sm font-medium text-[var(--color-theme-light)] active:opacity-70"
@@ -302,7 +310,7 @@ export default function PracticePage() {
 
       {/* Top bar */}
       <header
-        className="flex shrink-0 items-center gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3"
+        className="flex shrink-0 items-center gap-3 bg-[var(--color-surface)] px-4 py-3"
         style={{ paddingTop: "max(12px, env(safe-area-inset-top))" }}
       >
         <button
@@ -334,19 +342,24 @@ export default function PracticePage() {
         )}
       </header>
 
-      {/* Lyrics scroll area */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3">
+      {/* Lyrics stream */}
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto"
+        style={{
+          maskImage: "linear-gradient(to bottom, transparent 0%, black 18%, black 82%, transparent 100%)",
+          WebkitMaskImage: "linear-gradient(to bottom, transparent 0%, black 18%, black 82%, transparent 100%)",
+        }}
+      >
         {lines.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-muted)" strokeWidth="1.5">
-              <path d="M4 6h16M4 12h16M4 18h10" />
-            </svg>
+          <div className="flex h-full flex-col items-center justify-center gap-2 px-8 text-center">
             <p className="text-sm text-[var(--color-text-muted)]">No lyrics added yet.</p>
           </div>
         ) : (
-          <div className="space-y-0.5 pb-4">
+          <div className="space-y-2 px-6 py-20">
             {lines.map((line, idx) => {
-              const isActive = idx === activeLineIdx;
+              const isActive = activeLineIdx >= 0 && idx === activeLineIdx;
+              const opacity = activeLineIdx < 0 ? 0.65 : getLineOpacity(idx - activeLineIdx);
               const translation = translationByOrder.get(line.order);
 
               return (
@@ -357,45 +370,23 @@ export default function PracticePage() {
                     else lineRefs.current.delete(idx);
                   }}
                   onClick={() => seekToLine(idx)}
-                  className={[
-                    "rounded-lg px-3 py-2.5 transition-colors",
-                    isActive
-                      ? "bg-[var(--color-theme)] bg-opacity-15"
-                      : "active:bg-[var(--color-surface)]",
-                  ].join(" ")}
+                  className="py-1.5"
+                  style={{ opacity, transition: "opacity 400ms ease-out" }}
                 >
-                  {/* Status dot */}
-                  <div className="flex items-start gap-2">
-                    <span
-                      className="mt-1 h-2 w-2 shrink-0 rounded-full"
-                      style={{ backgroundColor: STATUS_DOT_COLORS[line.status as keyof typeof STATUS_DOT_COLORS] ?? "#94A3B8" }}
-                    />
-                    <div className="min-w-0 flex-1">
-                      {/* Lyrics text */}
-                      <p
-                        className={[
-                          "text-[15px] leading-relaxed",
-                          isActive ? "font-semibold text-[var(--color-text)]" : "text-[var(--color-text)]",
-                        ].join(" ")}
-                      >
-                        <LineText line={line} />
-                      </p>
+                  <p
+                    className={[
+                      "text-[16px] leading-relaxed text-[var(--color-text)]",
+                      isActive ? "font-medium" : "font-normal",
+                    ].join(" ")}
+                  >
+                    <LineText line={line} />
+                  </p>
 
-                      {/* Translation */}
-                      {showTranslation && translation && (
-                        <p className="mt-0.5 text-[12.5px] leading-snug text-[var(--color-text-muted)]">
-                          {translation}
-                        </p>
-                      )}
-
-                      {/* Timestamps */}
-                      {line.start_ms != null && (
-                        <p className="mt-0.5 text-[11px] text-[var(--color-text-muted)] opacity-50">
-                          {formatTime(line.start_ms / 1000)}
-                        </p>
-                      )}
-                    </div>
-                  </div>
+                  {showTranslation && translation && (
+                    <p className="mt-0.5 text-[12.5px] leading-snug text-[var(--color-text-muted)]">
+                      {translation}
+                    </p>
+                  )}
                 </div>
               );
             })}
@@ -405,8 +396,8 @@ export default function PracticePage() {
 
       {/* Audio player */}
       <div
-        className="shrink-0 border-t border-[var(--color-border)] bg-[var(--color-surface)] px-5 pt-4 pb-4"
-        style={{ paddingBottom: "max(16px, env(safe-area-inset-bottom))" }}
+        className="shrink-0 bg-[var(--color-surface)] px-5 pt-5"
+        style={{ paddingBottom: "max(20px, env(safe-area-inset-bottom))" }}
       >
         {!audioSrc ? (
           <p className="text-center text-sm text-[var(--color-text-muted)]">
@@ -415,7 +406,7 @@ export default function PracticePage() {
         ) : (
           <>
             {/* Seek bar */}
-            <div className="mb-3 flex items-center gap-2">
+            <div className="mb-4 flex items-center gap-2">
               <span className="w-8 text-right text-[11px] tabular-nums text-[var(--color-text-muted)]">
                 {formatTime(currentTime)}
               </span>
@@ -434,18 +425,18 @@ export default function PracticePage() {
             </div>
 
             {/* Play / pause */}
-            <div className="flex items-center justify-center">
+            <div className="flex items-center justify-center pb-1">
               <button
                 onClick={handlePlayPause}
-                className="flex h-[60px] w-[60px] items-center justify-center rounded-full bg-[var(--color-theme)] text-white active:opacity-80"
+                className="flex h-[52px] w-[52px] items-center justify-center rounded-full bg-[var(--color-theme)] text-white transition-opacity active:opacity-70"
               >
                 {isPlaying ? (
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                     <rect x="6" y="4" width="4" height="16" rx="1" />
                     <rect x="14" y="4" width="4" height="16" rx="1" />
                   </svg>
                 ) : (
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                     <polygon points="5,3 19,12 5,21" />
                   </svg>
                 )}
@@ -457,13 +448,3 @@ export default function PracticePage() {
     </div>
   );
 }
-
-// Status dot colors (inlined — mirrors desktop status-config)
-const STATUS_DOT_COLORS = {
-  new:          "#94A3B8",
-  listened:     "#60A5FA",
-  annotated:    "#F59E0B",
-  practiced:    "#F97316",
-  recorded:     "#22C55E",
-  best_take_set:"#EAB308",
-} as const;

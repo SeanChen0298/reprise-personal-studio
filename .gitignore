@@ -159,6 +159,22 @@ Thumbs.db
 # Claude Code
 .claude/settings.local.json
 
+# Agent/AI tool skills and configs (local only)
+.agent/skills/
+.claude/skills/
+.github/prompts/
+.codebuddy/
+.codex/
+.continue/
+.cursor/
+.gemini/
+.kiro/
+.opencode/
+.qoder/
+.roo/
+.trae/
+.windsurf/
+
 # Personal notes (local only)
 NOTES.md
 
