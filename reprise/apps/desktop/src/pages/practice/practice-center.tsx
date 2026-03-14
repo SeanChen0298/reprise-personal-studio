@@ -737,7 +737,18 @@ export function PracticeCenter({
                     title={isActive ? "Click to preview · Double-click to edit" : "Click to preview this line"}
                   >
                     {!line.custom_text && line.furigana_html ? (
-                      <span dangerouslySetInnerHTML={{ __html: line.furigana_html }} />
+                      <>
+                        <span dangerouslySetInnerHTML={{ __html: line.furigana_html }} />
+                        {line.annotations && line.annotations.length > 0 && (
+                          <div className="mt-0.5 text-[0.6em]">
+                            <AnnotatedText
+                              text={lineDisplay}
+                              annotations={line.annotations}
+                              highlights={highlights}
+                            />
+                          </div>
+                        )}
+                      </>
                     ) : (
                       <AnnotatedText
                         text={lineDisplay}
@@ -813,7 +824,18 @@ export function PracticeCenter({
             <div className="font-serif text-[20px] tracking-[-0.3px] text-[var(--text-muted)] leading-relaxed">
               {prevLine ? (
                 !prevLine.custom_text && prevLine.furigana_html ? (
-                  <span dangerouslySetInnerHTML={{ __html: prevLine.furigana_html }} />
+                  <>
+                    <span dangerouslySetInnerHTML={{ __html: prevLine.furigana_html }} />
+                    {prevLine.annotations && prevLine.annotations.length > 0 && (
+                      <div className="mt-0.5 text-[0.6em]">
+                        <AnnotatedText
+                          text={prevLine.custom_text ?? prevLine.text}
+                          annotations={prevLine.annotations}
+                          highlights={highlights}
+                        />
+                      </div>
+                    )}
+                  </>
                 ) : (
                   <AnnotatedText
                     text={prevLine.custom_text ?? prevLine.text}
@@ -894,7 +916,18 @@ export function PracticeCenter({
                   title="Click to preview · Double-click to edit"
                 >
                   {!hasCustomText && currentLine.furigana_html ? (
-                    <span dangerouslySetInnerHTML={{ __html: currentLine.furigana_html }} />
+                    <>
+                      <span dangerouslySetInnerHTML={{ __html: currentLine.furigana_html }} />
+                      {currentLine.annotations && currentLine.annotations.length > 0 && (
+                        <div className="mt-2 text-[0.6em]">
+                          <AnnotatedText
+                            text={displayText}
+                            annotations={currentLine.annotations}
+                            highlights={highlights}
+                          />
+                        </div>
+                      )}
+                    </>
                   ) : (
                     <AnnotatedText
                       text={displayText}
@@ -967,7 +1000,18 @@ export function PracticeCenter({
             <div className="font-serif text-[20px] tracking-[-0.3px] text-[var(--text-muted)] leading-relaxed">
               {nextLineData ? (
                 !nextLineData.custom_text && nextLineData.furigana_html ? (
-                  <span dangerouslySetInnerHTML={{ __html: nextLineData.furigana_html }} />
+                  <>
+                    <span dangerouslySetInnerHTML={{ __html: nextLineData.furigana_html }} />
+                    {nextLineData.annotations && nextLineData.annotations.length > 0 && (
+                      <div className="mt-0.5 text-[0.6em]">
+                        <AnnotatedText
+                          text={nextLineData.custom_text ?? nextLineData.text}
+                          annotations={nextLineData.annotations}
+                          highlights={highlights}
+                        />
+                      </div>
+                    )}
+                  </>
                 ) : (
                   <AnnotatedText
                     text={nextLineData.custom_text ?? nextLineData.text}

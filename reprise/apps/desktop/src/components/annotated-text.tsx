@@ -13,11 +13,12 @@ interface Segment {
   text: string;
   annotationIndex: number | null; // index into annotations array, or null for plain text
   type: string | null;
+  furigana_html: string | null;
 }
 
 function buildSegments(text: string, annotations?: Annotation[]): Segment[] {
   if (!annotations || annotations.length === 0) {
-    return [{ text, annotationIndex: null, type: null }];
+    return [{ text, annotationIndex: null, type: null, furigana_html: null }];
   }
 
   // Sort by start position
@@ -34,7 +35,7 @@ function buildSegments(text: string, annotations?: Annotation[]): Segment[] {
 
     // Plain text before this annotation
     if (cursor < start) {
-      segments.push({ text: text.slice(cursor, start), annotationIndex: null, type: null });
+      segments.push({ text: text.slice(cursor, start), annotationIndex: null, type: null, furigana_html: null });
     }
 
     // Annotated segment
@@ -43,6 +44,7 @@ function buildSegments(text: string, annotations?: Annotation[]): Segment[] {
         text: text.slice(start, end),
         annotationIndex: ann.originalIndex,
         type: ann.type,
+        furigana_html: ann.furigana_html ?? null,
       });
     }
 
@@ -51,7 +53,7 @@ function buildSegments(text: string, annotations?: Annotation[]): Segment[] {
 
   // Trailing plain text
   if (cursor < text.length) {
-    segments.push({ text: text.slice(cursor), annotationIndex: null, type: null });
+    segments.push({ text: text.slice(cursor), annotationIndex: null, type: null, furigana_html: null });
   }
 
   return segments;
@@ -85,7 +87,9 @@ export function AnnotatedText({ text, annotations, highlights, onClickAnnotation
               padding: "1px 2px",
             }}
           >
-            {seg.text}
+            {seg.furigana_html
+              ? <span dangerouslySetInnerHTML={{ __html: seg.furigana_html }} />
+              : seg.text}
           </span>
         );
       })}

@@ -1,0 +1,14 @@
+-- Migration: Annotation furigana_html support
+--
+-- No DDL changes required.
+--
+-- Annotations are stored as JSONB in lines.annotations (default '[]').
+-- Each annotation object gains an optional furigana_html field, e.g.:
+--
+--   [{ "start": 0, "end": 2, "type": "falsetto", "furigana_html": "<ruby>歌<rt>うた</rt></ruby>" }]
+--
+-- Because the column is already JSONB, new fields in the JSON structure are
+-- accepted without any schema change. The application writes furigana_html
+-- into the annotation objects at save time (fire-and-forget, Japanese songs only).
+--
+-- This file is intentionally a no-op — it documents the intent for review.

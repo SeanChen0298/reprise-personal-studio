@@ -611,6 +611,33 @@ export const useSongStore = create<SongStore>()((set, get) => ({
       updates.status = upgradeStatus(line.status, "annotated");
     }
     await get().updateLine(songId, lineId, updates);
+
+    // Fire-and-forget: generate furigana for annotation text on Japanese songs
+    const song = get().songs.find((s) => s.id === songId);
+    if (song?.language?.startsWith("ja") && annotations.length > 0 && line) {
+      const lineText = line.custom_text ?? line.text;
+      const KANJI_RE = /[\u4E00-\u9FAF\u3400-\u4DBF]/;
+      (async () => {
+        const { generateFurigana } = await import("@reprise/shared");
+        const newAnnotations: Annotation[] = [...annotations];
+        let changed = false;
+        for (let i = 0; i < annotations.length; i++) {
+          const ann = annotations[i];
+          const text = lineText.slice(ann.start, ann.end);
+          if (!KANJI_RE.test(text)) continue;
+          try {
+            const html = await generateFurigana(text);
+            newAnnotations[i] = { ...ann, furigana_html: html };
+            changed = true;
+          } catch {
+            // fail silently per annotation
+          }
+        }
+        if (changed) {
+          await get().updateLine(songId, lineId, { annotations: newAnnotations });
+        }
+      })();
+    }
   },
 
   getLinesForSong: (songId) => {

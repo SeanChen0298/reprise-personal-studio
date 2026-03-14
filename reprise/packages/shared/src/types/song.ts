@@ -42,6 +42,7 @@ export interface Annotation {
   start: number; // char index in custom_text (inclusive)
   end: number;   // char index in custom_text (exclusive)
   type: string;  // highlight type id, e.g. "falsetto"
+  furigana_html?: string; // HTML with <ruby> tags, auto-generated for Japanese annotation text
 }
 
 export interface Line {
