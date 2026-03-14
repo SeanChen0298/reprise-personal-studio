@@ -188,6 +188,7 @@ export function PracticeCenter({
 
   const enterEditMode = useCallback(() => {
     if (!currentLine) return;
+    player.pause();
     setEditText(currentLine.custom_text ?? currentLine.text);
     setEditAnnotations(currentLine.annotations ?? []);
     setToolbarPos(null);
@@ -195,7 +196,7 @@ export function PracticeCenter({
     onEditModeChange?.(true);
     // Focus the input after render
     requestAnimationFrame(() => inputRef.current?.focus());
-  }, [currentLine, onEditModeChange]);
+  }, [currentLine, player, onEditModeChange]);
 
   const exitEditMode = useCallback(() => {
     if (!currentLine) return;

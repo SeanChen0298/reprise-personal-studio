@@ -1,10 +1,12 @@
 import { useEffect } from "react";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
+import * as Linking from "expo-linking";
+import { Alert, View, ActivityIndicator } from "react-native";
 import { useAuthStore } from "../src/stores/auth-store";
 import { useSongFilesStore } from "../src/stores/song-files-store";
+import type { DriveToken } from "../src/lib/google-drive-download";
 import { AuthScreen } from "../src/screens/auth-screen";
-import { View, ActivityIndicator } from "react-native";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -20,6 +22,31 @@ export default function RootLayout() {
     hydrate();
     return unsub;
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Handle Google Drive OAuth deep link callback: reprise://auth/drive-callback?tokens...
+  const url = Linking.useURL();
+  useEffect(() => {
+    if (!url) return;
+    const parsed = Linking.parse(url);
+    // reprise://auth/drive-callback → hostname="auth", path="drive-callback"
+    if (parsed.hostname !== "auth" || parsed.path !== "drive-callback") return;
+
+    const params = (parsed.queryParams ?? {}) as Record<string, string>;
+    if (params.error) {
+      Alert.alert("Drive Connection Failed", params.error);
+      return;
+    }
+    if (!params.access_token) return;
+
+    const token: DriveToken = {
+      accessToken: params.access_token,
+      refreshToken: params.refresh_token,
+      expiresAt: Date.now() + Number(params.expires_in ?? 3600) * 1000,
+    };
+    useSongFilesStore.getState().setDriveToken(token).then(() => {
+      Alert.alert("Google Drive Connected", "Your Drive account is now linked.");
+    });
+  }, [url]);
 
   useEffect(() => {
     if (!loading && hydrated) {
@@ -43,6 +70,7 @@ export default function RootLayout() {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="song/[id]" options={{ presentation: "card" }} />
+      <Stack.Screen name="practice/[id]" options={{ presentation: "card", gestureEnabled: true }} />
     </Stack>
   );
 }

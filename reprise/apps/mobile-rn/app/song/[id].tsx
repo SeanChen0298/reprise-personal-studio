@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import {
   View,
   Text,
@@ -40,7 +41,7 @@ export default function SongDetailScreen() {
   const [lines, setLines] = useState<Line[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const localFiles = useSongFilesStore((s) => s.getLocalFiles(id ?? ""));
+  const localFiles = useSongFilesStore(useShallow((s) => s.getLocalFiles(id ?? "")));
   const setLocalFiles = useSongFilesStore((s) => s.setLocalFiles);
   const driveToken = useSongFilesStore((s) => s.driveToken);
 
@@ -319,6 +320,19 @@ export default function SongDetailScreen() {
         </View>
       )}
 
+      {/* Practice */}
+      {(localFiles.audioPath || audioStatus.state === "done") && (
+        <View style={styles.section}>
+          <TouchableOpacity
+            style={styles.practiceBtn}
+            onPress={() => router.push(`/practice/${id}`)}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.practiceBtnText}>▶  Start Practicing</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* Lyrics */}
       {lines.length > 0 && (
         <View style={styles.section}>
@@ -525,4 +539,16 @@ const styles = StyleSheet.create({
 
   lyricLine: { fontSize: 14, color: "#1E293B", lineHeight: 22 },
   lyricLineSep: { marginTop: 2 },
+  practiceBtn: {
+    backgroundColor: '#1D4ED8',
+    borderRadius: 12,
+    paddingVertical: 15,
+    alignItems: 'center',
+    shadowColor: '#1D4ED8',
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
+  },
+  practiceBtnText: { fontSize: 16, fontWeight: '700', color: '#fff' },
 });

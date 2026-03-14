@@ -1,28 +1,17 @@
 /**
  * Google Drive download helpers for Reprise mobile (Expo).
  *
- * OAuth2 PKCE flow via expo-auth-session:
- *   1. startDriveAuth()  → opens browser, returns DriveToken on success
- *   2. downloadDriveFile(fileId, destPath, token, onProgress) → downloads to FS
+ * OAuth is handled server-side via Supabase Edge Functions:
+ *   1. Open browser to google-drive-auth edge function
+ *   2. Edge function completes OAuth, deep-links back with tokens
+ *   3. refreshAccessToken() calls google-drive-refresh edge function
  *
  * Scope: https://www.googleapis.com/auth/drive.file
  */
 
-import * as AuthSession from "expo-auth-session";
-import * as Crypto from "expo-crypto";
 import * as FileSystem from "expo-file-system";
 
-const CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID!;
-
-// Expo uses a special redirect URI proxy in development, or the app scheme in production.
-// expo-auth-session provides `makeRedirectUri()` which handles both cases.
-const REDIRECT_URI = AuthSession.makeRedirectUri({ scheme: "reprise", path: "drive-callback" });
-
-const DISCOVERY = {
-  authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
-  tokenEndpoint: "https://oauth2.googleapis.com/token",
-  revocationEndpoint: "https://oauth2.googleapis.com/revoke",
-};
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -37,81 +26,25 @@ export interface DownloadProgress {
   totalBytesExpected: number;
 }
 
-// ─── PKCE helpers ─────────────────────────────────────────────────────────────
-
-async function generatePKCE(): Promise<{ verifier: string; challenge: string }> {
-  const verifier = await Crypto.digestStringAsync(
-    Crypto.CryptoDigestAlgorithm.SHA256,
-    Math.random().toString(36) + Date.now().toString(36),
-    { encoding: Crypto.CryptoEncoding.HEX }
-  );
-  // Compute challenge from verifier
-  const challengeBytes = await Crypto.digestStringAsync(
-    Crypto.CryptoDigestAlgorithm.SHA256,
-    verifier,
-    { encoding: Crypto.CryptoEncoding.BASE64 }
-  );
-  // Base64url-encode
-  const challenge = challengeBytes
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=/g, "");
-  return { verifier, challenge };
-}
-
-// ─── OAuth flow ───────────────────────────────────────────────────────────────
+// ─── OAuth helpers ────────────────────────────────────────────────────────────
 
 /**
- * Initiates the Google Drive OAuth2 PKCE flow using expo-auth-session.
- * Returns a DriveToken on success, or throws on failure/cancellation.
- *
- * NOTE: This must be called from a component using `useAuthRequest` hook
- * from expo-auth-session. This function is the lower-level token exchange
- * called after the browser redirect completes.
+ * Returns the URL to open in the browser to start the Google Drive OAuth flow.
+ * The state param is used for CSRF protection — validate it in the deep link callback.
  */
-export async function exchangeCodeForToken(
-  code: string,
-  codeVerifier: string
-): Promise<DriveToken> {
-  const res = await fetch(DISCOVERY.tokenEndpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      code,
-      client_id: CLIENT_ID,
-      redirect_uri: REDIRECT_URI,
-      grant_type: "authorization_code",
-      code_verifier: codeVerifier,
-    }).toString(),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Drive token exchange failed: ${text}`);
-  }
-
-  const json = (await res.json()) as {
-    access_token: string;
-    refresh_token?: string;
-    expires_in: number;
-  };
-
-  return {
-    accessToken: json.access_token,
-    refreshToken: json.refresh_token,
-    expiresAt: Date.now() + json.expires_in * 1000,
-  };
+export function buildDriveAuthUrl(state: string): string {
+  return `${SUPABASE_URL}/functions/v1/google-drive-auth?state=${encodeURIComponent(state)}`;
 }
 
+/**
+ * Refreshes an expired Drive access token via the Supabase Edge Function.
+ * The client secret is kept server-side.
+ */
 export async function refreshAccessToken(refreshToken: string): Promise<DriveToken> {
-  const res = await fetch(DISCOVERY.tokenEndpoint, {
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/google-drive-refresh`, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: CLIENT_ID,
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-    }).toString(),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refresh_token: refreshToken }),
   });
 
   if (!res.ok) throw new Error("Failed to refresh Drive access token");
@@ -124,38 +57,16 @@ export async function refreshAccessToken(refreshToken: string): Promise<DriveTok
   };
 }
 
-/** Returns usable auth request config for `useAuthRequest` from expo-auth-session. */
-export async function buildAuthRequest(): Promise<{
-  request: AuthSession.AuthRequest;
-  verifier: string;
-}> {
-  const { verifier, challenge } = await generatePKCE();
-
-  const request = new AuthSession.AuthRequest({
-    clientId: CLIENT_ID,
-    redirectUri: REDIRECT_URI,
-    scopes: ["https://www.googleapis.com/auth/drive.file"],
-    codeChallenge: challenge,
-    codeChallengeMethod: AuthSession.CodeChallengeMethod.S256,
-    extraParams: {
-      access_type: "offline",
-      prompt: "consent",
-    },
-  });
-
-  return { request, verifier };
-}
-
 // ─── File download ────────────────────────────────────────────────────────────
 
 /**
  * Downloads a Google Drive file to the local filesystem using expo-file-system.
  * Uses a resumable download to support large files (.wav up to 200 MB).
  *
- * @param fileId    - Google Drive file ID
- * @param destPath  - Absolute local path (e.g. FileSystem.documentDirectory + "songs/id/audio.m4a")
+ * @param fileId      - Google Drive file ID
+ * @param destPath    - Absolute local path (e.g. FileSystem.documentDirectory + "songs/id/audio.m4a")
  * @param accessToken - Valid Drive access token
- * @param onProgress - Optional progress callback
+ * @param onProgress  - Optional progress callback
  */
 export async function downloadDriveFile(
   fileId: string,
@@ -165,7 +76,6 @@ export async function downloadDriveFile(
 ): Promise<void> {
   const url = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
 
-  // Ensure parent directory exists
   const dir = destPath.substring(0, destPath.lastIndexOf("/"));
   const dirInfo = await FileSystem.getInfoAsync(dir);
   if (!dirInfo.exists) {
@@ -196,7 +106,6 @@ export async function downloadDriveFile(
 
 /**
  * Returns the local path for a song's audio file in the document directory.
- * Creates the songs/{songId}/ directory structure.
  */
 export function localPathForFile(songId: string, fileName: string): string {
   return `${FileSystem.documentDirectory}songs/${songId}/${fileName}`;

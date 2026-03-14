@@ -8,38 +8,24 @@ import {
   ScrollView,
   ActivityIndicator,
 } from "react-native";
-import * as AuthSession from "expo-auth-session";
 import * as WebBrowser from "expo-web-browser";
 import { useAuthStore } from "../../src/stores/auth-store";
 import { useSongFilesStore } from "../../src/stores/song-files-store";
-import { buildAuthRequest, exchangeCodeForToken } from "../../src/lib/google-drive-download";
-
-// Required for expo-auth-session on Android
-WebBrowser.maybeCompleteAuthSession();
+import { buildDriveAuthUrl } from "../../src/lib/google-drive-download";
 
 export default function SettingsScreen() {
   const user = useAuthStore((s) => s.user);
   const signOut = useAuthStore((s) => s.signOut);
   const driveToken = useSongFilesStore((s) => s.driveToken);
-  const setDriveToken = useSongFilesStore((s) => s.setDriveToken);
   const [connectingDrive, setConnectingDrive] = useState(false);
 
   const connectDrive = async () => {
     setConnectingDrive(true);
     try {
-      const { request, verifier } = await buildAuthRequest();
-      await request.makeAuthUrlAsync({ authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth" });
-      const result = await request.promptAsync({ authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth" });
-
-      if (result.type === "success" && result.params.code) {
-        const token = await exchangeCodeForToken(result.params.code, verifier);
-        await setDriveToken(token);
-        Alert.alert("Google Drive Connected", "Your Drive account is now linked.");
-      } else if (result.type === "cancel" || result.type === "dismiss") {
-        // User cancelled — no-op
-      } else {
-        Alert.alert("Error", "Could not connect to Google Drive.");
-      }
+      const state = Math.random().toString(36).substring(2);
+      const authUrl = buildDriveAuthUrl(state);
+      // openAuthSessionAsync closes the browser automatically when reprise:// deep link fires
+      await WebBrowser.openAuthSessionAsync(authUrl, "reprise://");
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       Alert.alert("Drive Connection Failed", msg);

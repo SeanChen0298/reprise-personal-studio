@@ -612,13 +612,33 @@ export const useSongStore = create<SongStore>()((set, get) => ({
     }
     await get().updateLine(songId, lineId, updates);
 
-    // Fire-and-forget: generate furigana for annotation text on Japanese songs
+    // Fire-and-forget: generate furigana for the full line and each annotation slice (Japanese songs only)
     const song = get().songs.find((s) => s.id === songId);
     if (song?.language?.startsWith("ja") && annotations.length > 0 && line) {
       const lineText = line.custom_text ?? line.text;
       const KANJI_RE = /[\u4E00-\u9FAF\u3400-\u4DBF]/;
       (async () => {
         const { generateFurigana } = await import("@reprise/shared");
+
+        // Full-line furigana → line.furigana_html (same as generateFuriganaForSong)
+        if (KANJI_RE.test(line.text)) {
+          try {
+            const lineHtml = await generateFurigana(line.text);
+            await supabase.from("lines").update({ furigana_html: lineHtml }).eq("id", lineId);
+            set((s) => ({
+              lines: {
+                ...s.lines,
+                [songId]: (s.lines[songId] ?? []).map((l) =>
+                  l.id === lineId ? { ...l, furigana_html: lineHtml } : l
+                ),
+              },
+            }));
+          } catch {
+            // fail silently
+          }
+        }
+
+        // Per-annotation furigana → annotation.furigana_html (for ruby inside highlight spans)
         const newAnnotations: Annotation[] = [...annotations];
         let changed = false;
         for (let i = 0; i < annotations.length; i++) {

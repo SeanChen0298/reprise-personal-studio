@@ -15,10 +15,11 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,
+    flowType: "pkce", // Required for mobile OAuth (PKCE via exchangeCodeForSession)
   },
 });
 
-// ─── Data fetching helpers ─────────────────────────────────────────────────────
+// ─── Data fetching helpers ────────────────────────────────────────────────────
 
 export async function fetchSongs(userId: string): Promise<Song[]> {
   const { data, error } = await supabase
@@ -45,7 +46,6 @@ export async function fetchLines(songId: string): Promise<Line[]> {
     .from("lines")
     .select("*")
     .eq("song_id", songId)
-    .is("language", null) // primary lines only
     .order("order", { ascending: true });
   if (error) throw error;
   return (data ?? []) as Line[];
