@@ -141,6 +141,8 @@ vite.config.ts.timestamp-*
 # Rust / Tauri
 target/
 src-tauri/target/
+# Sidecar binaries — download via scripts/download-binaries.ps1 instead of committing
+**/src-tauri/binaries/*.exe
 
 # Expo / React Native
 .expo/
@@ -159,3 +161,5 @@ Thumbs.db
 
 # Personal notes (local only)
 NOTES.md
+
+!gen/android/app/src/main/java/com/reprise/mobile/MainActivity.kt

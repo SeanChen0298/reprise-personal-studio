@@ -5,19 +5,14 @@ import tailwindcss from "@tailwindcss/vite";
 const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig(async () => ({
+  base: "./",
   plugins: [react(), tailwindcss()],
   clearScreen: false,
   server: {
     port: 5174,
     strictPort: true,
-    host: host || "127.0.0.1",
-    hmr: host
-      ? {
-          protocol: "ws",
-          host,
-          port: 1422,
-        }
-      : undefined,
+    host: "0.0.0.0",
+    hmr: false,
     watch: {
       ignored: ["**/src-tauri/**"],
     },

@@ -1,5 +1,6 @@
 import { Command } from "@tauri-apps/plugin-shell";
 import { mkdir, exists } from "@tauri-apps/plugin-fs";
+import { invoke } from "@tauri-apps/api/core";
 
 const REPRISE_ROOT = "C:/Reprise";
 
@@ -77,13 +78,40 @@ function sanitizeYouTubeUrl(url: string): string {
 
 export const COOKIES_PATH = `${REPRISE_ROOT}/cookies.txt`;
 
-/** Common yt-dlp args: single video, Node.js runtime, challenge solver, cookies for YouTube auth */
+/** Common yt-dlp args: single video, Deno JS runtime (bundled sidecar), cookies for YouTube auth */
 const YT_DLP_BASE = [
   "--no-playlist",
-  "--js-runtimes", "node",
-  "--remote-components", "ejs:github",
+  "--js-runtimes", "deno",
   "--cookies", COOKIES_PATH,
 ];
+
+// Cache so we only invoke the Rust command once per session.
+let _cachedSidecarPathEnv: string | null = null;
+
+/**
+ * In production, returns env vars that inject the sidecar binaries directory into PATH
+ * so yt-dlp can discover the bundled deno.exe at runtime.
+ * In dev, returns an empty object (system yt-dlp is used; Deno must be on system PATH).
+ */
+async function getYtDlpEnv(): Promise<Record<string, string>> {
+  if (import.meta.env.DEV) return {};
+  if (_cachedSidecarPathEnv === null) {
+    _cachedSidecarPathEnv = await invoke<string>("get_sidecar_path_env");
+  }
+  return { PATH: _cachedSidecarPathEnv, DENO_NO_UPDATE_CHECK: "1" };
+}
+
+/**
+ * Creates a yt-dlp Command with the correct invocation for dev vs prod,
+ * and with PATH pre-loaded so yt-dlp can find the bundled deno sidecar.
+ */
+async function makeYtDlpCommand(args: string[]): Promise<ReturnType<typeof Command.create>> {
+  if (import.meta.env.DEV) {
+    return Command.create("yt-dlp", args);
+  }
+  const env = await getYtDlpEnv();
+  return Command.sidecar("binaries/yt-dlp", args, { env });
+}
 
 /** Remove characters invalid for Windows folder names and non-ASCII chars
  *  that cause Tauri shell encoding errors */
@@ -191,10 +219,8 @@ export async function downloadAudio(
   ];
   console.log("[downloadAudio] Subtitle pass args:", subArgs);
   try {
-    const subCommand = import.meta.env.DEV
-      ? Command.create("yt-dlp", subArgs)        // dev: uses system yt-dlp
-      : Command.sidecar("binaries/yt-dlp", subArgs);  // prod: uses bundled sidecar
-    console.log("[downloadAudio] Command.sidecar succeeded for subtitles");
+    const subCommand = await makeYtDlpCommand(subArgs);
+    console.log("[downloadAudio] Command created for subtitles");
     const subResult = await spawnAndWait(subCommand, "[downloadAudio][sub]");
     console.log("[downloadAudio] Subtitle pass done, code:", subResult.code);
   } catch (err) {
@@ -217,12 +243,10 @@ export async function downloadAudio(
 
   let audioCommand;
   try {
-    audioCommand = import.meta.env.DEV
-      ? Command.create("yt-dlp", audioArgs)        // dev: uses system yt-dlp
-      : Command.sidecar("binaries/yt-dlp", audioArgs);  // prod: uses bundled sidecar
-    console.log("[downloadAudio] Command.sidecar succeeded for audio");
+    audioCommand = await makeYtDlpCommand(audioArgs);
+    console.log("[downloadAudio] Command created for audio");
   } catch (err) {
-    console.error("[downloadAudio] Command.sidecar FAILED for audio:", err);
+    console.error("[downloadAudio] makeYtDlpCommand FAILED for audio:", err);
     throw err;
   }
 
@@ -419,12 +443,10 @@ export async function fetchLyricsForLanguage(
 
   let command;
   try {
-    command = import.meta.env.DEV
-      ? Command.create("yt-dlp", args)        // dev: uses system yt-dlp
-      : Command.sidecar("binaries/yt-dlp", args);  // prod: uses bundled sidecar
-    console.log("[fetchLyrics] Command.sidecar succeeded");
+    command = await makeYtDlpCommand(args);
+    console.log("[fetchLyrics] Command created");
   } catch (err) {
-    console.error("[fetchLyrics] Command.sidecar FAILED:", err);
+    console.error("[fetchLyrics] makeYtDlpCommand FAILED:", err);
     throw err;
   }
 
@@ -536,14 +558,7 @@ export async function listSubtitleLanguages(youtubeUrl: string): Promise<string[
     cleanUrl,
   ];
 
-  let command;
-  try {
-    command = import.meta.env.DEV
-      ? Command.create("yt-dlp", args)
-      : Command.sidecar("binaries/yt-dlp", args);
-  } catch (err) {
-    throw err;
-  }
+  const command = await makeYtDlpCommand(args);
 
   const result = await spawnAndWait(command, "[listSubs]");
 
@@ -582,9 +597,7 @@ function parseSubtitleLanguageCodes(output: string): string[] {
 /** Check if yt-dlp is available on the system. Returns version string or null. */
 export async function checkYtDlpInstalled(): Promise<string | null> {
   try {
-    const command = import.meta.env.DEV
-      ? Command.create("yt-dlp", ["--version"])        // dev: uses system yt-dlp
-      : Command.sidecar("binaries/yt-dlp", ["--version"]);  // prod: uses bundled sidecar
+    const command = await makeYtDlpCommand(["--version"]);
     const result = await command.execute();
     return result.code === 0 ? result.stdout.trim() : null;
   } catch {

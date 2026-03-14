@@ -4,7 +4,7 @@
   "identifier": "com.reprise.mobile",
   "build": {
     "frontendDist": "../dist",
-    "devUrl": "http://localhost:5174",
+    "devUrl": "http://10.0.2.2:5174",
     "beforeDevCommand": "pnpm dev",
     "beforeBuildCommand": "pnpm --filter mobile build"
   },

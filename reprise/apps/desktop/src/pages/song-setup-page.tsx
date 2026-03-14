@@ -1,7 +1,19 @@
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Sidebar } from "../components/sidebar";
 import { useSongStore } from "../stores/song-store";
 import type { PitchStatus } from "../types/song";
+import {
+  clearToken,
+  ensureSongFolder,
+  generatePKCE,
+  getAuthUrl,
+  getStoredToken,
+  getValidAccessToken,
+  uploadFileResumable,
+  type DriveUploadProgress,
+} from "../lib/google-drive";
+import { readFile } from "@tauri-apps/plugin-fs";
 
 export function SongSetupPage() {
   const { id } = useParams<{ id: string }>();
@@ -10,6 +22,11 @@ export function SongSetupPage() {
   const downloadSongAudio = useSongStore((s) => s.downloadSongAudio);
   const separateSongStems = useSongStore((s) => s.separateSongStems);
   const analyzeSongPitch = useSongStore((s) => s.analyzeSongPitch);
+  const markStaleAnalysesAsFailed = useSongStore((s) => s.markStaleAnalysesAsFailed);
+
+  useEffect(() => {
+    markStaleAnalysesAsFailed();
+  }, [markStaleAnalysesAsFailed]);
 
   if (!song) {
     return (
@@ -31,6 +48,134 @@ export function SongSetupPage() {
   const pitchDone = pitchStatus === "done";
   const pitchProcessing = pitchStatus === "processing";
   const pitchError = pitchStatus === "error";
+
+  // ── Google Drive sync state ─────────────────────────────────────────────────
+  const updateSong = useSongStore((s) => s.updateSong);
+  const isDriveConnected = !!getStoredToken();
+
+  type FileUploadState = "idle" | "uploading" | "done" | "error";
+  const [audioUpload, setAudioUpload] = useState<FileUploadState>("idle");
+  const [vocalsUpload, setVocalsUpload] = useState<FileUploadState>("idle");
+  const [instrUpload, setInstrUpload] = useState<FileUploadState>("idle");
+  const [audioProgress, setAudioProgress] = useState(0);
+  const [vocalsProgress, setVocalsProgress] = useState(0);
+  const [instrProgress, setInstrProgress] = useState(0);
+  const [driveError, setDriveError] = useState<string | null>(null);
+  const [driveConnected, setDriveConnected] = useState(isDriveConnected);
+  const uploadingRef = useRef(false);
+
+  // Sync initial upload states from existing Drive file IDs
+  useEffect(() => {
+    if (song.drive_audio_file_id) setAudioUpload("done");
+    if (song.drive_vocals_file_id) setVocalsUpload("done");
+    if (song.drive_instrumental_file_id) setInstrUpload("done");
+  }, [song.drive_audio_file_id, song.drive_vocals_file_id, song.drive_instrumental_file_id]);
+
+  const connectDrive = useCallback(async () => {
+    const { verifier, challenge } = await generatePKCE();
+    sessionStorage.setItem("reprise_drive_pkce_verifier", verifier);
+    const returnTo = `/song/${id}/setup`;
+    const state = encodeURIComponent(JSON.stringify({ returnTo }));
+    window.location.href = getAuthUrl(challenge, state);
+  }, [id]);
+
+  const disconnectDrive = useCallback(() => {
+    clearToken();
+    setDriveConnected(false);
+  }, []);
+
+  const uploadToDrive = useCallback(async () => {
+    if (uploadingRef.current) return;
+    uploadingRef.current = true;
+    setDriveError(null);
+
+    try {
+      const accessToken = await getValidAccessToken();
+      const folderId = await ensureSongFolder(accessToken, song.id);
+
+      const makeProgress =
+        (setter: (v: number) => void) =>
+        ({ bytesSent, totalBytes }: DriveUploadProgress) => {
+          setter(totalBytes > 0 ? Math.round((bytesSent / totalBytes) * 100) : 0);
+        };
+
+      const updates: Partial<typeof song> = {};
+
+      // audio.m4a
+      if (song.audio_path && audioUpload !== "done") {
+        setAudioUpload("uploading");
+        setAudioProgress(0);
+        const data = await readFile(song.audio_path);
+        const fileId = await uploadFileResumable(
+          accessToken,
+          data,
+          "audio.m4a",
+          "audio/mp4",
+          folderId,
+          makeProgress(setAudioProgress)
+        );
+        setAudioUpload("done");
+        updates.drive_audio_file_id = fileId;
+      }
+
+      // vocals.wav
+      if (song.vocals_path && vocalsUpload !== "done") {
+        setVocalsUpload("uploading");
+        setVocalsProgress(0);
+        const data = await readFile(song.vocals_path);
+        const fileId = await uploadFileResumable(
+          accessToken,
+          data,
+          "vocals.wav",
+          "audio/wav",
+          folderId,
+          makeProgress(setVocalsProgress)
+        );
+        setVocalsUpload("done");
+        updates.drive_vocals_file_id = fileId;
+      }
+
+      // no_vocals.wav
+      if (song.instrumental_path && instrUpload !== "done") {
+        setInstrUpload("uploading");
+        setInstrProgress(0);
+        const data = await readFile(song.instrumental_path);
+        const fileId = await uploadFileResumable(
+          accessToken,
+          data,
+          "no_vocals.wav",
+          "audio/wav",
+          folderId,
+          makeProgress(setInstrProgress)
+        );
+        setInstrUpload("done");
+        updates.drive_instrumental_file_id = fileId;
+      }
+
+      if (Object.keys(updates).length > 0) {
+        await updateSong(song.id, updates);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setDriveError(msg);
+      // Reset in-progress states back to idle on error
+      setAudioUpload((s) => (s === "uploading" ? "idle" : s));
+      setVocalsUpload((s) => (s === "uploading" ? "idle" : s));
+      setInstrUpload((s) => (s === "uploading" ? "idle" : s));
+    } finally {
+      uploadingRef.current = false;
+    }
+  }, [song, audioUpload, vocalsUpload, instrUpload, updateSong]);
+
+  const hasDriveIds =
+    !!song.drive_audio_file_id ||
+    !!song.drive_vocals_file_id ||
+    !!song.drive_instrumental_file_id;
+  const canUpload = isDownloaded || stemsDone;
+  const isUploading =
+    audioUpload === "uploading" ||
+    vocalsUpload === "uploading" ||
+    instrUpload === "uploading";
 
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--bg)]">
@@ -369,30 +514,137 @@ export function SongSetupPage() {
               </div>
             )}
 
-            {/* Additional Files Section (Coming Soon) */}
+            {/* Google Drive Sync Section */}
             <div className="mb-6">
               <div className="flex items-center gap-2 mb-3">
                 <span className="text-[10.5px] font-medium uppercase tracking-[0.09em] text-[var(--text-muted)] flex-shrink-0">
-                  Additional files
+                  Mobile sync (Google Drive)
                 </span>
                 <div className="flex-1 h-px bg-[var(--border-subtle)]" />
               </div>
 
-              <div className="p-6 border-2 border-dashed border-[var(--border)] rounded-[var(--radius)] bg-[var(--surface)] text-center opacity-60">
-                <div className="text-[var(--text-muted)] mb-2">
-                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mx-auto">
-                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-                    <polyline points="17 8 12 3 7 8" />
-                    <line x1="12" y1="3" x2="12" y2="15" />
-                  </svg>
+              {!driveConnected ? (
+                /* Not connected */
+                <div className="flex items-center gap-3.5 p-4 bg-[var(--bg)] border border-dashed border-[var(--border)] rounded-[var(--radius)]">
+                  <div className="w-10 h-10 rounded-[9px] bg-[var(--accent-light)] flex items-center justify-center flex-shrink-0">
+                    {/* Google Drive icon */}
+                    <svg width="20" height="17" viewBox="0 0 87.3 78" xmlns="http://www.w3.org/2000/svg">
+                      <path d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z" fill="#0066da"/>
+                      <path d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44a9.06 9.06 0 0 0 -1.2 4.5h27.5z" fill="#00ac47"/>
+                      <path d="m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5h-27.502l5.852 11.5z" fill="#ea4335"/>
+                      <path d="m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z" fill="#00832d"/>
+                      <path d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" fill="#2684fc"/>
+                      <path d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 28h27.45c0-1.55-.4-3.1-1.2-4.5z" fill="#ffba00"/>
+                    </svg>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[13.5px] font-medium text-[var(--text-muted)]">Connect Google Drive</div>
+                    <div className="text-[11.5px] text-[var(--text-muted)]">Upload audio files so the Reprise mobile app can download them</div>
+                  </div>
+                  <button
+                    onClick={connectDrive}
+                    className="px-3 py-[5px] rounded-[6px] bg-[var(--accent)] text-white border-[1.5px] border-[var(--accent)] text-[12px] font-medium hover:opacity-85 transition-opacity flex items-center gap-1 flex-shrink-0"
+                  >
+                    Connect
+                  </button>
                 </div>
-                <div className="text-[13px] font-medium text-[var(--text-secondary)] mb-1">Drag & drop audio files here</div>
-                <div className="text-[11.5px] text-[var(--text-muted)]">Coming soon — Supports MP3, WAV, FLAC, OGG</div>
-              </div>
+              ) : (
+                /* Connected — show file upload states */
+                <div className="flex flex-col gap-1.5">
+                  {/* Connection header */}
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-1.5 text-[11.5px] text-[#15803D]">
+                      <span className="w-[6px] h-[6px] rounded-full bg-[#22C55E]" />
+                      Google Drive connected
+                    </div>
+                    <button
+                      onClick={disconnectDrive}
+                      className="text-[11px] text-[var(--text-muted)] hover:text-red-500 transition-colors"
+                    >
+                      Disconnect
+                    </button>
+                  </div>
+
+                  {/* audio.m4a */}
+                  <DriveFileRow
+                    label="audio.m4a"
+                    sublabel="Reference audio"
+                    available={isDownloaded}
+                    status={audioUpload}
+                    progress={audioProgress}
+                    fileId={song.drive_audio_file_id}
+                  />
+
+                  {/* vocals.wav */}
+                  <DriveFileRow
+                    label="vocals.wav"
+                    sublabel="Isolated vocals"
+                    available={stemsDone}
+                    status={vocalsUpload}
+                    progress={vocalsProgress}
+                    fileId={song.drive_vocals_file_id}
+                  />
+
+                  {/* no_vocals.wav */}
+                  <DriveFileRow
+                    label="no_vocals.wav"
+                    sublabel="Instrumental track"
+                    available={stemsDone}
+                    status={instrUpload}
+                    progress={instrProgress}
+                    fileId={song.drive_instrumental_file_id}
+                  />
+
+                  {/* Error */}
+                  {driveError && (
+                    <p className="text-[11.5px] text-red-500 mt-1 leading-relaxed">{driveError}</p>
+                  )}
+
+                  {/* Upload / Re-upload button */}
+                  {canUpload && (
+                    <button
+                      onClick={uploadToDrive}
+                      disabled={isUploading}
+                      className="mt-2 self-start px-3 py-[5px] rounded-[6px] bg-[var(--accent)] text-white border-[1.5px] border-[var(--accent)] text-[12px] font-medium hover:opacity-85 transition-opacity flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      {isUploading ? (
+                        <>
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="animate-spin">
+                            <circle cx="12" cy="12" r="10" />
+                            <path d="M12 6v6" />
+                          </svg>
+                          Uploading…
+                        </>
+                      ) : hasDriveIds ? (
+                        <>
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <polyline points="23 4 23 10 17 10" />
+                            <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
+                          </svg>
+                          Re-sync to Drive
+                        </>
+                      ) : (
+                        <>
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12" />
+                          </svg>
+                          Sync to Drive
+                        </>
+                      )}
+                    </button>
+                  )}
+
+                  {!canUpload && (
+                    <p className="text-[11.5px] text-[var(--text-muted)] mt-1">
+                      Download reference audio first to enable Drive sync.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Info note */}
-            <div className="flex items-start gap-2.5 p-3.5 bg-[var(--theme-light)] border border-[#BFDBFE] rounded-[9px] mt-6">
+            <div className="flex items-start gap-2.5 p-3.5 bg-[var(--theme-light)] border border-[#BFDBFE] rounded-[9px] mt-6 mb-6">
               <div className="text-[var(--theme-text)] flex-shrink-0 mt-0.5">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="12" cy="12" r="10" />
@@ -406,6 +658,65 @@ export function SongSetupPage() {
             </div>
           </div>
         </main>
+      </div>
+    </div>
+  );
+}
+
+// ─── DriveFileRow ─────────────────────────────────────────────────────────────
+
+function DriveFileRow({
+  label,
+  sublabel,
+  available,
+  status,
+  progress,
+  fileId,
+}: {
+  label: string;
+  sublabel: string;
+  available: boolean;
+  status: "idle" | "uploading" | "done" | "error";
+  progress: number;
+  fileId?: string;
+}) {
+  const dot =
+    status === "done"
+      ? "bg-[#22C55E]"
+      : status === "uploading"
+      ? "bg-[#F59E0B] animate-pulse"
+      : status === "error"
+      ? "bg-red-500"
+      : "bg-[var(--border)]";
+
+  return (
+    <div
+      className={`flex items-center gap-3 p-3 rounded-[8px] border ${
+        available
+          ? "bg-[var(--surface)] border-[var(--border)]"
+          : "bg-[var(--bg)] border-dashed border-[var(--border)] opacity-50"
+      }`}
+    >
+      <span className={`w-[6px] h-[6px] rounded-full flex-shrink-0 ${dot}`} />
+      <div className="flex-1 min-w-0">
+        <div className="text-[12.5px] font-medium">{label}</div>
+        <div className="text-[11px] text-[var(--text-muted)]">
+          {status === "uploading"
+            ? `Uploading… ${progress}%`
+            : status === "done" && fileId
+            ? "Synced to Drive"
+            : available
+            ? sublabel
+            : "Not available yet"}
+        </div>
+        {status === "uploading" && (
+          <div className="mt-1 h-0.5 bg-[var(--border)] rounded-full overflow-hidden">
+            <div
+              className="h-full bg-[var(--accent)] transition-all duration-300"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

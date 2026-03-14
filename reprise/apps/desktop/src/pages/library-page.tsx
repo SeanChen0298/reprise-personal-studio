@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Sidebar } from "../components/sidebar";
 import { useSongStore } from "../stores/song-store";
@@ -201,6 +202,11 @@ export function LibraryPage() {
   const navigate = useNavigate();
   const songs = useSongStore((s) => s.songs);
   const togglePin = useSongStore((s) => s.togglePin);
+  const markStaleAnalysesAsFailed = useSongStore((s) => s.markStaleAnalysesAsFailed);
+
+  useEffect(() => {
+    markStaleAnalysesAsFailed();
+  }, [markStaleAnalysesAsFailed]);
 
   const pinned = songs.filter((s) => s.pinned);
   const rest = songs.filter((s) => !s.pinned);

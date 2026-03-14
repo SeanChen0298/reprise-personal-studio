@@ -71,6 +71,7 @@ interface SongStore {
   downloadSongAudio: (id: string) => Promise<void>;
   separateSongStems: (id: string) => Promise<void>;
   analyzeSongPitch: (id: string) => Promise<void>;
+  markStaleAnalysesAsFailed: () => Promise<void>;
 
   // Lines management
   setLines: (songId: string, lines: Line[]) => Promise<void>;
@@ -363,6 +364,28 @@ export const useSongStore = create<SongStore>()((set, get) => ({
         pitch_status: "error",
         pitch_error: err instanceof Error ? err.message : "Pitch analysis failed",
       });
+    }
+  },
+
+  markStaleAnalysesAsFailed: async () => {
+    const TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+    const now = Date.now();
+    for (const song of get().songs) {
+      const updatedAt = new Date(song.updated_at).getTime();
+      if (now - updatedAt <= TIMEOUT_MS) continue;
+
+      const updates: Partial<Song> = {};
+      if (song.stem_status === "processing") {
+        updates.stem_status = "error";
+        updates.stem_error = "Processing timed out after 10 minutes. Please retry.";
+      }
+      if (song.pitch_status === "processing") {
+        updates.pitch_status = "error";
+        updates.pitch_error = "Processing timed out after 10 minutes. Please retry.";
+      }
+      if (Object.keys(updates).length > 0) {
+        await get().updateSong(song.id, updates);
+      }
     }
   },
 

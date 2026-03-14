@@ -16,6 +16,7 @@ import { SettingsPage } from "./pages/settings-page";
 import { PracticePage } from "./pages/practice";
 import { TimestampPage } from "./pages/timestamp-page";
 import { RecordingsPage } from "./pages/recordings-page";
+import { DriveAuthCallbackPage } from "./pages/drive-auth-callback";
 
 export function App() {
   const initialize = useAuthStore((s) => s.initialize);
@@ -122,6 +123,8 @@ export function App() {
             </ProtectedRoute>
           }
         />
+        {/* Google Drive OAuth2 PKCE callback — must be unprotected so the redirect lands here */}
+        <Route path="/drive-auth/callback" element={<DriveAuthCallbackPage />} />
       </Routes>
     </BrowserRouter>
   );

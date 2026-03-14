@@ -29,6 +29,10 @@ export interface Song {
   pitch_data_path?: string;
   pitch_status?: PitchStatus;
   pitch_error?: string;
+  // Google Drive file IDs (set by desktop after upload, read by mobile for download)
+  drive_audio_file_id?: string;
+  drive_vocals_file_id?: string;
+  drive_instrumental_file_id?: string;
   created_at: string;
   updated_at: string;
   user_id?: string;
