@@ -19,6 +19,8 @@ Personal practice studio for singers. Cross-platform (Tauri/React Native).
 - **Audio:** `ms` (milliseconds) for all timing. 0.5x–1.0x speed range.
 - **Sync:** Supabase (Postgres) with `updated_at` last-write-wins conflict resolution.
 
+## UI/UX Goals: Clean, Japanese-style aesthetic. High information density but quiet. Focus on vocal pedagogy accessibility.
+
 ## Common Commands
 - **Install:** `pnpm install`
 - **Run Desktop:** `pnpm --filter desktop tauri dev`
