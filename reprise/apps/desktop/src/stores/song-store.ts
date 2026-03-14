@@ -271,7 +271,7 @@ export const useSongStore = create<SongStore>()((set, get) => ({
     const song = get().songs.find((s) => s.id === id);
     if (!song?.youtube_url) return;
 
-    const songFolder = buildSongFolder(song.title, song.artist);
+    const songFolder = buildSongFolder(song.title, song.artist, id);
 
     await get().updateSong(id, {
       download_status: "downloading",

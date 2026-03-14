@@ -39,7 +39,9 @@
       "Bash(find /c/Repo/reprise-personal-studio/reprise/apps/desktop/src -type f -name *.tsx -o -name *.ts)",
       "Bash(find /c/Repo/reprise-personal-studio/reprise/packages -type f -name *.ts -o -name *.tsx)",
       "Bash(xargs wc:*)",
-      "Bash(powershell -ExecutionPolicy Bypass -File \"scripts/download-binaries.ps1\" -Force)"
+      "Bash(powershell -ExecutionPolicy Bypass -File \"scripts/download-binaries.ps1\" -Force)",
+      "Bash(pnpm tauri:*)",
+      "Bash(pnpm tsc:*)"
     ],
     "additionalDirectories": [
       "C:\\Repo\\reprise-personal-studio\\separated",

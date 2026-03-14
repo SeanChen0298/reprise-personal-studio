@@ -1,25 +1,27 @@
 /**
  * Google Drive integration for Reprise desktop app.
  *
- * OAuth2 PKCE flow:
- *   1. generatePKCE()        → { verifier, challenge }
- *   2. getAuthUrl(challenge)  → navigate browser to this URL
- *   3. Google redirects to REDIRECT_URI?code=...&state=...
- *   4. exchangeCodeForToken(code, verifier) → DriveToken
- *   5. storeToken(token) / getStoredToken()
+ * OAuth2 PKCE flow (system browser + Rust local HTTP server):
+ *   1. startDriveOAuth()
+ *      a. Rust binds a random loopback port, returns it
+ *      b. JS generates PKCE, opens OAuth URL in system browser
+ *      c. User authenticates; Google redirects to http://localhost:PORT/...?code=...
+ *      d. Rust catches the request, emits "drive-oauth-code" Tauri event
+ *      e. JS receives the code, exchanges it for a token, stores it
  *
  * Scopes: https://www.googleapis.com/auth/drive.file
  * (Only files created by this app — never reads arbitrary Drive content.)
  */
 
-const CLIENT_ID = import.meta.env.VITE_GOOGLE_DRIVE_CLIENT_ID as string;
-const REDIRECT_URI =
-  (import.meta.env.VITE_GOOGLE_DRIVE_REDIRECT_URI as string | undefined) ??
-  `${window.location.origin}/drive-auth/callback`;
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-shell";
 
+const CLIENT_ID = import.meta.env.VITE_GOOGLE_DRIVE_CLIENT_ID as string;
+const CLIENT_SECRET = import.meta.env.VITE_GOOGLE_DRIVE_CLIENT_SECRET as string;
 const TOKEN_KEY = "reprise_drive_token";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface DriveToken {
   access_token: string;
@@ -41,7 +43,7 @@ function base64url(buf: ArrayBuffer): string {
     .replace(/=/g, "");
 }
 
-export async function generatePKCE(): Promise<{ verifier: string; challenge: string }> {
+async function generatePKCE(): Promise<{ verifier: string; challenge: string }> {
   const verifierBytes = crypto.getRandomValues(new Uint8Array(32));
   const verifier = base64url(verifierBytes.buffer);
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
@@ -49,24 +51,24 @@ export async function generatePKCE(): Promise<{ verifier: string; challenge: str
   return { verifier, challenge };
 }
 
-export function getAuthUrl(challenge: string, state: string): string {
+function buildAuthUrl(challenge: string, redirectUri: string): string {
   const params = new URLSearchParams({
     client_id: CLIENT_ID,
-    redirect_uri: REDIRECT_URI,
+    redirect_uri: redirectUri,
     response_type: "code",
     scope: "https://www.googleapis.com/auth/drive.file",
     code_challenge: challenge,
     code_challenge_method: "S256",
     access_type: "offline",
     prompt: "consent",
-    state,
   });
   return `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
 }
 
-export async function exchangeCodeForToken(
+async function exchangeCodeForToken(
   code: string,
-  verifier: string
+  verifier: string,
+  redirectUri: string
 ): Promise<DriveToken> {
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -74,7 +76,8 @@ export async function exchangeCodeForToken(
     body: new URLSearchParams({
       code,
       client_id: CLIENT_ID,
-      redirect_uri: REDIRECT_URI,
+      client_secret: CLIENT_SECRET,
+      redirect_uri: redirectUri,
       grant_type: "authorization_code",
       code_verifier: verifier,
     }),
@@ -93,6 +96,63 @@ export async function exchangeCodeForToken(
     refresh_token: json.refresh_token,
     expires_at: Date.now() + json.expires_in * 1000,
   };
+}
+
+// ─── Full OAuth flow ──────────────────────────────────────────────────────────
+
+/**
+ * Runs the complete Google Drive OAuth2 PKCE flow via system browser.
+ *
+ * 1. Asks Rust to bind a random loopback port (one-shot HTTP server)
+ * 2. Opens the Google consent screen in the user's default browser
+ * 3. Waits for the "drive-oauth-code" Tauri event from Rust
+ * 4. Exchanges the code for a token and stores it
+ *
+ * Throws on error or if the user cancels (no code received).
+ */
+export async function startDriveOAuth(
+  onUrl?: (url: string) => void
+): Promise<DriveToken> {
+  // Start the Rust callback server — returns the random port
+  const port = await invoke<number>("start_drive_oauth_listener");
+  const redirectUri = `http://localhost:${port}/drive-auth/callback`;
+
+  const { verifier, challenge } = await generatePKCE();
+  const authUrl = buildAuthUrl(challenge, redirectUri);
+
+  // Open the consent screen in the system browser, then expose URL to caller
+  await open(authUrl);
+  onUrl?.(authUrl);
+
+  // Wait for Rust to emit the code (or an error)
+  return new Promise<DriveToken>((resolve, reject) => {
+    const unlistenCode = listen<string>("drive-oauth-code", async (event) => {
+      cleanup();
+      try {
+        const token = await exchangeCodeForToken(event.payload, verifier, redirectUri);
+        storeToken(token);
+        resolve(token);
+      } catch (err) {
+        reject(err);
+      }
+    });
+
+    const unlistenError = listen<string>("drive-oauth-error", (event) => {
+      cleanup();
+      reject(new Error(event.payload));
+    });
+
+    const timeoutId = setTimeout(() => {
+      cleanup();
+      reject(new Error("Authentication timed out. Please try again."));
+    }, 2 * 60 * 1000); // 2 minutes
+
+    function cleanup() {
+      clearTimeout(timeoutId);
+      unlistenCode.then((fn) => fn());
+      unlistenError.then((fn) => fn());
+    }
+  });
 }
 
 // ─── Token storage ────────────────────────────────────────────────────────────
@@ -134,6 +194,7 @@ export async function getValidAccessToken(): Promise<string> {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
       grant_type: "refresh_token",
       refresh_token: token.refresh_token,
     }),
@@ -154,7 +215,6 @@ export async function getValidAccessToken(): Promise<string> {
 
 // ─── Drive folder helpers ─────────────────────────────────────────────────────
 
-/** Returns the ID of an existing folder or creates it under `parentId`. */
 async function findOrCreateFolder(
   accessToken: string,
   name: string,
@@ -190,28 +250,39 @@ async function findOrCreateFolder(
   return folder.id;
 }
 
-/**
- * Ensures `Reprise/{songId}/` exists in Drive.
- * Returns the folder ID for that song.
- */
 export async function ensureSongFolder(
   accessToken: string,
-  songId: string
+  folderName: string
 ): Promise<string> {
-  const rootId = await findOrCreateFolder(accessToken, "Reprise");
-  return findOrCreateFolder(accessToken, songId, rootId);
+  const rootId = await findOrCreateFolder(accessToken, "[Reprise Audio Files - DO NOT MODIFY]");
+  return findOrCreateFolder(accessToken, folderName, rootId);
+}
+
+/**
+ * Search for existing files inside a Drive folder by name.
+ * Returns a map of { fileName → fileId } for any matches found.
+ */
+export async function discoverFilesInFolder(
+  accessToken: string,
+  folderId: string,
+  fileNames: string[]
+): Promise<Record<string, string>> {
+  const nameList = fileNames.map((n) => `name = '${n}'`).join(" or ");
+  const q = `(${nameList}) and '${folderId}' in parents and trashed = false`;
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  const { files } = await res.json() as { files: { id: string; name: string }[] };
+  const result: Record<string, string> = {};
+  for (const f of files) result[f.name] = f.id;
+  return result;
 }
 
 // ─── Resumable upload ─────────────────────────────────────────────────────────
 
 const CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB
 
-/**
- * Uploads a file to Google Drive using the resumable upload protocol.
- * Supports large files (vocals/instrumental can be 50–200 MB).
- *
- * @returns The Drive file ID of the uploaded file.
- */
 export async function uploadFileResumable(
   accessToken: string,
   data: Uint8Array,
@@ -222,7 +293,6 @@ export async function uploadFileResumable(
 ): Promise<string> {
   const totalBytes = data.byteLength;
 
-  // Step 1: Initiate the resumable session
   const initRes = await fetch(
     "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id",
     {
@@ -233,10 +303,7 @@ export async function uploadFileResumable(
         "X-Upload-Content-Type": mimeType,
         "X-Upload-Content-Length": String(totalBytes),
       },
-      body: JSON.stringify({
-        name: fileName,
-        parents: [folderId],
-      }),
+      body: JSON.stringify({ name: fileName, parents: [folderId] }),
     }
   );
   if (!initRes.ok) {
@@ -245,7 +312,6 @@ export async function uploadFileResumable(
   const uploadUri = initRes.headers.get("Location");
   if (!uploadUri) throw new Error("No upload URI returned from Drive");
 
-  // Step 2: Upload in chunks
   let offset = 0;
   while (offset < totalBytes) {
     const end = Math.min(offset + CHUNK_SIZE, totalBytes);
@@ -254,20 +320,15 @@ export async function uploadFileResumable(
 
     const chunkRes = await fetch(uploadUri, {
       method: "PUT",
-      headers: {
-        "Content-Range": contentRange,
-        "Content-Type": mimeType,
-      },
+      headers: { "Content-Range": contentRange, "Content-Type": mimeType },
       body: chunk,
     });
 
     if (chunkRes.status === 308) {
-      // Incomplete — continue
       const range = chunkRes.headers.get("Range");
       offset = range ? parseInt(range.split("-")[1], 10) + 1 : end;
       onProgress?.({ bytesSent: offset, totalBytes });
     } else if (chunkRes.status === 200 || chunkRes.status === 201) {
-      // Complete
       const file = await chunkRes.json() as { id: string };
       onProgress?.({ bytesSent: totalBytes, totalBytes });
       return file.id;
@@ -278,8 +339,6 @@ export async function uploadFileResumable(
 
   throw new Error("Upload loop ended without a completed response");
 }
-
-// ─── Public download URL helper ───────────────────────────────────────────────
 
 /** Returns a direct download URL for a Drive file (requires access token on mobile). */
 export function getDriveDownloadUrl(fileId: string): string {

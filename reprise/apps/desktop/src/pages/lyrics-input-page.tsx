@@ -302,7 +302,7 @@ export function LyricsInputPage() {
     setFetchError(null);
 
     try {
-      const songFolder = song.audio_folder ?? buildSongFolder(song.title, song.artist);
+      const songFolder = song.audio_folder ?? buildSongFolder(song.title, song.artist, song.id);
       const timedLines = await fetchLyricsForLanguage(
         song.youtube_url,
         songFolder,
@@ -341,7 +341,7 @@ export function LyricsInputPage() {
     setSavingTranslation(true);
     setTranslationSaveMsg(null);
     try {
-      const songFolder = song.audio_folder ?? buildSongFolder(song.title, song.artist);
+      const songFolder = song.audio_folder ?? buildSongFolder(song.title, song.artist, song.id);
       const timedLines = await fetchLyricsForLanguage(song.youtube_url, songFolder, translationLang);
       const now = new Date().toISOString();
       const newLines: Line[] = timedLines.map((tl, i) => ({

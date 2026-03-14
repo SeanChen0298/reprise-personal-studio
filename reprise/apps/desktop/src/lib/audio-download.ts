@@ -124,13 +124,18 @@ function sanitizeFolderName(name: string): string {
     .trim();
 }
 
-/** Build the song folder path: C:/Reprise/{Title} - {Artist} */
-export function buildSongFolder(title: string, artist: string): string {
+/** Build the song folder path: C:/Reprise/{Title} - {Artist} [songId[:8]] */
+export function buildSongFolder(title: string, artist: string, songId: string): string {
   const folderName = sanitizeFolderName(
     artist ? `${title} - ${artist}` : title
   );
-  const uniqueId = Date.now().toString(36);
-  return `${REPRISE_ROOT}/${folderName} [${uniqueId}]`;
+  return `${REPRISE_ROOT}/${folderName} [${songId.slice(0, 8)}]`;
+}
+
+/** Build the human-readable Drive folder name (no path prefix). */
+export function buildDriveFolderName(title: string, artist: string, songId: string): string {
+  const base = artist ? `${title} - ${artist}` : title;
+  return `${base} [${songId.slice(0, 8)}]`;
 }
 
 /** Ensure the song folder exists, creating it if necessary */

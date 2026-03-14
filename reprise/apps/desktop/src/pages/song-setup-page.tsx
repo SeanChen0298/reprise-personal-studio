@@ -5,14 +5,15 @@ import { useSongStore } from "../stores/song-store";
 import type { PitchStatus } from "../types/song";
 import {
   clearToken,
+  discoverFilesInFolder,
   ensureSongFolder,
-  generatePKCE,
-  getAuthUrl,
   getStoredToken,
   getValidAccessToken,
+  startDriveOAuth,
   uploadFileResumable,
   type DriveUploadProgress,
 } from "../lib/google-drive";
+import { buildDriveFolderName } from "../lib/audio-download";
 import { readFile } from "@tauri-apps/plugin-fs";
 
 export function SongSetupPage() {
@@ -62,6 +63,9 @@ export function SongSetupPage() {
   const [instrProgress, setInstrProgress] = useState(0);
   const [driveError, setDriveError] = useState<string | null>(null);
   const [driveConnected, setDriveConnected] = useState(isDriveConnected);
+  const [connectingDrive, setConnectingDrive] = useState(false);
+  const [driveAuthUrl, setDriveAuthUrl] = useState<string | null>(null);
+  const [urlCopied, setUrlCopied] = useState(false);
   const uploadingRef = useRef(false);
 
   // Sync initial upload states from existing Drive file IDs
@@ -72,14 +76,49 @@ export function SongSetupPage() {
   }, [song.drive_audio_file_id, song.drive_vocals_file_id, song.drive_instrumental_file_id]);
 
   const connectDrive = useCallback(async () => {
-    const { verifier, challenge } = await generatePKCE();
-    sessionStorage.setItem("reprise_drive_pkce_verifier", verifier);
-    const returnTo = `/song/${id}/setup`;
-    const state = encodeURIComponent(JSON.stringify({ returnTo }));
-    window.location.href = getAuthUrl(challenge, state);
-  }, [id]);
+    setConnectingDrive(true);
+    setDriveError(null);
+    setDriveAuthUrl(null);
+    setUrlCopied(false);
+    try {
+      await startDriveOAuth((url) => setDriveAuthUrl(url));
+      setDriveConnected(true);
+      setDriveAuthUrl(null);
+
+      // Auto re-discovery: find existing files in Drive and restore file IDs
+      try {
+        const accessToken = await getValidAccessToken();
+        const folderName = buildDriveFolderName(song.title, song.artist, song.id);
+        const folderId = await ensureSongFolder(accessToken, folderName);
+        const found = await discoverFilesInFolder(accessToken, folderId, [
+          "audio.m4a",
+          "vocals.wav",
+          "no_vocals.wav",
+        ]);
+        const updates: Record<string, string> = {};
+        if (found["audio.m4a"] && !song.drive_audio_file_id)
+          updates.drive_audio_file_id = found["audio.m4a"];
+        if (found["vocals.wav"] && !song.drive_vocals_file_id)
+          updates.drive_vocals_file_id = found["vocals.wav"];
+        if (found["no_vocals.wav"] && !song.drive_instrumental_file_id)
+          updates.drive_instrumental_file_id = found["no_vocals.wav"];
+        if (Object.keys(updates).length > 0) await updateSong(song.id, updates);
+      } catch {
+        // Re-discovery is best-effort; fall through to show sync button
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setDriveError(msg);
+    } finally {
+      setConnectingDrive(false);
+    }
+  }, [song.id, song.title, song.artist, song.drive_audio_file_id, song.drive_vocals_file_id, song.drive_instrumental_file_id, updateSong]);
 
   const disconnectDrive = useCallback(() => {
+    const confirmed = window.confirm(
+      "Disconnect Google Drive?\n\nYour uploaded files will remain on Drive, but this app will no longer be able to sync until you reconnect."
+    );
+    if (!confirmed) return;
     clearToken();
     setDriveConnected(false);
   }, []);
@@ -91,7 +130,7 @@ export function SongSetupPage() {
 
     try {
       const accessToken = await getValidAccessToken();
-      const folderId = await ensureSongFolder(accessToken, song.id);
+      const folderId = await ensureSongFolder(accessToken, buildDriveFolderName(song.title, song.artist, song.id));
 
       const makeProgress =
         (setter: (v: number) => void) =>
@@ -525,6 +564,7 @@ export function SongSetupPage() {
 
               {!driveConnected ? (
                 /* Not connected */
+                <>
                 <div className="flex items-center gap-3.5 p-4 bg-[var(--bg)] border border-dashed border-[var(--border)] rounded-[var(--radius)]">
                   <div className="w-10 h-10 rounded-[9px] bg-[var(--accent-light)] flex items-center justify-center flex-shrink-0">
                     {/* Google Drive icon */}
@@ -543,11 +583,47 @@ export function SongSetupPage() {
                   </div>
                   <button
                     onClick={connectDrive}
-                    className="px-3 py-[5px] rounded-[6px] bg-[var(--accent)] text-white border-[1.5px] border-[var(--accent)] text-[12px] font-medium hover:opacity-85 transition-opacity flex items-center gap-1 flex-shrink-0"
+                    disabled={connectingDrive}
+                    className="px-3 py-[5px] rounded-[6px] bg-[var(--accent)] text-white border-[1.5px] border-[var(--accent)] text-[12px] font-medium hover:opacity-85 transition-opacity flex items-center gap-1.5 flex-shrink-0 disabled:opacity-60"
                   >
-                    Connect
+                    {connectingDrive ? (
+                      <>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="animate-spin">
+                          <circle cx="12" cy="12" r="10" /><path d="M12 6v6" />
+                        </svg>
+                        Waiting for browser…
+                      </>
+                    ) : "Connect"}
                   </button>
                 </div>
+
+                {/* Copyable auth URL — shown while waiting for browser */}
+                {connectingDrive && driveAuthUrl && (
+                  <div className="mt-2 p-3 bg-[var(--surface)] border border-[var(--border)] rounded-[8px]">
+                    <p className="text-[11px] text-[var(--text-muted)] mb-1.5">
+                      Browser didn't open? Copy this link and paste it manually:
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <input
+                        readOnly
+                        value={driveAuthUrl}
+                        className="flex-1 text-[10.5px] font-mono bg-[var(--bg)] border border-[var(--border)] rounded-[5px] px-2 py-1.5 text-[var(--text-secondary)] truncate outline-none"
+                        onFocus={(e) => e.target.select()}
+                      />
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(driveAuthUrl);
+                          setUrlCopied(true);
+                          setTimeout(() => setUrlCopied(false), 2000);
+                        }}
+                        className="px-2.5 py-1.5 rounded-[5px] border border-[var(--border)] bg-[var(--bg)] text-[11px] font-medium text-[var(--text-secondary)] hover:border-[#888] transition-all flex-shrink-0"
+                      >
+                        {urlCopied ? "Copied!" : "Copy"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                </>
               ) : (
                 /* Connected — show file upload states */
                 <div className="flex flex-col gap-1.5">
