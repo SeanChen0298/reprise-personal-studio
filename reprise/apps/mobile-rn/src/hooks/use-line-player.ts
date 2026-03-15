@@ -57,7 +57,7 @@ export function useLinePlayer({
   const [isPlaying, setIsPlaying] = useState(false);
 
   const [currentLineIndex, setCurrentLineIndex] = useState(initialLineIndex);
-  const [loopEnabled, setLoopEnabled] = useState(true);
+  const [loopEnabled, setLoopEnabled] = useState(false);
   const [loopCount, setLoopCount] = useState(1);
   const [maxLoops, setMaxLoops] = useState(3);
   const [speed, setSpeedState] = useState(1.0);

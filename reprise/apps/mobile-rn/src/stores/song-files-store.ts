@@ -12,8 +12,9 @@ import { create } from "zustand";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { DriveToken } from "../lib/google-drive-download";
 
-const FILES_KEY = "reprise_song_files";
-const TOKEN_KEY = "reprise_drive_token";
+const FILES_KEY    = "reprise_song_files";
+const TOKEN_KEY    = "reprise_drive_token";
+const SETTINGS_KEY = "reprise_settings";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -30,6 +31,8 @@ interface SongFilesState {
   driveToken: DriveToken | null;
   /** Whether initial load from AsyncStorage has completed */
   hydrated: boolean;
+  /** Auto-download audio files for all songs on app open */
+  autoDownload: boolean;
 
   hydrate: () => Promise<void>;
   setLocalFiles: (songId: string, files: Partial<SongLocalFiles>) => Promise<void>;
@@ -37,6 +40,7 @@ interface SongFilesState {
   getLocalFiles: (songId: string) => SongLocalFiles;
   setDriveToken: (token: DriveToken | null) => Promise<void>;
   getDriveToken: () => DriveToken | null;
+  setAutoDownload: (enabled: boolean) => Promise<void>;
 }
 
 // ─── Store ────────────────────────────────────────────────────────────────────
@@ -45,17 +49,20 @@ export const useSongFilesStore = create<SongFilesState>((set, get) => ({
   localFiles: {},
   driveToken: null,
   hydrated: false,
+  autoDownload: false,
 
   async hydrate() {
-    const [filesRaw, tokenRaw] = await Promise.all([
+    const [filesRaw, tokenRaw, settingsRaw] = await Promise.all([
       AsyncStorage.getItem(FILES_KEY),
       AsyncStorage.getItem(TOKEN_KEY),
+      AsyncStorage.getItem(SETTINGS_KEY),
     ]);
 
-    const localFiles = filesRaw ? (JSON.parse(filesRaw) as Record<string, SongLocalFiles>) : {};
-    const driveToken = tokenRaw ? (JSON.parse(tokenRaw) as DriveToken) : null;
+    const localFiles   = filesRaw    ? (JSON.parse(filesRaw)    as Record<string, SongLocalFiles>) : {};
+    const driveToken   = tokenRaw    ? (JSON.parse(tokenRaw)    as DriveToken)                     : null;
+    const settings     = settingsRaw ? (JSON.parse(settingsRaw) as { autoDownload?: boolean })      : {};
 
-    set({ localFiles, driveToken, hydrated: true });
+    set({ localFiles, driveToken, hydrated: true, autoDownload: settings.autoDownload ?? false });
   },
 
   async setLocalFiles(songId, files) {
@@ -88,6 +95,11 @@ export const useSongFilesStore = create<SongFilesState>((set, get) => ({
 
   getDriveToken() {
     return get().driveToken;
+  },
+
+  async setAutoDownload(enabled) {
+    set({ autoDownload: enabled });
+    await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify({ autoDownload: enabled }));
   },
 }));
 

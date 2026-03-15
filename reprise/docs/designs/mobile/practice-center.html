@@ -1,0 +1,1558 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reprise — Practice Center (Mobile)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=Noto+Serif+JP:wght@400;500;600&family=Noto+Sans+JP:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #F9F9F9;
+    --surface: #FFFFFF;
+    --border: #E4E4E4;
+    --border-subtle: #EFEFEF;
+    --text-primary: #111111;
+    --text-secondary: #555555;
+    --text-muted: #999999;
+    --accent: #111111;
+    --accent-light: #F0F0F0;
+    --theme: #2563EB;
+    --theme-light: #EFF6FF;
+    --theme-text: #1D4ED8;
+    --danger: #DC2626;
+    --danger-light: #FEF2F2;
+    --green: #16A34A;
+    --amber: #D97706;
+    --radius: 14px;
+  }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text-primary);
+    min-height: 100vh;
+    padding: 48px 24px 80px;
+  }
+
+  /* Page layout */
+  .page-header {
+    max-width: 1120px;
+    margin: 0 auto 56px;
+    text-align: center;
+  }
+  .logo {
+    font-family: 'DM Serif Display', serif;
+    font-size: 28px;
+    color: var(--text-primary);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .logo-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--theme); }
+  .page-subtitle { font-size: 14px; color: var(--text-muted); }
+
+  .section-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 16px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  /* Grid of phone frames */
+  .frames-grid {
+    max-width: 1120px;
+    margin: 0 auto 64px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 40px;
+    justify-content: center;
+  }
+
+  .frame-group {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+  .frame-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  /* Phone shell */
+  .phone {
+    width: 320px;
+    height: 693px;
+    background: #fff;
+    border-radius: 44px;
+    border: 2px solid #D1D5DB;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.12), 0 4px 16px rgba(0,0,0,0.06);
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+  .phone.dark {
+    background: #0C0C10;
+    border-color: #2D2D35;
+  }
+
+  /* Dynamic island */
+  .island {
+    width: 88px; height: 28px;
+    background: #000;
+    border-radius: 20px;
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+  }
+  .phone.dark .island { background: #1a1a1f; }
+
+  /* Status bar */
+  .status-bar {
+    height: 52px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    padding: 0 20px 6px;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 5;
+  }
+  .status-time { font-size: 13px; font-weight: 600; color: var(--text-primary); letter-spacing: -0.2px; }
+  .status-icons { display: flex; align-items: center; gap: 5px; }
+  .phone.dark .status-time { color: #E5E7EB; }
+
+  /* Screen body */
+  .screen { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* ─── SHARED COMPONENTS ─── */
+
+  /* Header bar */
+  .nav-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px 8px;
+    border-bottom: 1px solid var(--border-subtle);
+    flex-shrink: 0;
+  }
+  .phone.dark .nav-bar { border-color: #1E1E26; }
+
+  .nav-back {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    border: 1.5px solid var(--border);
+    background: transparent;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-secondary);
+  }
+  .phone.dark .nav-back { border-color: #2D2D3A; color: #9CA3AF; }
+
+  .nav-title {
+    text-align: center;
+    flex: 1;
+    padding: 0 8px;
+  }
+  .nav-title-main {
+    font-family: 'DM Serif Display', serif;
+    font-size: 14px;
+    color: var(--text-primary);
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .nav-title-sub { font-size: 10px; color: var(--text-muted); margin-top: 1px; }
+  .phone.dark .nav-title-main { color: #F3F4F6; }
+  .phone.dark .nav-title-sub { color: #6B7280; }
+
+  .nav-action {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    border: 1.5px solid var(--border);
+    background: transparent;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-secondary);
+  }
+  .phone.dark .nav-action { border-color: #2D2D3A; color: #9CA3AF; }
+
+  /* Main lyrics area */
+  .lyrics-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 12px 20px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  /* Line display */
+  .line-prev, .line-next {
+    font-family: 'Noto Serif JP', serif;
+    font-size: 15px;
+    color: var(--text-muted);
+    text-align: center;
+    opacity: 0.4;
+    line-height: 1.5;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .phone.dark .line-prev, .phone.dark .line-next { color: #6B7280; }
+
+  .line-current-wrap {
+    margin: 16px 0;
+    text-align: center;
+    width: 100%;
+  }
+  .line-current {
+    font-family: 'Noto Serif JP', serif;
+    font-size: 26px;
+    font-weight: 500;
+    color: var(--text-primary);
+    line-height: 1.4;
+    text-align: center;
+    letter-spacing: -0.3px;
+  }
+  .phone.dark .line-current { color: #F9FAFB; }
+
+  .line-furigana {
+    font-size: 10px;
+    color: var(--text-muted);
+    line-height: 1.6;
+    margin-bottom: 2px;
+  }
+  .phone.dark .line-furigana { color: #6B7280; }
+
+  .line-translation {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: 'DM Sans', sans-serif;
+    margin-top: 6px;
+    opacity: 0.7;
+    line-height: 1.4;
+  }
+  .phone.dark .line-translation { color: #9CA3AF; }
+
+  /* Annotation highlight */
+  .ann { border-radius: 3px; padding: 0 1px; }
+  .ann-blue { background: #DBEAFE; color: #1D4ED8; }
+  .ann-yellow { background: #FEF9C3; color: #854D0E; }
+  .ann-red { background: #FEE2E2; color: #991B1B; }
+
+  /* Line meta */
+  .line-meta {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+  }
+  .meta-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    color: var(--text-muted);
+    background: var(--accent-light);
+    border-radius: 20px;
+    padding: 3px 8px;
+  }
+  .phone.dark .meta-chip { background: #1A1A24; color: #6B7280; }
+  .status-tag {
+    font-size: 10px;
+    font-weight: 500;
+    border-radius: 20px;
+    padding: 3px 8px;
+  }
+  .tag-learning { background: #FEF9C3; color: #92400E; }
+  .tag-mastered { background: #D1FAE5; color: #065F46; }
+  .tag-not-started { background: #F1F5F9; color: #64748B; }
+
+  /* Waveform strip */
+  .waveform-strip {
+    margin: 0 16px;
+    height: 40px;
+    border-radius: 8px;
+    background: var(--accent-light);
+    overflow: hidden;
+    position: relative;
+    flex-shrink: 0;
+  }
+  .phone.dark .waveform-strip { background: #16161E; }
+  .waveform-bars {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    height: 100%;
+    padding: 0 8px;
+  }
+  .wbar {
+    width: 2px;
+    border-radius: 1px;
+    background: #CBD5E1;
+    flex-shrink: 0;
+  }
+  .wbar.active { background: var(--theme); }
+  .phone.dark .wbar { background: #2D2D3A; }
+  .phone.dark .wbar.active { background: #3B82F6; }
+
+  /* Pitch strip */
+  .pitch-strip {
+    margin: 4px 16px 0;
+    height: 32px;
+    border-radius: 6px;
+    background: var(--accent-light);
+    overflow: hidden;
+    position: relative;
+    flex-shrink: 0;
+  }
+  .phone.dark .pitch-strip { background: #16161E; }
+  .pitch-line {
+    position: absolute;
+    bottom: 8px;
+    left: 8px; right: 8px;
+    height: 14px;
+  }
+
+  /* Timestamps row */
+  .timestamps {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 20px 0;
+    flex-shrink: 0;
+  }
+  .ts { font-size: 9px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .phone.dark .ts { color: #4B5563; }
+
+  /* Transport bar */
+  .transport {
+    padding: 12px 12px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    flex-shrink: 0;
+    border-top: 1px solid var(--border-subtle);
+  }
+  .phone.dark .transport { border-color: #1A1A24; }
+
+  .btn-transport {
+    border-radius: 50%;
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+    cursor: pointer;
+  }
+  .phone.dark .btn-transport { border-color: #2D2D3A; background: #16161E; color: #9CA3AF; }
+
+  .btn-sm { width: 40px; height: 40px; }
+  .btn-md { width: 52px; height: 52px; }
+  .btn-lg { width: 60px; height: 60px; }
+  .btn-play { background: var(--accent); color: #fff; border: none; }
+  .phone.dark .btn-play { background: #F9FAFB; color: #0C0C10; }
+  .btn-record { background: var(--danger); color: #fff; border: none; }
+  .btn-record.recording { background: var(--danger); box-shadow: 0 0 0 3px rgba(220,38,38,0.25); }
+  .btn-theme { background: var(--theme-light); color: var(--theme-text); border-color: var(--theme); }
+  .phone.dark .btn-theme { background: #1E3A6E; color: #93C5FD; border-color: #3B82F6; }
+
+  /* Keyboard hint strip */
+  .hints {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 0 12px 12px;
+    flex-shrink: 0;
+  }
+  .hint-tag {
+    font-size: 9px;
+    color: var(--text-muted);
+    background: var(--accent-light);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-weight: 600;
+  }
+
+  /* ─── OVERLAYS ─── */
+
+  .overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 20;
+  }
+  .overlay-dim { background: rgba(0,0,0,0.45); }
+  .overlay-countdown-num {
+    font-size: 80px;
+    font-weight: 700;
+    color: #fff;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 4px 20px rgba(0,0,0,0.4);
+  }
+  .overlay-sub {
+    font-size: 12px;
+    color: rgba(255,255,255,0.6);
+    margin-top: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  /* Recording indicator bar */
+  .rec-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 6px 16px;
+    background: rgba(220,38,38,0.08);
+    border-bottom: 1px solid rgba(220,38,38,0.12);
+    flex-shrink: 0;
+  }
+  .rec-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--danger);
+  }
+  .rec-time {
+    font-size: 12px;
+    color: var(--danger);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .rec-label {
+    font-size: 9px;
+    color: var(--danger);
+    opacity: 0.6;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .level-meter {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 14px;
+  }
+  .lbar {
+    width: 3px;
+    border-radius: 1px;
+    background: var(--border);
+  }
+  .lbar.on-g { background: #22C55E; }
+  .lbar.on-y { background: #F59E0B; }
+  .lbar.on-r { background: #DC2626; }
+
+  /* Feedback panel */
+  .feedback-panel {
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding: 10px 16px 6px;
+    flex-shrink: 0;
+  }
+  .phone.dark .feedback-panel { background: #13131A; border-color: #1E1E2A; }
+  .feedback-title {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+  }
+  .feedback-btns {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .fbtn {
+    flex: 1;
+    height: 38px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1.5px solid;
+  }
+  .fbtn-play { border-color: var(--theme); color: var(--theme-text); background: var(--theme-light); }
+  .fbtn-retry { border-color: var(--danger); color: var(--danger); background: var(--danger-light); }
+  .fbtn-next { border-color: var(--border); color: var(--text-secondary); background: var(--surface); }
+  .phone.dark .fbtn-next { border-color: #2D2D3A; color: #9CA3AF; background: #1A1A24; }
+  .phone.dark .fbtn-play { background: #1E3A6E; color: #93C5FD; border-color: #3B82F6; }
+  .phone.dark .fbtn-retry { background: #2D1515; color: #F87171; border-color: #7F1D1D; }
+
+  /* Section mode */
+  .section-header {
+    text-align: center;
+    padding: 8px 16px 6px;
+    border-bottom: 1px solid var(--border-subtle);
+    flex-shrink: 0;
+  }
+  .phone.dark .section-header { border-color: #1A1A24; }
+  .section-badge {
+    display: inline-block;
+    font-size: 9.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--theme-text);
+    background: var(--theme-light);
+    border-radius: 20px;
+    padding: 3px 10px;
+  }
+
+  .section-lines {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 12px 20px;
+    gap: 8px;
+    overflow: hidden;
+  }
+  .sec-line {
+    font-family: 'Noto Serif JP', serif;
+    text-align: center;
+    line-height: 1.5;
+    transition: all 0.2s;
+    width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .sec-line.active {
+    font-size: 22px;
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+  .phone.dark .sec-line.active { color: #F9FAFB; }
+  .sec-line.inactive {
+    font-size: 15px;
+    color: var(--text-muted);
+    opacity: 0.35;
+  }
+  .phone.dark .sec-line.inactive { color: #6B7280; }
+  .sec-translation {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-align: center;
+    margin-top: 2px;
+    font-family: 'DM Sans', sans-serif;
+    opacity: 0.65;
+  }
+
+  /* Edit mode */
+  .edit-overlay {
+    position: absolute;
+    inset: 0;
+    background: var(--surface);
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    padding: 16px;
+  }
+  .phone.dark .edit-overlay { background: #0C0C10; }
+  .edit-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  .edit-heading {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  .phone.dark .edit-heading { color: #F3F4F6; }
+  .edit-done {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--theme-text);
+    border: none;
+    background: none;
+    cursor: pointer;
+  }
+  .edit-original {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    opacity: 0.55;
+  }
+  .edit-input {
+    width: 100%;
+    padding: 10px 14px;
+    font-family: 'Noto Serif JP', serif;
+    font-size: 16px;
+    border: 2px solid var(--theme);
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--text-primary);
+    outline: none;
+    text-align: center;
+    margin-bottom: 12px;
+    box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
+  }
+  .phone.dark .edit-input { background: #16161E; color: #F3F4F6; border-color: #3B82F6; }
+  .edit-preview {
+    font-family: 'Noto Serif JP', serif;
+    font-size: 22px;
+    line-height: 1.4;
+    text-align: center;
+    padding: 12px;
+    border: 1.5px dashed var(--border);
+    border-radius: 10px;
+    background: var(--bg);
+    color: var(--text-primary);
+    min-height: 60px;
+    margin-bottom: 10px;
+  }
+  .phone.dark .edit-preview { background: #13131A; color: #F3F4F6; border-color: #2D2D3A; }
+  .edit-hint {
+    font-size: 9.5px;
+    color: var(--text-muted);
+    text-align: center;
+    opacity: 0.6;
+    margin-bottom: 12px;
+  }
+  /* Highlight toolbar */
+  .highlight-bar {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: auto;
+    padding-top: 10px;
+    border-top: 1px solid var(--border-subtle);
+  }
+  .phone.dark .highlight-bar { border-color: #1A1A24; }
+  .hl-btn {
+    height: 30px;
+    padding: 0 10px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 500;
+    border: 1.5px solid transparent;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .hl-blue { background: #DBEAFE; color: #1D4ED8; border-color: #BFDBFE; }
+  .hl-yellow { background: #FEF9C3; color: #92400E; border-color: #FEF08A; }
+  .hl-red { background: #FEE2E2; color: #991B1B; border-color: #FECACA; }
+  .hl-green { background: #D1FAE5; color: #065F46; border-color: #A7F3D0; }
+  .sym-btn {
+    height: 30px;
+    width: 30px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    background: var(--accent-light);
+    border: 1.5px solid var(--border);
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Swipe indicators */
+  .swipe-hint {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 4px 0 2px;
+    flex-shrink: 0;
+  }
+  .swipe-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--border); }
+  .swipe-dot.active { background: var(--theme); }
+
+  /* Section record btn */
+  .sec-record-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    height: 36px;
+    padding: 0 14px;
+    border-radius: 20px;
+    border: 1.5px solid var(--danger);
+    background: transparent;
+    color: var(--danger);
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  /* Speed pill */
+  .speed-pill {
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 20px;
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+  }
+  .phone.dark .speed-pill { border-color: #2D2D3A; background: #16161E; color: #9CA3AF; }
+
+  /* Backing toggle */
+  .backing-btn {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-muted);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .backing-btn.on { background: var(--theme-light); color: var(--theme); border-color: var(--theme); }
+  .phone.dark .backing-btn { border-color: #2D2D3A; background: #16161E; color: #4B5563; }
+  .phone.dark .backing-btn.on { background: #1E3A6E; color: #3B82F6; border-color: #3B82F6; }
+
+  /* ─── ANNOTATIONS ─── */
+  .ann-bar {
+    display: flex;
+    gap: 3px;
+    justify-content: center;
+    margin-top: 4px;
+    flex-wrap: wrap;
+  }
+  .ann-chip {
+    font-size: 9px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-weight: 500;
+  }
+
+  /* ─── PAGE NOTES ─── */
+  .notes-section {
+    max-width: 860px;
+    margin: 0 auto 40px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px 28px;
+  }
+  .notes-title {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    margin-bottom: 16px;
+  }
+  .notes-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px 32px;
+  }
+  .note-item {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .note-key {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+  }
+  .note-val {
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+
+  /* SVG helpers */
+  svg { display: block; }
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <div class="logo">
+    <span class="logo-dot"></span>
+    Reprise
+  </div>
+  <p style="font-family:'DM Serif Display',serif;font-size:18px;color:var(--text-secondary);margin-bottom:4px;">Practice Center — Mobile Design</p>
+  <p class="page-subtitle">React Native · 6 states · iPhone 14 Pro (393 × 852 pt)</p>
+</div>
+
+<!-- ═══════════════════════════════════ ROW 1 ═══════════════════════════════════ -->
+<div style="max-width:1120px;margin:0 auto 16px;padding:0 24px;">
+  <div class="section-label">Core States</div>
+</div>
+
+<div class="frames-grid">
+
+  <!-- ① NORMAL PLAYBACK -->
+  <div class="frame-group">
+    <div class="frame-label">① Normal Playback</div>
+    <div class="phone">
+      <div class="island"></div>
+      <div class="status-bar">
+        <span class="status-time">9:41</span>
+        <div class="status-icons">
+          <svg width="16" height="12" viewBox="0 0 16 12" fill="none"><rect x="0" y="3" width="3" height="9" rx="1" fill="#111"/><rect x="4.5" y="2" width="3" height="10" rx="1" fill="#111"/><rect x="9" y="0" width="3" height="12" rx="1" fill="#111"/><rect x="13.5" y="0" width="2.5" height="12" rx="1" fill="#D1D5DB"/></svg>
+          <svg width="16" height="12" viewBox="0 0 20 14" fill="none"><path d="M10 2.5C12.8 2.5 15.3 3.7 17 5.7L18.5 4.2C16.4 1.8 13.4 0.2 10 0.2C6.6 0.2 3.6 1.8 1.5 4.2L3 5.7C4.7 3.7 7.2 2.5 10 2.5Z" fill="#111"/><path d="M10 5.8C12 5.8 13.8 6.7 15 8.1L16.5 6.6C14.9 4.9 12.6 3.8 10 3.8C7.4 3.8 5.1 4.9 3.5 6.6L5 8.1C6.2 6.7 8 5.8 10 5.8Z" fill="#111"/><circle cx="10" cy="12" r="2" fill="#111"/></svg>
+          <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3.5" stroke="#111" stroke-opacity="0.35"/><rect x="2" y="2" width="16" height="8" rx="2" fill="#111"/><path d="M23 4v4a2 2 0 000-4z" fill="#111" fill-opacity="0.4"/></svg>
+        </div>
+      </div>
+
+      <div class="screen">
+        <!-- Nav bar -->
+        <div class="nav-bar">
+          <div class="nav-back">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+          </div>
+          <div class="nav-title">
+            <div class="nav-title-main">ツキマシテハ</div>
+            <div class="nav-title-sub">Mrs. GREEN APPLE · 120 BPM</div>
+          </div>
+          <div class="nav-action">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+          </div>
+        </div>
+
+        <!-- Lyrics area -->
+        <div class="lyrics-area">
+          <div class="line-prev">見えない未来に手を伸ばして</div>
+
+          <div class="line-current-wrap">
+            <div class="line-furigana" style="font-family:'Noto Sans JP',sans-serif;">
+              <ruby>言葉<rt>ことば</rt></ruby>にならない<ruby>想<rt>おも</rt></ruby>いが
+            </div>
+            <div class="line-current">
+              言葉にならない想いが
+            </div>
+            <div class="ann-bar">
+              <span class="ann-chip ann-blue">breath ↗</span>
+              <span class="ann-chip ann-yellow">soften</span>
+            </div>
+            <div class="line-translation">Words that can't be put into words</div>
+          </div>
+
+          <div class="line-next">溢れてあふれて止まらなくて</div>
+
+          <!-- Line meta -->
+          <div class="line-meta">
+            <span class="meta-chip">
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              0:32 — 0:36
+            </span>
+            <span class="meta-chip">Line 8 of 24</span>
+            <span class="status-tag tag-learning">Learning</span>
+          </div>
+        </div>
+
+        <!-- Swipe dots -->
+        <div class="swipe-hint">
+          <div class="swipe-dot"></div>
+          <div class="swipe-dot active"></div>
+          <div class="swipe-dot"></div>
+        </div>
+
+        <!-- Waveform -->
+        <div class="waveform-strip" style="margin-top:8px;">
+          <div class="waveform-bars">
+            <div class="wbar" style="height:8px;"></div><div class="wbar" style="height:12px;"></div><div class="wbar" style="height:18px;"></div><div class="wbar" style="height:22px;"></div><div class="wbar" style="height:14px;"></div>
+            <div class="wbar active" style="height:28px;"></div><div class="wbar active" style="height:20px;"></div><div class="wbar active" style="height:32px;"></div><div class="wbar active" style="height:26px;"></div><div class="wbar active" style="height:24px;"></div><div class="wbar active" style="height:30px;"></div><div class="wbar active" style="height:18px;"></div>
+            <div class="wbar" style="height:22px;"></div><div class="wbar" style="height:16px;"></div><div class="wbar" style="height:10px;"></div><div class="wbar" style="height:14px;"></div><div class="wbar" style="height:20px;"></div><div class="wbar" style="height:26px;"></div><div class="wbar" style="height:18px;"></div><div class="wbar" style="height:12px;"></div><div class="wbar" style="height:8px;"></div>
+          </div>
+        </div>
+
+        <!-- Pitch strip -->
+        <div class="pitch-strip">
+          <svg class="pitch-line" viewBox="0 0 260 14" fill="none" preserveAspectRatio="none">
+            <path d="M0 12 C20 10, 40 4, 60 6 C80 8, 100 2, 130 5 C160 8, 190 3, 210 6 C230 9, 250 4, 260 6" stroke="#93C5FD" stroke-width="1.5" fill="none"/>
+          </svg>
+        </div>
+
+        <!-- Timestamps -->
+        <div class="timestamps">
+          <span class="ts">0:32.4</span>
+          <span class="ts" style="color:var(--text-muted);font-size:9px;">Analyze pitch</span>
+          <span class="ts">0:36.1</span>
+        </div>
+
+        <!-- Transport -->
+        <div class="transport">
+          <button class="btn-transport btn-sm">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg>
+          </button>
+
+          <button class="btn-transport btn-md btn-play">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+          </button>
+
+          <button class="btn-transport btn-lg btn-record">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><circle cx="12" cy="12" r="6" fill="white" stroke="none"/></svg>
+          </button>
+
+          <div class="backing-btn on">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 010 7.07"/></svg>
+          </div>
+
+          <button class="btn-transport btn-sm">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
+          </button>
+        </div>
+
+        <!-- Hints -->
+        <div class="hints">
+          <span class="hint-tag" style="font-size:9px;color:var(--text-muted);background:transparent;border:none;">Tap lyric to preview · Double-tap to edit</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ② RECORDING ACTIVE -->
+  <div class="frame-group">
+    <div class="frame-label">② Recording Active</div>
+    <div class="phone">
+      <div class="island" style="background:#3D0000;box-shadow:0 0 12px rgba(220,38,38,0.5);"></div>
+      <div class="status-bar">
+        <span class="status-time">9:41</span>
+        <div class="status-icons">
+          <svg width="16" height="12" viewBox="0 0 16 12" fill="none"><rect x="0" y="3" width="3" height="9" rx="1" fill="#111"/><rect x="4.5" y="2" width="3" height="10" rx="1" fill="#111"/><rect x="9" y="0" width="3" height="12" rx="1" fill="#111"/><rect x="13.5" y="0" width="2.5" height="12" rx="1" fill="#D1D5DB"/></svg>
+          <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3.5" stroke="#111" stroke-opacity="0.35"/><rect x="2" y="2" width="16" height="8" rx="2" fill="#111"/><path d="M23 4v4a2 2 0 000-4z" fill="#111" fill-opacity="0.4"/></svg>
+        </div>
+      </div>
+      <div class="screen">
+        <div class="nav-bar">
+          <div class="nav-back">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+          </div>
+          <div class="nav-title">
+            <div class="nav-title-main">ツキマシテハ</div>
+            <div class="nav-title-sub">Mrs. GREEN APPLE</div>
+          </div>
+          <div style="width:32px;"></div>
+        </div>
+
+        <!-- Rec indicator bar -->
+        <div class="rec-bar">
+          <div class="level-meter">
+            <div class="lbar on-g" style="height:6px;"></div>
+            <div class="lbar on-g" style="height:8px;"></div>
+            <div class="lbar on-g" style="height:11px;"></div>
+            <div class="lbar on-y" style="height:13px;"></div>
+            <div class="lbar" style="height:14px;"></div>
+          </div>
+          <div class="rec-dot"></div>
+          <span class="rec-time">0:03.2</span>
+          <span class="rec-label">REC</span>
+        </div>
+
+        <div class="lyrics-area">
+          <div class="line-prev" style="opacity:0.2;">見えない未来に手を伸ばして</div>
+
+          <div class="line-current-wrap">
+            <div class="line-current" style="color:var(--danger);">
+              言葉にならない想いが
+            </div>
+            <div class="line-translation" style="opacity:0.5;">Words that can't be put into words</div>
+          </div>
+
+          <div class="line-next" style="opacity:0.2;">溢れてあふれて止まらなくて</div>
+
+          <div class="line-meta" style="margin-top:14px;">
+            <span class="meta-chip" style="background:#FEF2F2;color:#DC2626;">
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              0:32 — 0:36
+            </span>
+            <span class="meta-chip">Line 8 of 24</span>
+          </div>
+        </div>
+
+        <!-- Pitch (active with playback line) -->
+        <div class="pitch-strip" style="margin:0 16px 4px;">
+          <svg class="pitch-line" viewBox="0 0 260 14" fill="none" preserveAspectRatio="none">
+            <path d="M0 12 C20 10, 40 4, 60 6 C80 8, 100 2, 130 5" stroke="#FCA5A5" stroke-width="1.5" fill="none"/>
+            <line x1="130" y1="0" x2="130" y2="14" stroke="#DC2626" stroke-width="1" stroke-dasharray="2,2"/>
+          </svg>
+        </div>
+        <div class="timestamps">
+          <span class="ts">0:32.4</span>
+          <span class="ts">0:36.1</span>
+        </div>
+
+        <div class="transport" style="background:rgba(254,242,242,0.4);">
+          <button class="btn-transport btn-sm" style="opacity:0.3;" disabled>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg>
+          </button>
+
+          <button class="btn-transport btn-md btn-play" style="opacity:0.5;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+          </button>
+
+          <!-- Record = stop -->
+          <button class="btn-transport btn-lg btn-record recording" style="box-shadow:0 0 0 4px rgba(220,38,38,0.2);">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+          </button>
+
+          <div class="backing-btn on">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 010 7.07"/></svg>
+          </div>
+
+          <button class="btn-transport btn-sm" style="opacity:0.3;" disabled>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
+          </button>
+        </div>
+
+        <div class="hints" style="padding-bottom:14px;">
+          <span style="font-size:9px;color:#DC2626;opacity:0.6;">Tap record button to stop</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ③ COUNTDOWN -->
+  <div class="frame-group">
+    <div class="frame-label">③ Countdown</div>
+    <div class="phone">
+      <div class="island"></div>
+      <div class="status-bar">
+        <span class="status-time">9:41</span>
+        <div class="status-icons">
+          <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3.5" stroke="#111" stroke-opacity="0.35"/><rect x="2" y="2" width="16" height="8" rx="2" fill="#111"/><path d="M23 4v4a2 2 0 000-4z" fill="#111" fill-opacity="0.4"/></svg>
+        </div>
+      </div>
+      <div class="screen" style="position:relative;">
+        <div class="nav-bar">
+          <div class="nav-back"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></div>
+          <div class="nav-title">
+            <div class="nav-title-main">ツキマシテハ</div>
+            <div class="nav-title-sub">Mrs. GREEN APPLE</div>
+          </div>
+          <div style="width:32px;"></div>
+        </div>
+
+        <div class="lyrics-area">
+          <div class="line-current-wrap">
+            <div class="line-current">言葉にならない想いが</div>
+            <div class="line-translation">Words that can't be put into words</div>
+          </div>
+          <div class="line-meta">
+            <span class="meta-chip">Line 8 of 24</span>
+            <span class="status-tag tag-learning">Learning</span>
+          </div>
+        </div>
+
+        <div class="transport">
+          <button class="btn-transport btn-sm" style="opacity:0.3;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg></button>
+          <button class="btn-transport btn-md btn-play"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg></button>
+          <button class="btn-transport btn-lg btn-record" style="box-shadow:0 0 0 4px rgba(251,191,36,0.35);background:#D97706;">
+            <span style="font-size:18px;font-weight:700;color:white;font-variant-numeric:tabular-nums;">3</span>
+          </button>
+          <div class="backing-btn on"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 010 7.07"/></svg></div>
+          <button class="btn-transport btn-sm"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg></button>
+        </div>
+
+        <!-- Countdown overlay -->
+        <div class="overlay overlay-dim">
+          <div class="overlay-countdown-num">3</div>
+          <div class="overlay-sub">Count in</div>
+          <div style="margin-top:24px;display:flex;gap:8px;">
+            <div style="width:10px;height:10px;border-radius:50%;background:rgba(255,255,255,0.9);"></div>
+            <div style="width:10px;height:10px;border-radius:50%;background:rgba(255,255,255,0.35);"></div>
+            <div style="width:10px;height:10px;border-radius:50%;background:rgba(255,255,255,0.35);"></div>
+            <div style="width:10px;height:10px;border-radius:50%;background:rgba(255,255,255,0.35);"></div>
+          </div>
+          <button style="margin-top:20px;color:rgba(255,255,255,0.5);font-size:11px;background:none;border:1px solid rgba(255,255,255,0.25);border-radius:20px;padding:5px 14px;cursor:pointer;">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════════════ ROW 2 ═══════════════════════════════════ -->
+<div style="max-width:1120px;margin:0 auto 16px;padding:0 24px;">
+  <div class="section-label">More States</div>
+</div>
+
+<div class="frames-grid">
+
+  <!-- ④ FEEDBACK LOOP -->
+  <div class="frame-group">
+    <div class="frame-label">④ Feedback Loop</div>
+    <div class="phone">
+      <div class="island"></div>
+      <div class="status-bar">
+        <span class="status-time">9:41</span>
+        <div class="status-icons"><svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3.5" stroke="#111" stroke-opacity="0.35"/><rect x="2" y="2" width="16" height="8" rx="2" fill="#111"/><path d="M23 4v4a2 2 0 000-4z" fill="#111" fill-opacity="0.4"/></svg></div>
+      </div>
+      <div class="screen">
+        <div class="nav-bar">
+          <div class="nav-back"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></div>
+          <div class="nav-title">
+            <div class="nav-title-main">ツキマシテハ</div>
+            <div class="nav-title-sub">Mrs. GREEN APPLE</div>
+          </div>
+          <div style="width:32px;"></div>
+        </div>
+
+        <div class="lyrics-area">
+          <div class="line-prev" style="opacity:0.25;">見えない未来に手を伸ばして</div>
+          <div class="line-current-wrap">
+            <div class="line-current">言葉にならない想いが</div>
+            <div class="line-translation">Words that can't be put into words</div>
+          </div>
+          <div class="line-next" style="opacity:0.25;">溢れてあふれて止まらなくて</div>
+          <div class="line-meta" style="margin-top:14px;">
+            <span class="meta-chip">Line 8 of 24</span>
+            <span class="status-tag tag-learning">Learning</span>
+            <div style="display:flex;align-items:center;gap:4px;font-size:10px;color:#16A34A;background:#D1FAE5;border-radius:20px;padding:3px 8px;">
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+              Take saved
+            </div>
+          </div>
+        </div>
+
+        <!-- Waveform  -->
+        <div class="waveform-strip">
+          <div class="waveform-bars">
+            <div class="wbar" style="height:8px;"></div><div class="wbar" style="height:12px;"></div>
+            <div class="wbar active" style="height:20px;"></div><div class="wbar active" style="height:28px;"></div><div class="wbar active" style="height:22px;"></div><div class="wbar active" style="height:30px;"></div><div class="wbar active" style="height:18px;"></div><div class="wbar active" style="height:24px;"></div><div class="wbar active" style="height:32px;"></div><div class="wbar active" style="height:20px;"></div><div class="wbar active" style="height:16px;"></div><div class="wbar active" style="height:26px;"></div><div class="wbar active" style="height:20px;"></div><div class="wbar active" style="height:14px;"></div><div class="wbar active" style="height:18px;"></div><div class="wbar active" style="height:10px;"></div>
+            <div class="wbar" style="height:8px;"></div><div class="wbar" style="height:6px;"></div>
+          </div>
+        </div>
+        <div class="timestamps"><span class="ts">0:32.4</span><span class="ts">0:36.1</span></div>
+
+        <!-- Feedback panel -->
+        <div class="feedback-panel">
+          <div class="feedback-title">How'd that go?</div>
+          <div class="feedback-btns">
+            <button class="fbtn fbtn-play">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
+              Listen
+            </button>
+            <button class="fbtn fbtn-retry">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
+              Retry
+            </button>
+            <button class="fbtn fbtn-next">
+              Next
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Transport (minimal) -->
+        <div class="transport" style="padding-top:10px;">
+          <button class="btn-transport btn-sm"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg></button>
+          <button class="btn-transport btn-md btn-play"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg></button>
+          <button class="btn-transport btn-lg btn-record"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><circle cx="12" cy="12" r="6" fill="white" stroke="none"/></svg></button>
+          <div class="backing-btn on"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 010 7.07"/></svg></div>
+          <button class="btn-transport btn-sm"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ⑤ SECTION MODE -->
+  <div class="frame-group">
+    <div class="frame-label">⑤ Section / Chorus</div>
+    <div class="phone">
+      <div class="island"></div>
+      <div class="status-bar">
+        <span class="status-time">9:41</span>
+        <div class="status-icons"><svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3.5" stroke="#111" stroke-opacity="0.35"/><rect x="2" y="2" width="16" height="8" rx="2" fill="#111"/><path d="M23 4v4a2 2 0 000-4z" fill="#111" fill-opacity="0.4"/></svg></div>
+      </div>
+      <div class="screen">
+        <div class="nav-bar">
+          <div class="nav-back"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></div>
+          <div class="nav-title">
+            <div class="nav-title-main">ツキマシテハ</div>
+            <div class="nav-title-sub">Mrs. GREEN APPLE</div>
+          </div>
+          <div class="nav-action"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg></div>
+        </div>
+
+        <!-- Section banner -->
+        <div class="section-header">
+          <span class="section-badge">Chorus 1</span>
+        </div>
+
+        <!-- Section lines -->
+        <div class="section-lines">
+          <div style="text-align:center;">
+            <div class="sec-line inactive">見えない未来に手を伸ばして</div>
+            <div class="sec-translation">Reaching for an invisible future</div>
+          </div>
+          <div style="text-align:center;">
+            <div class="sec-line active">言葉にならない想いが</div>
+            <div class="sec-translation" style="color:var(--text-muted);opacity:0.8;">Words that can't be put into words</div>
+          </div>
+          <div style="text-align:center;">
+            <div class="sec-line inactive">溢れてあふれて止まらなくて</div>
+            <div class="sec-translation">Overflowing, overflowing, can't stop</div>
+          </div>
+          <div style="text-align:center;">
+            <div class="sec-line inactive">君に届けたくて</div>
+            <div class="sec-translation">I want to reach you</div>
+          </div>
+        </div>
+
+        <!-- Section meta -->
+        <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:0 16px 8px;flex-shrink:0;">
+          <span class="meta-chip">
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            0:28 — 0:44
+          </span>
+          <span class="meta-chip">4 lines</span>
+          <span class="status-tag tag-learning">In Progress</span>
+        </div>
+
+        <!-- Pitch strip -->
+        <div class="pitch-strip" style="margin:0 16px 4px;">
+          <svg class="pitch-line" viewBox="0 0 260 14" fill="none" preserveAspectRatio="none">
+            <path d="M0 10 C30 8, 60 5, 90 7 C110 9, 130 4, 160 6 C185 8, 210 3, 240 5 C250 5.5, 255 6, 260 6" stroke="#93C5FD" stroke-width="1.5" fill="none"/>
+          </svg>
+        </div>
+        <div class="timestamps"><span class="ts">0:28.0</span><span class="ts">0:44.5</span></div>
+
+        <!-- Transport with section record -->
+        <div class="transport" style="gap:8px;">
+          <button class="btn-transport btn-sm"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg></button>
+          <button class="btn-transport btn-md btn-play"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg></button>
+          <button class="btn-transport btn-lg btn-record"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><circle cx="12" cy="12" r="6" fill="white" stroke="none"/></svg></button>
+          <button class="sec-record-btn">
+            <svg width="8" height="8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6" fill="#DC2626"/></svg>
+            Chorus 1
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ⑥ EDIT MODE -->
+  <div class="frame-group">
+    <div class="frame-label">⑥ Edit / Annotate</div>
+    <div class="phone">
+      <div class="island"></div>
+      <div class="status-bar">
+        <span class="status-time">9:41</span>
+        <div class="status-icons"><svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3.5" stroke="#111" stroke-opacity="0.35"/><rect x="2" y="2" width="16" height="8" rx="2" fill="#111"/><path d="M23 4v4a2 2 0 000-4z" fill="#111" fill-opacity="0.4"/></svg></div>
+      </div>
+
+      <!-- Edit overlay covers screen -->
+      <div class="screen" style="position:relative;">
+        <div class="nav-bar">
+          <div class="nav-back"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></div>
+          <div class="nav-title"><div class="nav-title-main">ツキマシテハ</div></div>
+          <div style="width:32px;"></div>
+        </div>
+
+        <div class="edit-overlay" style="top:93px;">
+          <div class="edit-header">
+            <span class="edit-heading">Edit Line 8</span>
+            <button class="edit-done">✓ Done</button>
+          </div>
+
+          <div class="edit-original">Original: 言葉にならない想いが</div>
+
+          <input class="edit-input" type="text" value="言葉にならない想いが" readonly>
+
+          <div class="edit-preview">
+            言葉に<span class="ann ann-blue">ならない</span><span class="ann ann-yellow">想い</span>が
+          </div>
+          <div class="edit-hint">Select text in preview to highlight · Tap highlight to remove</div>
+
+          <!-- Special symbols -->
+          <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;">
+            <button class="sym-btn">♪</button>
+            <button class="sym-btn">→</button>
+            <button class="sym-btn">↗</button>
+            <button class="sym-btn">↘</button>
+            <button class="sym-btn">~</button>
+            <button class="sym-btn" style="font-size:10px;width:auto;padding:0 8px;">息</button>
+          </div>
+
+          <div class="highlight-bar">
+            <button class="hl-btn hl-blue">
+              <div style="width:8px;height:8px;border-radius:2px;background:#BFDBFE;"></div>
+              Breath
+            </button>
+            <button class="hl-btn hl-yellow">
+              <div style="width:8px;height:8px;border-radius:2px;background:#FEF08A;"></div>
+              Soft
+            </button>
+            <button class="hl-btn hl-red">
+              <div style="width:8px;height:8px;border-radius:2px;background:#FECACA;"></div>
+              Strong
+            </button>
+            <button class="hl-btn hl-green">
+              <div style="width:8px;height:8px;border-radius:2px;background:#A7F3D0;"></div>
+              Vibrato
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════════════ DARK MODE ROW ═══════════════════════════════════ -->
+<div style="max-width:1120px;margin:0 auto 16px;padding:0 24px;">
+  <div class="section-label">Dark Mode (Alternate Theme)</div>
+</div>
+
+<div class="frames-grid">
+
+  <!-- DARK: Normal Playback -->
+  <div class="frame-group">
+    <div class="frame-label">Dark · Normal Playback</div>
+    <div class="phone dark">
+      <div class="island"></div>
+      <div class="status-bar">
+        <span class="status-time">9:41</span>
+        <div class="status-icons">
+          <svg width="16" height="12" viewBox="0 0 16 12" fill="none"><rect x="0" y="3" width="3" height="9" rx="1" fill="#E5E7EB"/><rect x="4.5" y="2" width="3" height="10" rx="1" fill="#E5E7EB"/><rect x="9" y="0" width="3" height="12" rx="1" fill="#E5E7EB"/><rect x="13.5" y="0" width="2.5" height="12" rx="1" fill="#4B5563"/></svg>
+          <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3.5" stroke="#9CA3AF" stroke-opacity="0.5"/><rect x="2" y="2" width="13" height="8" rx="2" fill="#E5E7EB"/><path d="M23 4v4a2 2 0 000-4z" fill="#9CA3AF" fill-opacity="0.4"/></svg>
+        </div>
+      </div>
+      <div class="screen" style="background:#0C0C10;">
+        <div class="nav-bar">
+          <div class="nav-back"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></div>
+          <div class="nav-title">
+            <div class="nav-title-main">ツキマシテハ</div>
+            <div class="nav-title-sub">Mrs. GREEN APPLE · 120 BPM</div>
+          </div>
+          <div class="nav-action"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg></div>
+        </div>
+
+        <div class="lyrics-area">
+          <div class="line-prev">見えない未来に手を伸ばして</div>
+          <div class="line-current-wrap">
+            <div class="line-furigana" style="font-family:'Noto Sans JP',sans-serif;color:#4B5563;">
+              <ruby>言葉<rt>ことば</rt></ruby>にならない<ruby>想<rt>おも</rt></ruby>いが
+            </div>
+            <div class="line-current">言葉にならない想いが</div>
+            <div class="ann-bar">
+              <span class="ann-chip" style="background:#1E3A6E;color:#93C5FD;">breath ↗</span>
+              <span class="ann-chip" style="background:#3B2A00;color:#FCD34D;">soften</span>
+            </div>
+            <div class="line-translation">Words that can't be put into words</div>
+          </div>
+          <div class="line-next">溢れてあふれて止まらなくて</div>
+          <div class="line-meta" style="margin-top:12px;">
+            <span class="meta-chip">
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              0:32 — 0:36
+            </span>
+            <span class="meta-chip">Line 8 of 24</span>
+            <span class="status-tag" style="background:#1E2D3D;color:#60A5FA;">Learning</span>
+          </div>
+        </div>
+
+        <div class="swipe-hint">
+          <div class="swipe-dot" style="background:#2D2D3A;"></div>
+          <div class="swipe-dot" style="background:#3B82F6;"></div>
+          <div class="swipe-dot" style="background:#2D2D3A;"></div>
+        </div>
+
+        <div class="waveform-strip" style="margin-top:8px;">
+          <div class="waveform-bars">
+            <div class="wbar" style="height:8px;"></div><div class="wbar" style="height:12px;"></div><div class="wbar" style="height:18px;"></div><div class="wbar" style="height:22px;"></div>
+            <div class="wbar active" style="height:28px;"></div><div class="wbar active" style="height:20px;"></div><div class="wbar active" style="height:32px;"></div><div class="wbar active" style="height:26px;"></div><div class="wbar active" style="height:30px;"></div><div class="wbar active" style="height:18px;"></div>
+            <div class="wbar" style="height:22px;"></div><div class="wbar" style="height:16px;"></div><div class="wbar" style="height:14px;"></div><div class="wbar" style="height:20px;"></div><div class="wbar" style="height:18px;"></div><div class="wbar" style="height:12px;"></div>
+          </div>
+        </div>
+
+        <div class="pitch-strip" style="margin:4px 16px 0;">
+          <svg class="pitch-line" viewBox="0 0 260 14" fill="none" preserveAspectRatio="none">
+            <path d="M0 12 C20 10, 40 4, 60 6 C80 8, 100 2, 130 5 C160 8, 190 3, 210 6 C230 9, 250 4, 260 6" stroke="#60A5FA" stroke-width="1.5" fill="none"/>
+          </svg>
+        </div>
+        <div class="timestamps" style="border:none;">
+          <span class="ts">0:32.4</span>
+          <span class="ts">0:36.1</span>
+        </div>
+
+        <div class="transport" style="background:#0C0C10;">
+          <button class="btn-transport btn-sm"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" stroke-width="2"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg></button>
+          <button class="btn-transport btn-md" style="background:#F9FAFB;color:#0C0C10;border:none;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+          </button>
+          <button class="btn-transport btn-lg btn-record"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="6" fill="white" stroke="none"/></svg></button>
+          <div class="backing-btn on"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 010 7.07"/></svg></div>
+          <button class="btn-transport btn-sm"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" stroke-width="2"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg></button>
+        </div>
+        <div class="hints" style="padding-bottom:14px;">
+          <span style="font-size:9px;color:#4B5563;">Tap lyric to preview · Double-tap to edit</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DARK: Recording -->
+  <div class="frame-group">
+    <div class="frame-label">Dark · Recording</div>
+    <div class="phone dark">
+      <div class="island" style="background:#3D0000;box-shadow:0 0 14px rgba(220,38,38,0.6);"></div>
+      <div class="status-bar">
+        <span class="status-time">9:41</span>
+        <div class="status-icons"><svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3.5" stroke="#9CA3AF" stroke-opacity="0.5"/><rect x="2" y="2" width="13" height="8" rx="2" fill="#E5E7EB"/><path d="M23 4v4a2 2 0 000-4z" fill="#9CA3AF" fill-opacity="0.4"/></svg></div>
+      </div>
+      <div class="screen" style="background:#0C0C10;">
+        <div class="nav-bar">
+          <div class="nav-back"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></div>
+          <div class="nav-title">
+            <div class="nav-title-main">ツキマシテハ</div>
+            <div class="nav-title-sub">Mrs. GREEN APPLE</div>
+          </div>
+          <div style="width:32px;"></div>
+        </div>
+
+        <div class="rec-bar" style="background:rgba(220,38,38,0.06);border-color:rgba(220,38,38,0.1);">
+          <div class="level-meter">
+            <div class="lbar on-g" style="height:5px;"></div>
+            <div class="lbar on-g" style="height:8px;"></div>
+            <div class="lbar on-g" style="height:12px;"></div>
+            <div class="lbar on-y" style="height:14px;"></div>
+            <div class="lbar on-r" style="height:14px;"></div>
+          </div>
+          <div class="rec-dot"></div>
+          <span class="rec-time">0:05.7</span>
+          <span class="rec-label">REC</span>
+        </div>
+
+        <div class="lyrics-area">
+          <div class="line-current-wrap">
+            <div class="line-current" style="color:#FCA5A5;font-size:28px;">言葉にならない想いが</div>
+            <div class="line-translation" style="color:#6B7280;">Words that can't be put into words</div>
+          </div>
+          <div style="margin-top:16px;width:100%;height:1px;background:linear-gradient(to right,transparent,rgba(220,38,38,0.3),transparent);"></div>
+          <div style="margin-top:12px;text-align:center;">
+            <div style="font-size:10px;color:#6B7280;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:6px;">Progress</div>
+            <div style="height:3px;background:#1A1A24;border-radius:2px;width:200px;margin:0 auto;">
+              <div style="height:100%;width:55%;background:linear-gradient(to right,#DC2626,#EF4444);border-radius:2px;"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="pitch-strip" style="margin:0 16px 4px;background:#16161E;">
+          <svg class="pitch-line" viewBox="0 0 260 14" fill="none" preserveAspectRatio="none">
+            <path d="M0 10 C20 8, 40 5, 70 7 C90 9, 120 4, 143 6" stroke="#F87171" stroke-width="1.5" fill="none"/>
+            <line x1="143" y1="0" x2="143" y2="14" stroke="#DC2626" stroke-width="1" stroke-dasharray="2,2"/>
+          </svg>
+        </div>
+        <div class="timestamps" style="border:none;"><span class="ts" style="color:#4B5563;">0:32.4</span><span class="ts" style="color:#4B5563;">0:36.1</span></div>
+
+        <div class="transport" style="background:#0C0C10;border-color:#1A1A24;">
+          <button class="btn-transport btn-sm" style="opacity:0.3;" disabled><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" stroke-width="2"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg></button>
+          <button class="btn-transport btn-md" style="background:#F9FAFB;color:#0C0C10;border:none;opacity:0.5;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+          </button>
+          <button class="btn-transport btn-lg btn-record" style="box-shadow:0 0 0 5px rgba(220,38,38,0.2),0 0 0 9px rgba(220,38,38,0.08);">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+          </button>
+          <div class="backing-btn on"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 010 7.07"/></svg></div>
+          <button class="btn-transport btn-sm" style="opacity:0.3;" disabled><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" stroke-width="2"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg></button>
+        </div>
+        <div class="hints" style="padding-bottom:14px;">
+          <span style="font-size:9px;color:#7F1D1D;">Tap stop button to end recording</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════════════ DESIGN NOTES ═══════════════════════════════════ -->
+<div style="max-width:1120px;margin:0 auto 16px;padding:0 24px;">
+  <div class="section-label">Design Decisions</div>
+</div>
+
+<div class="notes-section">
+  <div class="notes-title">Mobile Adaptation Notes</div>
+  <div class="notes-grid">
+    <div class="note-item">
+      <div class="note-key">Navigation</div>
+      <div class="note-val">Back button → song detail. Ellipsis (···) → settings menu (speed, loop, pitch analysis). Section indicator in header when in section mode.</div>
+    </div>
+    <div class="note-item">
+      <div class="note-key">Lyrics Display</div>
+      <div class="note-val">Prev/current/next shown vertically. Furigana above main text. Translations below. Tap = preview, double-tap = edit. Swipe L/R = prev/next line.</div>
+    </div>
+    <div class="note-item">
+      <div class="note-key">Touch Targets</div>
+      <div class="note-val">All transport buttons ≥ 44×44pt. Record button is 60×60pt (primary action). Feedback buttons span full width for easy reach.</div>
+    </div>
+    <div class="note-item">
+      <div class="note-key">Recording State</div>
+      <div class="note-val">Dynamic Island glows red. Red level meter in top bar. Active lyric turns red. Prev/next lines fade out. Progress bar shows playback position. Nav buttons disabled.</div>
+    </div>
+    <div class="note-item">
+      <div class="note-key">Countdown Overlay</div>
+      <div class="note-val">Dim overlay covers full screen. Beat number large-centered. Beat dots show progression. Cancel button available. Record button turns amber with beat count.</div>
+    </div>
+    <div class="note-item">
+      <div class="note-key">Feedback Panel</div>
+      <div class="note-val">Slides up from bottom after recording stops. "How'd that go?" with 3 actions: Listen (plays back with gain), Retry (delete & re-record), Next (accept & advance).</div>
+    </div>
+    <div class="note-item">
+      <div class="note-key">Section Mode</div>
+      <div class="note-val">Section badge in header. All section lines displayed vertically with active line large. Section record button in transport. Translation shown for each line.</div>
+    </div>
+    <div class="note-item">
+      <div class="note-key">Edit Mode</div>
+      <div class="note-val">Full-screen modal. Text input with keyboard. Live preview with tap-to-highlight. Special symbol row (♪ ↗ ↘ 息). Highlight palette at bottom. Done saves + dismisses.</div>
+    </div>
+    <div class="note-item">
+      <div class="note-key">Dark Mode</div>
+      <div class="note-val">Background #0C0C10 (near-black). Borders #1A1A24. Text #F9FAFB → #6B7280 muted. Blue accents #3B82F6. Recording red carries through with reduced opacity glow.</div>
+    </div>
+    <div class="note-item">
+      <div class="note-key">Gestures (React Native)</div>
+      <div class="note-val">Swipe left/right on lyrics area → prev/next line. Long-press lyric → enter edit mode. Swipe down on edit modal → discard. Pull down on transport → show speed sheet.</div>
+    </div>
+  </div>
+</div>
+
+<!-- Footer -->
+<div style="text-align:center;padding:32px 0 0;color:var(--text-muted);font-size:11px;">
+  Reprise · Mobile Practice Center · Design v1.0 · 8 states across 2 themes
+</div>
+
+</body>
+</html>

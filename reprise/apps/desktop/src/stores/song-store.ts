@@ -447,14 +447,17 @@ export const useSongStore = create<SongStore>()((set, get) => ({
     // Everything else (primary language, language change, etc.) is a "primary save".
     const isTranslationSave = translationLang != null && language === translationLang;
 
-    // Optimistic: for primary saves keep only translation lines; for translation saves keep other-language lines
+    // Optimistic: for primary saves keep only translation lines; for translation saves keep
+    // everything EXCEPT lines of this translation language (null-language primary lines are preserved).
     set((s) => ({
       lines: {
         ...s.lines,
         [songId]: [
           ...(s.lines[songId] ?? []).filter((l) =>
             isTranslationSave
-              ? l.language != null && l.language !== language
+              // Keep all lines except the translation language being replaced
+              ? l.language !== language
+              // Keep only translation lines (primary lines are being replaced)
               : translationLang != null && l.language === translationLang
           ),
           ...lines,
@@ -465,20 +468,21 @@ export const useSongStore = create<SongStore>()((set, get) => ({
     // DB delete
     let delError: unknown;
     if (isTranslationSave) {
-      // Translation save: delete only lines matching this language (+ null-language legacy)
-      const orFilter = language
-        ? `language.eq.${language},language.is.null`
-        : `language.is.null`;
+      // Translation save: delete ONLY lines with this translation language.
+      // Never delete null-language lines — those are primary lyrics that were saved before
+      // language tagging was introduced.
       ({ error: delError } = await db
         .from("lines")
         .delete()
         .eq("song_id", songId)
-        .or(orFilter));
+        .eq("language", language));
     } else {
-      // Primary save: delete ALL lines except the translation language, so a language
-      // change (e.g. "ja" → "ja-Hira") never leaves stale lines behind.
+      // Primary save: delete all lines except translation lines.
+      // IMPORTANT: PostgreSQL != does not match NULL, so we explicitly include
+      // null-language (legacy) lines in the delete to avoid accumulating duplicates.
       const deleteQuery = translationLang
-        ? db.from("lines").delete().eq("song_id", songId).neq("language", translationLang)
+        ? db.from("lines").delete().eq("song_id", songId)
+            .or(`language.is.null,language.neq.${translationLang}`)
         : db.from("lines").delete().eq("song_id", songId);
       ({ error: delError } = await deleteQuery);
     }

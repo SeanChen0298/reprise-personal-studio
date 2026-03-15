@@ -98,3 +98,30 @@ export function IconDownload({ size = 20, color = "#5856D6" }: IconProps) {
     </Svg>
   );
 }
+
+export function IconCheck({ size = 20, color = "#16A34A" }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M20 6L9 17l-5-5" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
+export function IconCloud({ size = 20, color = "#8E8E93" }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M17.5 19H9a7 7 0 110-14 7 7 0 0114 0 5 5 0 01-5.5 14z" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
+export function IconMic({ size = 24, color = "#1C1C1E" }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Rect x="9" y="2" width="6" height="11" rx="3" stroke={color} strokeWidth="1.75" />
+      <Path d="M5 10a7 7 0 0014 0" stroke={color} strokeWidth="1.75" strokeLinecap="round" />
+      <Path d="M12 19v3" stroke={color} strokeWidth="1.75" strokeLinecap="round" />
+      <Path d="M8 22h8" stroke={color} strokeWidth="1.75" strokeLinecap="round" />
+    </Svg>
+  );
+}

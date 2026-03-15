@@ -48,27 +48,29 @@ interface Props {
   annotations?: Annotation[];
   fontSize?: number;
   color?: string;
+  bold?: boolean;
 }
 
-export function AnnotatedText({ text, annotations, fontSize = 18, color = "#e0e0ea" }: Props) {
+export function AnnotatedText({ text, annotations, fontSize = 18, color = "#1C1C1E", bold = false }: Props) {
   const segments = buildSegments(text, annotations);
+  const weight = bold ? "600" : "400";
 
   return (
-    <Text style={{ fontSize, color, lineHeight: fontSize * 1.5, textAlign: "center", flexWrap: "wrap" }}>
+    <Text style={{ fontSize, color, lineHeight: fontSize * 1.4, textAlign: "center", flexWrap: "wrap", fontFamily: "serif", fontWeight: weight }}>
       {segments.map((seg, i) => {
         const hl = seg.type ? HIGHLIGHT_COLORS[seg.type] : null;
         if (hl) {
           return (
             <Text
               key={i}
-              style={{ backgroundColor: hl.bg, color: hl.color, fontSize, borderRadius: 3 }}
+              style={{ backgroundColor: hl.bg, color: hl.color, fontSize, borderRadius: 3, fontFamily: "serif", fontWeight: weight }}
             >
               {seg.text}
             </Text>
           );
         }
         return (
-          <Text key={i} style={{ fontSize, color }}>
+          <Text key={i} style={{ fontSize, color, fontFamily: "serif", fontWeight: weight }}>
             {seg.text}
           </Text>
         );
