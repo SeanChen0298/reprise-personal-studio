@@ -24,11 +24,15 @@ interface PreferencesState {
   countInEnabled: boolean;
   recordingPlaybackGain: number;
   autoSyncDrive: boolean;
+  autoDemucs: boolean;
+  autoPitch: boolean;
   setTheme: (v: string) => void;
   setShowWaveform: (v: boolean) => void;
   setCountInEnabled: (v: boolean) => void;
   setRecordingPlaybackGain: (v: number) => void;
   setAutoSyncDrive: (v: boolean) => void;
+  setAutoDemucs: (v: boolean) => void;
+  setAutoPitch: (v: boolean) => void;
 }
 
 export const usePreferencesStore = create<PreferencesState>()(
@@ -39,6 +43,8 @@ export const usePreferencesStore = create<PreferencesState>()(
       countInEnabled: true,
       recordingPlaybackGain: 8.0,
       autoSyncDrive: false,
+      autoDemucs: false,
+      autoPitch: false,
       setTheme: (v) => {
         applyThemeCssVars(v);
         set({ theme: v });
@@ -47,6 +53,8 @@ export const usePreferencesStore = create<PreferencesState>()(
       setCountInEnabled: (v) => set({ countInEnabled: v }),
       setRecordingPlaybackGain: (v) => set({ recordingPlaybackGain: v }),
       setAutoSyncDrive: (v) => set({ autoSyncDrive: v }),
+      setAutoDemucs: (v) => set({ autoDemucs: v }),
+      setAutoPitch: (v) => set({ autoPitch: v }),
     }),
     {
       name: "reprise-preferences",

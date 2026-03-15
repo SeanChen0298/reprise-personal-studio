@@ -2,6 +2,8 @@ import { useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useAuthStore } from "./stores/auth-store";
 import { useAutoDriveSync } from "./hooks/use-auto-drive-sync";
+import { useTaskQueueProcessor } from "./hooks/use-task-queue-processor";
+import { useAutoProcess } from "./hooks/use-auto-process";
 import { ProtectedRoute } from "./components/protected-route";
 import { LandingPage } from "./pages/landing-page";
 import { LoginPage } from "./pages/login-page";
@@ -26,6 +28,8 @@ export function App() {
   }, [initialize]);
 
   useAutoDriveSync();
+  useTaskQueueProcessor();
+  useAutoProcess();
 
   return (
     <BrowserRouter>

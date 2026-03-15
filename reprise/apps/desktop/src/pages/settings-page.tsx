@@ -50,6 +50,10 @@ export function SettingsPage() {
   const setRecordingPlaybackGain = usePreferencesStore((s) => s.setRecordingPlaybackGain);
   const autoSyncDrive = usePreferencesStore((s) => s.autoSyncDrive);
   const setAutoSyncDrive = usePreferencesStore((s) => s.setAutoSyncDrive);
+  const autoDemucs = usePreferencesStore((s) => s.autoDemucs);
+  const setAutoDemucs = usePreferencesStore((s) => s.setAutoDemucs);
+  const autoPitch = usePreferencesStore((s) => s.autoPitch);
+  const setAutoPitch = usePreferencesStore((s) => s.setAutoPitch);
   const [confirmDelete, setConfirmDelete] = useState(true);
   const [autoSync, setAutoSync] = useState(true);
 
@@ -744,6 +748,24 @@ export function SettingsPage() {
                     "Auto-sync to cloud",
                     "Automatically sync progress and recordings to Supabase",
                     toggle(autoSync, setAutoSync),
+                    true,
+                  )}
+                </div>
+
+                {/* Audio processing */}
+                <div className="mb-7">
+                  {sectionHeader("Audio processing")}
+
+                  {settingRow(
+                    "Auto stem separation (Demucs)",
+                    "Automatically run Demucs on every downloaded song. Jobs are queued and processed one at a time.",
+                    toggle(autoDemucs, setAutoDemucs),
+                  )}
+
+                  {settingRow(
+                    "Auto pitch analysis (torchcrepe)",
+                    "Automatically run pitch analysis after stem separation completes. Queued with Demucs jobs.",
+                    toggle(autoPitch, setAutoPitch),
                     true,
                   )}
                 </div>

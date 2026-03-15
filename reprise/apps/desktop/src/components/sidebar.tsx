@@ -2,6 +2,7 @@ import { Link, useLocation } from "react-router-dom";
 import { useAuthStore } from "../stores/auth-store";
 import { useNavigate } from "react-router-dom";
 import { useDriveSyncStore } from "../stores/drive-sync-store";
+import { useTaskQueueStore } from "../stores/task-queue-store";
 
 export function Sidebar() {
   const location = useLocation();
@@ -9,6 +10,9 @@ export function Sidebar() {
   const user = useAuthStore((s) => s.user);
   const signOut = useAuthStore((s) => s.signOut);
   const syncingCount = useDriveSyncStore((s) => s.syncingIds.length);
+  const queueTasks = useTaskQueueStore((s) => s.tasks);
+  const runningTask = queueTasks.find((t) => t.status === "running");
+  const pendingCount = queueTasks.filter((t) => t.status === "pending").length;
 
   const initials = user?.email ? user.email.slice(0, 2).toUpperCase() : "??";
 
@@ -66,6 +70,40 @@ export function Sidebar() {
           </svg>
         )}
       </nav>
+
+      {/* Task queue panel */}
+      {queueTasks.length > 0 && (
+        <div className="px-[10px] py-2.5 border-t border-[var(--border-subtle)]">
+          <div className="flex items-start gap-[7px] px-[10px] py-[8px] rounded-[7px] bg-[var(--theme-light)]">
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="var(--theme-text)"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              className="flex-shrink-0 mt-[1px] animate-spin"
+              style={{ animationDuration: "1.4s" }}
+            >
+              <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+            </svg>
+            <div className="flex-1 min-w-0">
+              <div className="text-[12px] font-medium text-[var(--theme-text)] leading-snug">
+                {runningTask?.type === "stems" ? "Separating stems" : "Analyzing pitch"}
+              </div>
+              <div className="text-[11px] text-[var(--theme-text)] opacity-60 truncate">
+                {runningTask?.songTitle ?? queueTasks[0].songTitle}
+              </div>
+              {pendingCount > 0 && (
+                <div className="text-[10.5px] text-[var(--theme-text)] opacity-50 mt-[3px]">
+                  +{pendingCount} more in queue
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Footer */}
       <div className="px-[10px] py-3 border-t border-[var(--border-subtle)]">

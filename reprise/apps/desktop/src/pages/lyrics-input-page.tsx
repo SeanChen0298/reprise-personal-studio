@@ -65,7 +65,8 @@ export function LyricsInputPage() {
   const [editLines, setEditLines] = useState<{ id: string; text: string; start_ms?: number; end_ms?: number }[]>([]);
   const [bulkText, setBulkText] = useState("");
   const [pendingTranslationPairs, setPendingTranslationPairs] = useState<TranslationPair[]>([]);
-  const [saved, setSaved] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   // Section management state
   const [selectedRange, setSelectedRange] = useState<[number, number] | null>(null);
@@ -366,7 +367,7 @@ export function LyricsInputPage() {
     }
   }
 
-  function handleSave() {
+  async function handleSave() {
     const now = new Date().toISOString();
     const newLines: Line[] = editLines
       .filter((l) => l.text.trim())
@@ -388,66 +389,75 @@ export function LyricsInputPage() {
         };
       });
 
-    // Language-scoped save: preserves lines of other languages (e.g. translation),
-    // and replaces null-language legacy lines for backward compat.
-    setLinesForLanguage(id!, lyricsLang || null, newLines);
+    setSyncStatus("saving");
+    setSyncError(null);
 
-    // Persist the primary language on the song if it changed
-    if (lyricsLang && lyricsLang !== song!.language) {
-      updateSong(id!, { language: lyricsLang });
-    }
+    try {
+      // Language-scoped save: preserves lines of other languages (e.g. translation),
+      // and replaces null-language legacy lines for backward compat.
+      await setLinesForLanguage(id!, lyricsLang || null, newLines);
 
-    // Save pending translation pairs from bulk paste
-    if (pendingTranslationPairs.length > 0 && translationLang) {
-      const transLines: Line[] = pendingTranslationPairs.map((tp) => ({
-        id: crypto.randomUUID(),
-        song_id: id!,
-        text: tp.text,
-        language: translationLang,
-        order: tp.mainOrder,
-        status: "new" as const,
-        created_at: now,
-        updated_at: now,
-      }));
-      setLinesForLanguage(id!, translationLang, transLines);
-      updateSong(id!, { translation_language: translationLang });
-      setPendingTranslationPairs([]);
-    }
-
-    // Remap section boundaries to new line orders.
-    // Must use mainStoredLines (not storedLines) — translation lines share the same
-    // order values as main lines, so storedLines.find(order) could return a translation
-    // line whose ID is not in newOrderById, causing sections to be wrongly deleted.
-    const newOrderById = new Map<string, number>();
-    for (const nl of newLines) newOrderById.set(nl.id, nl.order);
-
-    for (const sec of sections) {
-      // Find the stored lines at section boundaries
-      const startLine = mainStoredLines.find((sl) => sl.order === sec.start_line_order);
-      const endLine = mainStoredLines.find((sl) => sl.order === sec.end_line_order);
-      if (!startLine || !endLine) {
-        removeSection(id!, sec.id);
-        continue;
+      // Persist the primary language on the song if it changed
+      if (lyricsLang && lyricsLang !== song!.language) {
+        await updateSong(id!, { language: lyricsLang });
       }
-      const newStart = newOrderById.get(startLine.id);
-      const newEnd = newOrderById.get(endLine.id);
-      if (newStart == null || newEnd == null) {
-        // Boundary line was deleted
-        removeSection(id!, sec.id);
-        continue;
-      }
-      if (newStart !== sec.start_line_order || newEnd !== sec.end_line_order) {
-        updateSection(id!, sec.id, { start_line_order: newStart, end_line_order: newEnd });
-      }
-    }
 
-    // Fire furigana generation AFTER section remapping so it never races with sections
-    if (lyricsLang?.startsWith("ja")) {
-      generateFuriganaForSong(id!).catch(() => {});
-    }
+      // Save pending translation pairs from bulk paste
+      if (pendingTranslationPairs.length > 0 && translationLang) {
+        const transLines: Line[] = pendingTranslationPairs.map((tp) => ({
+          id: crypto.randomUUID(),
+          song_id: id!,
+          text: tp.text,
+          language: translationLang,
+          order: tp.mainOrder,
+          status: "new" as const,
+          created_at: now,
+          updated_at: now,
+        }));
+        await setLinesForLanguage(id!, translationLang, transLines);
+        await updateSong(id!, { translation_language: translationLang });
+        setPendingTranslationPairs([]);
+      }
 
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2500);
+      // Remap section boundaries to new line orders.
+      // Must use mainStoredLines (not storedLines) — translation lines share the same
+      // order values as main lines, so storedLines.find(order) could return a translation
+      // line whose ID is not in newOrderById, causing sections to be wrongly deleted.
+      const newOrderById = new Map<string, number>();
+      for (const nl of newLines) newOrderById.set(nl.id, nl.order);
+
+      for (const sec of sections) {
+        // Find the stored lines at section boundaries
+        const startLine = mainStoredLines.find((sl) => sl.order === sec.start_line_order);
+        const endLine = mainStoredLines.find((sl) => sl.order === sec.end_line_order);
+        if (!startLine || !endLine) {
+          removeSection(id!, sec.id);
+          continue;
+        }
+        const newStart = newOrderById.get(startLine.id);
+        const newEnd = newOrderById.get(endLine.id);
+        if (newStart == null || newEnd == null) {
+          // Boundary line was deleted
+          removeSection(id!, sec.id);
+          continue;
+        }
+        if (newStart !== sec.start_line_order || newEnd !== sec.end_line_order) {
+          updateSection(id!, sec.id, { start_line_order: newStart, end_line_order: newEnd });
+        }
+      }
+
+      // Fire furigana generation AFTER section remapping so it never races with sections
+      if (lyricsLang?.startsWith("ja")) {
+        generateFuriganaForSong(id!).catch(() => {});
+      }
+
+      setSyncStatus("saved");
+      setTimeout(() => setSyncStatus("idle"), 3000);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to save lyrics";
+      setSyncError(msg);
+      setSyncStatus("error");
+    }
   }
 
   return (
@@ -472,9 +482,34 @@ export function LyricsInputPage() {
             </span>
           </div>
           <div className="flex items-center gap-2">
+            {syncStatus === "saving" && (
+              <span className="flex items-center gap-[5px] text-[12px] text-[var(--text-muted)]">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="animate-spin" style={{ animationDuration: "1.2s" }}>
+                  <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                </svg>
+                Saving…
+              </span>
+            )}
+            {syncStatus === "saved" && (
+              <span className="flex items-center gap-[5px] text-[12px] text-[#16A34A]">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                Synced to DB
+              </span>
+            )}
+            {syncStatus === "error" && (
+              <span className="flex items-center gap-[5px] text-[12px] text-red-500" title={syncError ?? undefined}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+                Save failed
+              </span>
+            )}
             <button
               onClick={handleSave}
-              className="flex items-center gap-[5px] px-[18px] py-[7px] rounded-[7px] bg-[var(--accent)] text-white text-[13px] font-medium hover:opacity-80 transition-opacity"
+              disabled={syncStatus === "saving"}
+              className="flex items-center gap-[5px] px-[18px] py-[7px] rounded-[7px] bg-[var(--accent)] text-white text-[13px] font-medium hover:opacity-80 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <polyline points="20 6 9 17 4 12" />
@@ -980,13 +1015,13 @@ export function LyricsInputPage() {
         {song.audio_path && <AudioPlayer audioPath={song.audio_path} />}
       </div>
 
-      {/* Save toast */}
-      {saved && (
-        <div className="fixed bottom-7 left-1/2 -translate-x-1/2 bg-[var(--accent)] text-white px-5 py-[10px] rounded-[9px] text-[13px] font-medium flex items-center gap-2 shadow-xl animate-fade-up z-50">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <polyline points="20 6 9 17 4 12" />
+      {/* Save error toast */}
+      {syncStatus === "error" && syncError && (
+        <div className="fixed bottom-7 left-1/2 -translate-x-1/2 bg-red-600 text-white px-5 py-[10px] rounded-[9px] text-[13px] font-medium flex items-center gap-2 shadow-xl animate-fade-up z-50 max-w-[480px]">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="flex-shrink-0">
+            <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
           </svg>
-          Lyrics saved!
+          <span className="truncate">Lyrics not saved: {syncError}</span>
         </div>
       )}
     </div>

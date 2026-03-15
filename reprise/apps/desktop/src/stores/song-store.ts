@@ -358,8 +358,6 @@ export const useSongStore = create<SongStore>()((set, get) => ({
         vocals_path: result.vocalsPath,
         instrumental_path: result.instrumentalPath,
       });
-
-      get().analyzeSongPitch(id);
     } catch (err) {
       await get().updateSong(id, {
         stem_status: "error",

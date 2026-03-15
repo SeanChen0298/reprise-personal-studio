@@ -13,6 +13,7 @@ import {
   uploadFileResumable,
   type DriveUploadProgress,
 } from "../lib/google-drive";
+import { useTaskQueueStore } from "../stores/task-queue-store";
 import { buildDriveFolderName } from "../lib/audio-download";
 import { readFile } from "@tauri-apps/plugin-fs";
 
@@ -21,9 +22,10 @@ export function SongSetupPage() {
   const navigate = useNavigate();
   const song = useSongStore((s) => s.songs.find((s) => s.id === id));
   const downloadSongAudio = useSongStore((s) => s.downloadSongAudio);
-  const separateSongStems = useSongStore((s) => s.separateSongStems);
-  const analyzeSongPitch = useSongStore((s) => s.analyzeSongPitch);
   const markStaleAnalysesAsFailed = useSongStore((s) => s.markStaleAnalysesAsFailed);
+
+  const enqueue = useTaskQueueStore((s) => s.enqueue);
+  const queueTasks = useTaskQueueStore((s) => s.tasks);
 
   useEffect(() => {
     markStaleAnalysesAsFailed();
@@ -49,6 +51,14 @@ export function SongSetupPage() {
   const pitchDone = pitchStatus === "done";
   const pitchProcessing = pitchStatus === "processing";
   const pitchError = pitchStatus === "error";
+
+  // ── Task queue state ────────────────────────────────────────────────────────
+  const stemQueued = queueTasks.some(
+    (t) => t.songId === song.id && t.type === "stems"
+  );
+  const pitchQueued = queueTasks.some(
+    (t) => t.songId === song.id && t.type === "pitch"
+  );
 
   // ── Google Drive sync state ─────────────────────────────────────────────────
   const updateSong = useSongStore((s) => s.updateSong);
@@ -423,7 +433,8 @@ export function SongSetupPage() {
 
                   {/* Re-separate button */}
                   <button
-                    onClick={() => separateSongStems(song.id)}
+                    onClick={() => enqueue(song.id, song.title, "stems")}
+                    disabled={stemQueued || stemsProcessing}
                     className="mt-1 self-start px-3 py-[5px] rounded-[6px] border-[1.5px] border-[var(--border)] bg-transparent text-[12px] font-medium text-[var(--text-secondary)] hover:border-[#888] hover:text-[var(--text-primary)] transition-all flex items-center gap-1"
                   >
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -454,15 +465,15 @@ export function SongSetupPage() {
                       </div>
                     </div>
                     <button
-                      onClick={() => separateSongStems(song.id)}
-                      disabled={!isDownloaded}
+                      onClick={() => enqueue(song.id, song.title, "stems")}
+                      disabled={!isDownloaded || stemQueued || stemsProcessing}
                       className="px-3 py-[5px] rounded-[6px] bg-[var(--accent)] text-white border-[1.5px] border-[var(--accent)] text-[12px] font-medium hover:opacity-85 transition-opacity flex items-center gap-1 disabled:opacity-50 flex-shrink-0"
                     >
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <circle cx="12" cy="12" r="10" />
                         <line x1="8" y1="12" x2="16" y2="12" />
                       </svg>
-                      {stemsError ? "Retry" : "Separate"}
+                      {stemQueued ? "Queued" : stemsError ? "Retry" : "Separate"}
                     </button>
                   </div>
                 </div>
@@ -512,14 +523,15 @@ export function SongSetupPage() {
                       </div>
                     </div>
                     <button
-                      onClick={() => analyzeSongPitch(song.id)}
-                      className="mt-1 self-start px-3 py-[5px] rounded-[6px] border-[1.5px] border-[var(--border)] bg-transparent text-[12px] font-medium text-[var(--text-secondary)] hover:border-[#888] hover:text-[var(--text-primary)] transition-all flex items-center gap-1"
+                      onClick={() => enqueue(song.id, song.title, "pitch")}
+                      disabled={pitchQueued || pitchProcessing}
+                      className="mt-1 self-start px-3 py-[5px] rounded-[6px] border-[1.5px] border-[var(--border)] bg-transparent text-[12px] font-medium text-[var(--text-secondary)] hover:border-[#888] hover:text-[var(--text-primary)] transition-all flex items-center gap-1 disabled:opacity-50"
                     >
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <polyline points="23 4 23 10 17 10" />
                         <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
                       </svg>
-                      Re-analyze
+                      {pitchQueued ? "Queued" : "Re-analyze"}
                     </button>
                   </div>
                 ) : (
@@ -540,13 +552,14 @@ export function SongSetupPage() {
                       </div>
                     </div>
                     <button
-                      onClick={() => analyzeSongPitch(song.id)}
-                      className="px-3 py-[5px] rounded-[6px] bg-[var(--accent)] text-white border-[1.5px] border-[var(--accent)] text-[12px] font-medium hover:opacity-85 transition-opacity flex items-center gap-1 flex-shrink-0"
+                      onClick={() => enqueue(song.id, song.title, "pitch")}
+                      disabled={pitchQueued || pitchProcessing}
+                      className="px-3 py-[5px] rounded-[6px] bg-[var(--accent)] text-white border-[1.5px] border-[var(--accent)] text-[12px] font-medium hover:opacity-85 transition-opacity flex items-center gap-1 flex-shrink-0 disabled:opacity-50"
                     >
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
                       </svg>
-                      {pitchError ? "Retry" : "Analyze"}
+                      {pitchQueued ? "Queued" : pitchError ? "Retry" : "Analyze"}
                     </button>
                   </div>
                 )}
