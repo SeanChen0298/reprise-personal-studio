@@ -6,7 +6,7 @@
  * Tappable overall progress bar.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -110,6 +110,10 @@ function PlayPauseButton({
   const pauseOpacity = useSharedValue(isPlaying ? 1 : 0);
   const playOpacity  = useSharedValue(isPlaying ? 0 : 1);
 
+  const wasEverReady = useRef(false);
+  if (audioReady) wasEverReady.current = true;
+  const showSpinner = !audioReady && !wasEverReady.current;
+
   useEffect(() => {
     pauseOpacity.value = withTiming(isPlaying ? 1 : 0, { duration: 120, easing: Easing.inOut(Easing.ease) });
     playOpacity.value  = withTiming(isPlaying ? 0 : 1, { duration: 120, easing: Easing.inOut(Easing.ease) });
@@ -140,7 +144,7 @@ function PlayPauseButton({
         ]}
         android_ripple={{ color: "rgba(255,255,255,0.15)", borderless: false }}
       >
-        {!audioReady ? (
+        {showSpinner ? (
           <ActivityIndicator size="small" color={C.theme} />
         ) : (
           <View style={{ width: 26, height: 26, alignItems: "center", justifyContent: "center" }}>
@@ -269,7 +273,7 @@ export function TransportControls({
   const overallProgress = durationMs > 0 ? positionMs / durationMs : 0;
 
   return (
-    <View style={[styles.container, { backgroundColor: C.surface, borderTopColor: C.border }]}>
+    <View style={[styles.container, { backgroundColor: C.surface }]}>
 
       {/* Overall progress (tappable) */}
       <View style={styles.overallRow}>
@@ -350,7 +354,6 @@ const styles = StyleSheet.create({
     paddingTop: 6,
     paddingBottom: 36,
     gap: 8,
-    borderTopWidth: 0.5,
   },
   overallRow: {
     flexDirection: "row",

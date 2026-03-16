@@ -681,8 +681,7 @@ export function PracticeCenter({
           <div className="flex flex-col gap-[6px]">
             {sectionLines.map((line) => {
               const isActive = line.id === currentLine?.id;
-              const lineDisplay = line.custom_text ?? line.text;
-              const lineIdx = lines.findIndex((l) => l.id === line.id);
+const lineIdx = lines.findIndex((l) => l.id === line.id);
 
               if (isActive && editMode) {
                 return (
@@ -737,25 +736,16 @@ export function PracticeCenter({
                     onDoubleClick={isActive ? (e) => { e.stopPropagation(); enterEditMode(); } : undefined}
                     title={isActive ? "Click to preview · Double-click to edit" : "Click to preview this line"}
                   >
-                    {!line.custom_text && line.furigana_html ? (
-                      <>
-                        <span dangerouslySetInnerHTML={{ __html: line.furigana_html }} />
-                        {line.annotations && line.annotations.length > 0 && (
-                          <div className="mt-0.5 text-[0.6em]">
-                            <AnnotatedText
-                              text={lineDisplay}
-                              annotations={line.annotations}
-                              highlights={highlights}
-                            />
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <AnnotatedText
-                        text={lineDisplay}
-                        annotations={line.annotations}
-                        highlights={highlights}
-                      />
+                    <AnnotatedText
+                      text={line.custom_text ?? line.text}
+                      annotations={line.annotations}
+                      highlights={highlights}
+                      lineFuriganaHtml={line.custom_text ? line.custom_furigana_html : line.furigana_html}
+                    />
+                    {line.custom_text && (
+                      <div className="mt-0.5 text-[0.55em] text-[var(--text-muted)] opacity-55 leading-snug">
+                        {line.text}
+                      </div>
                     )}
                   </div>
                   {showTranslation && translationByOrder.has(line.order) && (
@@ -824,26 +814,19 @@ export function PracticeCenter({
           >
             <div className="font-serif text-[20px] tracking-[-0.3px] text-[var(--text-muted)] leading-relaxed">
               {prevLine ? (
-                !prevLine.custom_text && prevLine.furigana_html ? (
-                  <>
-                    <span dangerouslySetInnerHTML={{ __html: prevLine.furigana_html }} />
-                    {prevLine.annotations && prevLine.annotations.length > 0 && (
-                      <div className="mt-0.5 text-[0.6em]">
-                        <AnnotatedText
-                          text={prevLine.custom_text ?? prevLine.text}
-                          annotations={prevLine.annotations}
-                          highlights={highlights}
-                        />
-                      </div>
-                    )}
-                  </>
-                ) : (
+                <>
                   <AnnotatedText
                     text={prevLine.custom_text ?? prevLine.text}
                     annotations={prevLine.annotations}
                     highlights={highlights}
+                    lineFuriganaHtml={prevLine.custom_text ? prevLine.custom_furigana_html : prevLine.furigana_html}
                   />
-                )
+                  {prevLine.custom_text && (
+                    <div className="mt-0.5 text-[0.55em] text-[var(--text-muted)] opacity-55 leading-snug">
+                      {prevLine.text}
+                    </div>
+                  )}
+                </>
               ) : "\u00A0"}
             </div>
             {prevLine && showTranslation && translationByOrder.has(prevLine.order) && (
@@ -905,38 +888,24 @@ export function PracticeCenter({
             ) : (
               /* Normal lyrics display */
               <>
-                {hasCustomText && (
-                  <div className="text-[14px] text-[var(--text-muted)] mb-2 opacity-50">
-                    {currentLine.text}
-                  </div>
-                )}
                 <div
                   className="font-serif text-[32px] tracking-[-0.5px] leading-[1.35] text-[var(--text-primary)] max-w-[640px] cursor-pointer hover:text-[var(--theme)] transition-colors"
                   onClick={() => player.playLineOnce(activeLineIndex)}
                   onDoubleClick={(e) => { e.stopPropagation(); enterEditMode(); }}
                   title="Click to preview · Double-click to edit"
                 >
-                  {!hasCustomText && currentLine.furigana_html ? (
-                    <>
-                      <span dangerouslySetInnerHTML={{ __html: currentLine.furigana_html }} />
-                      {currentLine.annotations && currentLine.annotations.length > 0 && (
-                        <div className="mt-2 text-[0.6em]">
-                          <AnnotatedText
-                            text={displayText}
-                            annotations={currentLine.annotations}
-                            highlights={highlights}
-                          />
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <AnnotatedText
-                      text={displayText}
-                      annotations={currentLine.annotations}
-                      highlights={highlights}
-                    />
-                  )}
+                  <AnnotatedText
+                    text={displayText}
+                    annotations={currentLine.annotations}
+                    highlights={highlights}
+                    lineFuriganaHtml={hasCustomText ? currentLine.custom_furigana_html : currentLine.furigana_html}
+                  />
                 </div>
+                {hasCustomText && (
+                  <div className="text-[14px] text-[var(--text-muted)] mt-1.5 opacity-50">
+                    {currentLine.text}
+                  </div>
+                )}
                 {showTranslation && translationByOrder.has(currentLine.order) && (
                   <div className="text-[15px] text-[var(--text-muted)] font-sans leading-relaxed mt-2 opacity-70">
                     {translationByOrder.get(currentLine.order)}
@@ -1000,26 +969,19 @@ export function PracticeCenter({
           >
             <div className="font-serif text-[20px] tracking-[-0.3px] text-[var(--text-muted)] leading-relaxed">
               {nextLineData ? (
-                !nextLineData.custom_text && nextLineData.furigana_html ? (
-                  <>
-                    <span dangerouslySetInnerHTML={{ __html: nextLineData.furigana_html }} />
-                    {nextLineData.annotations && nextLineData.annotations.length > 0 && (
-                      <div className="mt-0.5 text-[0.6em]">
-                        <AnnotatedText
-                          text={nextLineData.custom_text ?? nextLineData.text}
-                          annotations={nextLineData.annotations}
-                          highlights={highlights}
-                        />
-                      </div>
-                    )}
-                  </>
-                ) : (
+                <>
                   <AnnotatedText
                     text={nextLineData.custom_text ?? nextLineData.text}
                     annotations={nextLineData.annotations}
                     highlights={highlights}
+                    lineFuriganaHtml={nextLineData.custom_text ? nextLineData.custom_furigana_html : nextLineData.furigana_html}
                   />
-                )
+                  {nextLineData.custom_text && (
+                    <div className="mt-0.5 text-[0.55em] text-[var(--text-muted)] opacity-55 leading-snug">
+                      {nextLineData.text}
+                    </div>
+                  )}
+                </>
               ) : "\u00A0"}
             </div>
             {nextLineData && showTranslation && translationByOrder.has(nextLineData.order) && (

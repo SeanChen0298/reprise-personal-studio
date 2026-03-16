@@ -1,25 +1,21 @@
 /**
  * LyricDisplay — circular-buffer carousel animation.
  *
- * 5 physical slots rotate through roles (prev-prev, prev, center, next, next-next).
- * physicalCenter (Reanimated shared value) tracks which slot is center.
+ * Gesture model (outer container claims ALL touches):
+ *  - Short tap (<350ms, <15px)  → tap the nearest slot (line seek)
+ *  - Double-tap (<300ms apart)  → onDoubleTap callback
+ *  - Vertical swipe (dy>40)     → next / prev line
+ *  - Hold (1 s) + drag ←→      → speed scrub (indicator shown on hold)
  *
- * On animation complete (worklet, UI thread):
- *   physicalCenter += dir   ← ATOMIC with
- *   scrollPos = 0           ← no JS thread involvement → zero race condition
- *
- * Only the recycled (invisible) slot's content updates via React state.
- * Visible slots never change content mid-animation → no flash.
+ * Slot animation:
+ *  physicalCenter (Reanimated SV) + scrollPos (Reanimated SV) drive all
+ *  position, scale, and opacity — no React state in the render path.
+ *  Only the invisible "recycled" slot's content updates via React state,
+ *  so visible content never changes mid-animation (no flash / snap).
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  View,
-  Text,
-  Pressable,
-  StyleSheet,
-  PanResponder,
-} from "react-native";
+import { View, Text, StyleSheet, PanResponder } from "react-native";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -36,15 +32,17 @@ import { STATUS_CONFIG, formatMs } from "../lib/line-status-config";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const LARGE_FONT  = 36;
-const SMALL_SCALE = 24 / 36;   // 0.667 — visual prev/next size
-const CENTER_FRAC = 0.36;
-const STEP_FRAC   = 0.20;
+const LARGE_FONT   = 36;
+const CENTER_FRAC  = 0.36;   // center slot's Y as fraction of container height
+const STEP_FRAC    = 0.20;   // step between slots
+const HOLD_MS      = 1000;   // hold before speed-drag activates
+const DOUBLE_MS    = 300;    // max gap for double-tap
+const MIN_SWIPE    = 40;     // min dy to register a swipe
+const PX_PER_STEP  = 28;     // px of horizontal drag per speed step
+const SPEED_STEPS  = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0];
 
 // ─── Worklet helpers ──────────────────────────────────────────────────────────
 
-// Compute circular offset for physical slot s, given physicalCenter PC
-// All values are 0–4; arithmetic keeps numerator positive so JS % works.
 function circularOffset(s: number, PC: number): number {
   "worklet";
   return ((s - PC + 2 + 5) % 5) - 2;
@@ -63,41 +61,6 @@ function slotAnimStyle(eo: number, h: number) {
   };
 }
 
-// ─── Furigana / ruby renderer ────────────────────────────────────────────────
-
-interface RubySegment { base: string; rt?: string }
-
-function parseRubyHtml(html: string): RubySegment[] {
-  const cleaned = html.replace(/<rp>[^<]*<\/rp>/g, "");
-  const segments: RubySegment[] = [];
-  const re = /<ruby>(.*?)<rt>(.*?)<\/rt><\/ruby>/g;
-  let last = 0, m: RegExpExecArray | null;
-  while ((m = re.exec(cleaned)) !== null) {
-    if (m.index > last) segments.push({ base: cleaned.slice(last, m.index) });
-    segments.push({ base: m[1], rt: m[2] });
-    last = m.index + m[0].length;
-  }
-  if (last < cleaned.length) segments.push({ base: cleaned.slice(last) });
-  return segments;
-}
-
-function RubyText({ html, color }: { html: string; color: string }) {
-  const segs = parseRubyHtml(html);
-  return (
-    <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "flex-end", justifyContent: "center" }}>
-      {segs.map((seg, i) =>
-        seg.rt ? (
-          <View key={i} style={{ alignItems: "center" }}>
-            <Text style={{ fontSize: LARGE_FONT * 0.36, color, opacity: 0.55, fontFamily: "serif" }}>{seg.rt}</Text>
-            <Text style={{ fontSize: LARGE_FONT, color, fontFamily: "serif", fontWeight: "700" }}>{seg.base}</Text>
-          </View>
-        ) : (
-          <Text key={i} style={{ fontSize: LARGE_FONT, color, fontFamily: "serif", fontWeight: "700" }}>{seg.base}</Text>
-        )
-      )}
-    </View>
-  );
-}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -108,9 +71,13 @@ export interface LyricDisplayProps {
   translationByOrder: Map<number, string>;
   highlights: HighlightType[];
   C: ThemeColors;
+  speed?: number;
   onTapLine: (idx: number) => void;
+  onDoubleTap?: () => void;
+  onSwipeLeft?: () => void;
   onNext?: () => void;
   onPrev?: () => void;
+  onSpeedChange?: (s: number) => void;
 }
 
 // ─── LyricDisplay ────────────────────────────────────────────────────────────
@@ -122,44 +89,169 @@ export function LyricDisplay({
   translationByOrder,
   highlights,
   C,
+  speed = 1.0,
   onTapLine,
+  onDoubleTap,
+  onSwipeLeft,
   onNext,
   onPrev,
+  onSpeedChange,
 }: LyricDisplayProps) {
-  // slotLines[s] = the line rendered in physical slot s (0–4)
-  // Initially: slots 0–4 show lines at offsets -2,-1,0,+1,+2 from currentIndex
   const [slotLines, setSlotLines] = useState<(Line | null)[]>(() =>
     [-2, -1, 0, 1, 2].map(o => lines[currentIndex + o] ?? null)
   );
-  // physicalCenterState mirrors physicalCenter.value for React rendering
   const [physicalCenterState, setPhysicalCenterState] = useState(2);
-  // committedIndex: index of the line currently in the center slot (for meta + tap)
   const [committedIndex, setCommittedIndex] = useState(currentIndex);
+  const [speedDragActive, setSpeedDragActive] = useState(false);
 
-  const committedIndexRef = useRef(currentIndex);
-  const isAnimatingRef    = useRef(false);
+  const committedIndexRef  = useRef(currentIndex);
+  const isAnimatingRef     = useRef(false);
+  const containerHRef      = useRef(480);
+  // Touch tracking
+  const touchStartTimeRef  = useRef(0);
+  const lastTapTimeRef     = useRef(0);
+  const holdTimerRef       = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Speed drag state (all on JS thread)
+  const speedDragActiveRef = useRef(false);
+  const dragBaseSpeedRef   = useRef(speed);
+  const dragBaseXRef       = useRef(0);
+  const gestureConsumedRef = useRef(false); // true once swipe/hold triggers
 
-  // Reanimated shared values (UI thread)
-  const scrollPos     = useSharedValue(0);
+  // Live-updatable refs for PanResponder callbacks (avoids stale closure)
+  const cbRef = useRef({ onNext, onPrev, onSpeedChange, onDoubleTap, onSwipeLeft, onTapLine, speed, committedIndex });
+  cbRef.current = { onNext, onPrev, onSpeedChange, onDoubleTap, onSwipeLeft, onTapLine, speed, committedIndex };
+
+  // Reanimated shared values
+  const scrollPos      = useSharedValue(0);
   const physicalCenter = useSharedValue(2);
-  const containerH    = useSharedValue(480);
+  const containerH     = useSharedValue(480);
 
-  // ── Swipe gesture ──────────────────────────────────────────────────────────
+  // ── Tap-zone helper (JS thread) ────────────────────────────────────────────
+  // Determine which logical slot (center / prev / next) a touch Y coordinate hits.
+  const resolveSlot = (locationY: number) => {
+    const h = containerHRef.current;
+    const centerY = h * CENTER_FRAC;
+    const prevY   = centerY - h * STEP_FRAC;
+    const nextY   = centerY + h * STEP_FRAC;
+    const distC = Math.abs(locationY - centerY);
+    const distP = Math.abs(locationY - prevY);
+    const distN = Math.abs(locationY - nextY);
+    if (distC <= distP && distC <= distN) return "center";
+    if (distP <= distN) return "prev";
+    return "next";
+  };
+
+  // ── Gesture ────────────────────────────────────────────────────────────────
+  const clearHold = () => {
+    if (holdTimerRef.current) {
+      clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+  };
+
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_, g) =>
-        Math.abs(g.dy) > 10 && Math.abs(g.dy) > Math.abs(g.dx) * 1.5,
-      onPanResponderRelease: (_, g) => {
-        if (g.dy < -40) onNext?.();
-        else if (g.dy > 40) onPrev?.();
+      // Claim ALL touches so gestures work anywhere in the display area
+      onStartShouldSetPanResponder: () => true,
+
+      onPanResponderGrant: (e) => {
+        touchStartTimeRef.current = Date.now();
+        dragBaseXRef.current = e.nativeEvent.pageX;
+        gestureConsumedRef.current = false;
+        speedDragActiveRef.current = false;
+
+        // After HOLD_MS: show speed indicator (before any drag movement)
+        holdTimerRef.current = setTimeout(() => {
+          holdTimerRef.current = null;
+          speedDragActiveRef.current = true;
+          dragBaseSpeedRef.current = cbRef.current.speed;
+          setSpeedDragActive(true);
+        }, HOLD_MS);
+      },
+
+      onPanResponderMove: (e, g) => {
+        const dx = Math.abs(g.dx);
+        const dy = Math.abs(g.dy);
+
+        if (speedDragActiveRef.current) {
+          gestureConsumedRef.current = true;
+          const totalDx = e.nativeEvent.pageX - dragBaseXRef.current;
+          const steps   = Math.round(totalDx / PX_PER_STEP);
+          const baseIdx = SPEED_STEPS.indexOf(dragBaseSpeedRef.current);
+          const fromIdx = baseIdx >= 0 ? baseIdx : SPEED_STEPS.length - 1;
+          const newIdx  = Math.max(0, Math.min(SPEED_STEPS.length - 1, fromIdx + steps));
+          cbRef.current.onSpeedChange?.(SPEED_STEPS[newIdx]);
+          return;
+        }
+
+        // Cancel hold timer on any significant movement before it fires
+        if ((dx > 8 || dy > 8) && holdTimerRef.current) {
+          clearHold();
+        }
+      },
+
+      onPanResponderRelease: (e, g) => {
+        clearHold();
+
+        if (speedDragActiveRef.current) {
+          speedDragActiveRef.current = false;
+          setSpeedDragActive(false);
+          return;
+        }
+
+        if (gestureConsumedRef.current) return;
+
+        const elapsed = Date.now() - touchStartTimeRef.current;
+        const totalDx = Math.abs(g.dx);
+        const totalDy = Math.abs(g.dy);
+
+        // Horizontal swipe left → switch to list view
+        if (totalDx > MIN_SWIPE && totalDx > totalDy * 1.5 && g.dx < 0) {
+          cbRef.current.onSwipeLeft?.();
+          return;
+        }
+
+        // Vertical swipe → next / prev
+        if (totalDy > MIN_SWIPE && totalDy > totalDx * 1.2) {
+          if (g.dy < 0) cbRef.current.onNext?.();
+          else cbRef.current.onPrev?.();
+          return;
+        }
+
+        // Tap (short, minimal movement)
+        if (elapsed < 350 && totalDx < 15 && totalDy < 15) {
+          const slot = resolveSlot(e.nativeEvent.locationY);
+          const ci   = cbRef.current.committedIndex;
+
+          if (slot === "center") {
+            const now = Date.now();
+            if (now - lastTapTimeRef.current < DOUBLE_MS) {
+              lastTapTimeRef.current = 0;
+              cbRef.current.onDoubleTap?.();
+            } else {
+              lastTapTimeRef.current = now;
+              cbRef.current.onTapLine(ci);
+            }
+          } else if (slot === "prev") {
+            lastTapTimeRef.current = 0;
+            if (ci - 1 >= 0) cbRef.current.onTapLine(ci - 1);
+          } else {
+            lastTapTimeRef.current = 0;
+            if (ci + 1 < lines.length) cbRef.current.onTapLine(ci + 1);
+          }
+        }
+      },
+
+      onPanResponderTerminate: () => {
+        clearHold();
+        speedDragActiveRef.current = false;
+        setSpeedDragActive(false);
       },
     })
   ).current;
 
   // ── JS callbacks ───────────────────────────────────────────────────────────
 
-  // Called after animation: update the recycled (invisible) slot + bookkeeping
   const recycleSlot = useCallback((
     recycledSlotIdx: number,
     newLineIdx: number,
@@ -176,7 +268,6 @@ export function LyricDisplay({
     setPhysicalCenterState(newPhysCenter);
   }, [lines]);
 
-  // Called on animation cancel (rapid navigation)
   const snapToIndex = useCallback((target: number) => {
     isAnimatingRef.current = false;
     setSlotLines([-2, -1, 0, 1, 2].map(o => lines[target + o] ?? null));
@@ -184,7 +275,6 @@ export function LyricDisplay({
     setPhysicalCenterState(2);
   }, [lines]);
 
-  // Stable callback to clear isAnimatingRef from worklet via runOnJS
   const clearAnimating = useCallback(() => {
     isAnimatingRef.current = false;
   }, []);
@@ -193,12 +283,10 @@ export function LyricDisplay({
   useEffect(() => {
     const target = currentIndex;
     if (target === committedIndexRef.current) return;
-
     const prevIdx = committedIndexRef.current;
     committedIndexRef.current = target;
 
     if (isAnimatingRef.current) {
-      // Cancel in-flight animation, snap
       scrollPos.value = 0;
       physicalCenter.value = 2;
       snapToIndex(target);
@@ -208,85 +296,82 @@ export function LyricDisplay({
     const dir = target > prevIdx ? 1 : -1;
     isAnimatingRef.current = true;
 
-    // Pre-compute on JS thread — captured by value in the worklet closure,
-    // so the worklet never needs to read from a ref on the UI thread.
-    const newLineIdx      = target + (dir === 1 ? 2 : -2);
-    const capturedTarget  = target;
+    const newLineIdx     = target + (dir === 1 ? 2 : -2);
+    const capturedTarget = target;
 
     scrollPos.value = withTiming(
       dir,
       { duration: 320, easing: Easing.out(Easing.cubic) },
       (finished) => {
         "worklet";
-        if (!finished) {
-          runOnJS(clearAnimating)();
-          return;
-        }
-
-        const P = physicalCenter.value;
-        // New center: the slot that was at offset +dir
-        const newPC        = (P + (dir === 1 ? 1 : 4)) % 5;
-        // Recycled slot: the slot leaving the visible range
-        const recycledSlot = dir === 1 ? (P + 3) % 5 : (P + 2) % 5;
-
-        // ── ATOMIC on UI thread (same worklet frame = same UI frame) ─────────
+        if (!finished) { runOnJS(clearAnimating)(); return; }
+        const P        = physicalCenter.value;
+        const newPC    = (P + (dir === 1 ? 1 : 4)) % 5;
+        const recycled = dir === 1 ? (P + 3) % 5 : (P + 2) % 5;
         physicalCenter.value = newPC;
         scrollPos.value      = 0;
-        // ────────────────────────────────────────────────────────────────────
-
-        // Async: update the invisible recycled slot + React bookkeeping
-        runOnJS(recycleSlot)(recycledSlot, newLineIdx, capturedTarget, newPC);
+        runOnJS(recycleSlot)(recycled, newLineIdx, capturedTarget, newPC);
       },
     );
   }, [currentIndex, recycleSlot, snapToIndex, clearAnimating]);
 
-  // ── Animated styles (one per physical slot) ───────────────────────────────
+  // ── Slot animated styles ───────────────────────────────────────────────────
   const anim0 = useAnimatedStyle(() => slotAnimStyle(circularOffset(0, physicalCenter.value) - scrollPos.value, containerH.value));
   const anim1 = useAnimatedStyle(() => slotAnimStyle(circularOffset(1, physicalCenter.value) - scrollPos.value, containerH.value));
   const anim2 = useAnimatedStyle(() => slotAnimStyle(circularOffset(2, physicalCenter.value) - scrollPos.value, containerH.value));
   const anim3 = useAnimatedStyle(() => slotAnimStyle(circularOffset(3, physicalCenter.value) - scrollPos.value, containerH.value));
   const anim4 = useAnimatedStyle(() => slotAnimStyle(circularOffset(4, physicalCenter.value) - scrollPos.value, containerH.value));
-
   const animStyles = [anim0, anim1, anim2, anim3, anim4];
 
-  // ── Slot role helpers ─────────────────────────────────────────────────────
-  const PC = physicalCenterState;
-  const prevSlot   = (PC + 4) % 5;  // offset -1
-  const nextSlot   = (PC + 1) % 5;  // offset +1
+  // Content opacity: smoothly dims non-center slots during animation (UI thread, no snap)
+  const cop0 = useAnimatedStyle(() => ({ opacity: interpolate(Math.abs(circularOffset(0, physicalCenter.value) - scrollPos.value), [0, 1], [1, 0.38], Extrapolation.CLAMP) }));
+  const cop1 = useAnimatedStyle(() => ({ opacity: interpolate(Math.abs(circularOffset(1, physicalCenter.value) - scrollPos.value), [0, 1], [1, 0.38], Extrapolation.CLAMP) }));
+  const cop2 = useAnimatedStyle(() => ({ opacity: interpolate(Math.abs(circularOffset(2, physicalCenter.value) - scrollPos.value), [0, 1], [1, 0.38], Extrapolation.CLAMP) }));
+  const cop3 = useAnimatedStyle(() => ({ opacity: interpolate(Math.abs(circularOffset(3, physicalCenter.value) - scrollPos.value), [0, 1], [1, 0.38], Extrapolation.CLAMP) }));
+  const cop4 = useAnimatedStyle(() => ({ opacity: interpolate(Math.abs(circularOffset(4, physicalCenter.value) - scrollPos.value), [0, 1], [1, 0.38], Extrapolation.CLAMP) }));
+  const copStyles = [cop0, cop1, cop2, cop3, cop4];
 
   // ── Line content renderer ─────────────────────────────────────────────────
-  const renderLine = (line: Line | null, isCenter: boolean) => {
+  const renderLine = (line: Line | null) => {
     if (!line) return null;
-    const text   = line.custom_text ?? line.text;
-    const color  = isCenter ? C.text : C.muted;
-    const weight = isCenter ? "700" : "500";
+    const color = C.text;
 
-    const hasAnnotations = Array.isArray(line.annotations) && line.annotations.length > 0;
-    if (hasAnnotations) {
+    if (line.custom_text) {
+      // Annotated lyric: show custom text + furigana (for custom text) + subtext (original)
       return (
-        <AnnotatedText
-          text={text}
-          annotations={line.annotations}
-          highlights={highlights}
-          fontSize={LARGE_FONT}
-          color={color}
-          bold={isCenter}
-        />
+        <View style={{ alignItems: "center" }}>
+          <AnnotatedText
+            text={line.custom_text}
+            annotations={line.annotations}
+            highlights={highlights}
+            fontSize={LARGE_FONT}
+            color={color}
+            bold
+            lineFuriganaHtml={line.custom_furigana_html}
+          />
+          <Text selectable={false} style={{ fontSize: Math.round(LARGE_FONT * 0.5), color, opacity: 0.4, fontFamily: "serif", marginTop: 4, textAlign: "center" }}>
+            {line.text}
+          </Text>
+        </View>
       );
     }
 
-    if (line.furigana_html) {
-      return <RubyText html={line.furigana_html} color={color} />;
-    }
-
+    // Original lyric: show text + furigana integrated via AnnotatedText
     return (
-      <Text style={{ fontSize: LARGE_FONT, color, lineHeight: LARGE_FONT * 1.35, textAlign: "center", fontWeight: weight, fontFamily: "serif" }}>
-        {text}
-      </Text>
+      <AnnotatedText
+        text={line.text}
+        annotations={line.annotations}
+        highlights={highlights}
+        fontSize={LARGE_FONT}
+        color={color}
+        bold
+        lineFuriganaHtml={line.furigana_html}
+      />
     );
   };
 
   // ── Meta row ──────────────────────────────────────────────────────────────
+  const PC          = physicalCenterState;
   const centerLine  = slotLines[PC] ?? null;
   const statusCfg   = centerLine ? STATUS_CONFIG[centerLine.status] : null;
   const hasTs       = centerLine?.start_ms !== undefined && centerLine?.end_ms !== undefined;
@@ -295,41 +380,39 @@ export function LyricDisplay({
   return (
     <View
       style={styles.container}
-      onLayout={(e) => { containerH.value = e.nativeEvent.layout.height; }}
+      onLayout={(e) => {
+        const h = e.nativeEvent.layout.height;
+        containerH.value = h;
+        containerHRef.current = h;
+      }}
       {...panResponder.panHandlers}
     >
-      {/* 5 physical slots rendered in z-order: hidden first, center last */}
-      {([0, 1, 2, 3, 4] as const).map(s => {
-        const isCenter = s === PC;
-        const isPrev   = s === prevSlot;
-        const isNext   = s === nextSlot;
-        const interactive = isCenter || isPrev || isNext;
-
-        return (
-          <Animated.View
-            key={s}
-            style={[styles.slot, animStyles[s], isCenter && { zIndex: 10 }]}
-            pointerEvents={interactive ? "auto" : "none"}
-          >
-            <Pressable
-              onPress={() => {
-                if (isCenter) { centerLine && onTapLine(committedIndex); }
-                else if (isPrev) { committedIndex - 1 >= 0 && onTapLine(committedIndex - 1); }
-                else if (isNext) { committedIndex + 1 < lines.length && onTapLine(committedIndex + 1); }
-              }}
-              style={styles.touch}
-              android_ripple={{ color: "rgba(0,0,0,0.04)" }}
-            >
-              {renderLine(slotLines[s], isCenter)}
-              {isCenter && showTranslation && centerLine && translationByOrder.has(centerLine.order) && (
-                <Text style={[styles.translation, { color: C.muted }]}>
-                  {translationByOrder.get(centerLine.order)}
-                </Text>
-              )}
-            </Pressable>
+      {/* 5 physical slots — pointerEvents none since outer container handles all input */}
+      {([0, 1, 2, 3, 4] as const).map(s => (
+        <Animated.View
+          key={s}
+          style={[styles.slot, animStyles[s], s === PC && { zIndex: 10 }]}
+          pointerEvents="none"
+        >
+          <Animated.View style={[styles.slotInner, copStyles[s]]}>
+            {renderLine(slotLines[s])}
+            {s === PC && showTranslation && centerLine && translationByOrder.has(centerLine.order) && (
+              <Text selectable={false} style={[styles.translation, { color: C.muted }]}>
+                {translationByOrder.get(centerLine.order)}
+              </Text>
+            )}
           </Animated.View>
-        );
-      })}
+        </Animated.View>
+      ))}
+
+      {/* Speed indicator — top-right, shown during hold+drag */}
+      {speedDragActive && (
+        <View style={styles.speedIndicator} pointerEvents="none">
+          <Text style={[styles.speedIndicatorText, { color: C.muted }]}>
+            {Math.round(speed * 100)}%
+          </Text>
+        </View>
+      )}
 
       {/* Meta row — fixed at bottom */}
       {lines.length > 0 && (
@@ -367,7 +450,7 @@ const styles = StyleSheet.create({
     top: 0,
     alignItems: "center",
   },
-  touch: {
+  slotInner: {
     alignItems: "center",
     width: "100%",
     paddingVertical: 4,
@@ -379,6 +462,22 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontStyle: "italic",
     lineHeight: 19,
+  },
+  speedIndicator: {
+    position: "absolute",
+    top: 10,
+    right: 14,
+    backgroundColor: "rgba(0,0,0,0.07)",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  speedIndicatorText: {
+    fontSize: 20,
+    fontWeight: "700",
+    fontVariant: ["tabular-nums"],
+    letterSpacing: 0.4,
+    opacity: 0.7,
   },
   metaRow: {
     position: "absolute",

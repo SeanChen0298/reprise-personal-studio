@@ -1,4 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import Animated, { useSharedValue, useAnimatedStyle, withTiming, Easing } from "react-native-reanimated";
+import { Dimensions } from "react-native";
+import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import { useShallow } from "zustand/react/shallow";
 import {
   View,
@@ -7,7 +10,6 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Pressable,
-  Modal,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
@@ -19,18 +21,13 @@ import { usePreferencesStore } from "../../src/stores/preferences-store";
 import { useLinePlayer } from "../../src/hooks/use-line-player";
 import { useTheme, isDark } from "../../src/lib/theme";
 import { LyricDisplay } from "../../src/components/lyric-display";
+import { LyricListView } from "../../src/components/lyric-list-view";
 import { TransportControls } from "../../src/components/transport-controls";
 import { IconChevronLeft } from "../../src/components/icons";
 
 type TrackMode = "audio" | "vocals" | "instr";
 
 const SPEED_STEPS = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0];
-
-const TRACK_LABELS: Record<TrackMode, string> = {
-  audio: "Full Audio",
-  vocals: "Vocals",
-  instr: "Instrumental",
-};
 
 export default function PracticeScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -44,8 +41,15 @@ export default function PracticeScreen() {
   const [allLines, setAllLines] = useState<Line[]>([]);
   const [loading, setLoading] = useState(true);
   const [trackMode, setTrackMode] = useState<TrackMode>("audio");
-  const [showTranslation, setShowTranslation] = useState(false);
-  const [showTrackMenu, setShowTrackMenu] = useState(false);
+  const [viewMode, setViewMode] = useState<"carousel" | "list">("carousel");
+
+  // Slide animation: 0 = carousel visible, -W = list visible
+  const panelW = useRef(Dimensions.get("window").width);
+  const slideX = useSharedValue(0);
+  const slideStyle = useAnimatedStyle(() => ({ transform: [{ translateX: slideX.value }] }));
+
+  const showList     = () => { slideX.value = withTiming(-panelW.current, { duration: 280, easing: Easing.out(Easing.cubic) }); setViewMode("list"); };
+  const showCarousel = () => { slideX.value = withTiming(0,               { duration: 280, easing: Easing.out(Easing.cubic) }); setViewMode("carousel"); };
 
   const localFiles = useSongFilesStore(useShallow((s) => s.getLocalFiles(id ?? "")));
   const hasVocals = !!localFiles.vocalsPath;
@@ -86,6 +90,42 @@ export default function PracticeScreen() {
     cycleMaxLoops, speed, setSpeed,
     togglePlay, goToLine, nextLine, prevLine, audioReady, audioError,
   } = player;
+
+  // ── Seamless track swap ────────────────────────────────────────────────────
+  // When trackMode changes, capture playback position so we can resume there
+  // after the new audio file loads.
+  const pendingSeekRef = useRef<{ lineIndex: number; wasPlaying: boolean } | null>(null);
+  const prevAudioReadyRef = useRef(false);
+
+  useEffect(() => {
+    // audioReady just flipped true → restore position from pending seek
+    if (audioReady && !prevAudioReadyRef.current && pendingSeekRef.current) {
+      const { lineIndex, wasPlaying } = pendingSeekRef.current;
+      pendingSeekRef.current = null;
+      void goToLine(lineIndex, wasPlaying);
+    }
+    prevAudioReadyRef.current = audioReady;
+  }, [audioReady, goToLine]);
+
+  const switchTrack = (newMode: TrackMode) => {
+    pendingSeekRef.current = { lineIndex: currentLineIndex, wasPlaying: isPlaying };
+    setTrackMode(newMode);
+  };
+
+  const cycleTrack = () => {
+    const cycle = (["audio", hasVocals && "vocals", hasInstr && "instr"] as const).filter(Boolean) as TrackMode[];
+    const next = cycle[(cycle.indexOf(trackMode) + 1) % cycle.length];
+    switchTrack(next);
+  };
+
+  // ── Keep screen awake during playback ─────────────────────────────────────
+  useEffect(() => {
+    if (isPlaying) {
+      void activateKeepAwakeAsync();
+    } else {
+      deactivateKeepAwake();
+    }
+  }, [isPlaying]);
 
   // ── Speed cycling ──────────────────────────────────────────────────────────
   const cycleSpeed = () => {
@@ -158,27 +198,10 @@ export default function PracticeScreen() {
           {/* Push right buttons to far right */}
           <View style={{ flex: 1 }} />
 
-          {/* Translation toggle */}
-          {translationByOrder.size > 0 && (
-            <Pressable
-              onPress={() => setShowTranslation((v) => !v)}
-              style={[
-                s.headerBtn,
-                {
-                  borderColor: showTranslation ? C.theme : C.border,
-                  backgroundColor: showTranslation ? (isDark(C) ? "#1E1E3F" : "#EEEEFF") : bg,
-                },
-              ]}
-              android_ripple={{ color: "rgba(0,0,0,0.06)" }}
-            >
-              <Text style={[s.headerBtnText, { color: showTranslation ? C.theme : C.muted }]}>TL</Text>
-            </Pressable>
-          )}
-
-          {/* Track selector trigger */}
+          {/* Track cycle button */}
           {hasAlternate && (
             <Pressable
-              onPress={() => setShowTrackMenu(true)}
+              onPress={cycleTrack}
               style={[
                 s.headerBtn,
                 {
@@ -194,46 +217,6 @@ export default function PracticeScreen() {
             </Pressable>
           )}
         </View>
-
-        {/* ── Track selector modal ── */}
-        <Modal
-          visible={showTrackMenu}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setShowTrackMenu(false)}
-        >
-          <Pressable style={s.modalOverlay} onPress={() => setShowTrackMenu(false)}>
-            <View style={[s.trackMenu, { backgroundColor: C.surface, borderColor: C.border }]}>
-              <Text style={[s.trackMenuTitle, { color: C.muted }]}>Audio Track</Text>
-              {(["audio", hasVocals && "vocals", hasInstr && "instr"] as const)
-                .filter(Boolean)
-                .map((mode) => {
-                  if (!mode) return null;
-                  const active = mode === trackMode;
-                  return (
-                    <Pressable
-                      key={mode}
-                      onPress={() => { setTrackMode(mode as TrackMode); setShowTrackMenu(false); }}
-                      style={[
-                        s.trackMenuItem,
-                        { backgroundColor: active ? (isDark(C) ? "#1E1E3F" : "#EEEEFF") : "transparent" },
-                      ]}
-                      android_ripple={{ color: "rgba(0,0,0,0.06)" }}
-                    >
-                      <Text style={[s.trackMenuItemText, { color: active ? C.theme : C.text }]}>
-                        {TRACK_LABELS[mode as TrackMode]}
-                      </Text>
-                      {active && (
-                        <View style={[s.trackMenuCheck, { backgroundColor: C.theme }]}>
-                          <Text style={{ color: "#fff", fontSize: 10, fontWeight: "700" }}>✓</Text>
-                        </View>
-                      )}
-                    </Pressable>
-                  );
-                })}
-            </View>
-          </Pressable>
-        </Modal>
 
         {/* ── No audio ── */}
         {!hasAudio && (
@@ -266,17 +249,52 @@ export default function PracticeScreen() {
                 <Text style={[s.errorText, { color: C.muted }]}>No lyrics added yet.</Text>
               </View>
             ) : (
-              <LyricDisplay
-                lines={primaryLines}
-                currentIndex={currentLineIndex}
-                showTranslation={showTranslation}
-                translationByOrder={translationByOrder}
-                highlights={highlights}
-                C={C}
-                onTapLine={(idx) => goToLine(idx, true)}
-                onNext={() => void nextLine()}
-                onPrev={() => void prevLine()}
-              />
+              <View
+                style={s.panelContainer}
+                onLayout={(e) => { panelW.current = e.nativeEvent.layout.width; }}
+              >
+                <Animated.View style={[s.panelRow, slideStyle]}>
+                  {/* Panel 0 — carousel */}
+                  <View style={s.panel}>
+                    <LyricDisplay
+                      lines={primaryLines}
+                      currentIndex={currentLineIndex}
+                      showTranslation={false}
+                      translationByOrder={translationByOrder}
+                      highlights={highlights}
+                      C={C}
+                      speed={speed}
+                      onTapLine={(idx) => goToLine(idx, true)}
+                      onSwipeLeft={showList}
+                      onNext={() => void nextLine()}
+                      onPrev={() => void prevLine()}
+                      onSpeedChange={setSpeed}
+                    />
+                  </View>
+
+                  {/* Panel 1 — full list */}
+                  <View style={s.panel}>
+                    {viewMode === "list" && (
+                      <LyricListView
+                        lines={primaryLines}
+                        currentIndex={currentLineIndex}
+                        showTranslation={false}
+                        translationByOrder={translationByOrder}
+                        highlights={highlights}
+                        C={C}
+                        onTapLine={(idx) => { void goToLine(idx, true); }}
+                        onSwipeRight={showCarousel}
+                      />
+                    )}
+                  </View>
+                </Animated.View>
+
+                {/* Page dots */}
+                <View style={s.pageDots} pointerEvents="none">
+                  <View style={[s.dot, { backgroundColor: viewMode === "carousel" ? C.theme : C.border }]} />
+                  <View style={[s.dot, { backgroundColor: viewMode === "list"     ? C.theme : C.border }]} />
+                </View>
+              </View>
             )}
 
             <TransportControls
@@ -341,50 +359,32 @@ const s = StyleSheet.create({
   },
   headerBtnText: { fontSize: 12, fontWeight: "600" },
 
-  // Track menu modal
-  modalOverlay: {
+  // Two-panel slide layout
+  panelContainer: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.3)",
-    justifyContent: "flex-start",
-    alignItems: "flex-end",
-    paddingTop: 64,
-    paddingRight: 16,
+    overflow: "hidden",
   },
-  trackMenu: {
-    minWidth: 180,
-    borderRadius: 12,
-    borderWidth: 0.5,
-    paddingVertical: 6,
-    shadowColor: "#000",
-    shadowOpacity: 0.12,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 8,
-  },
-  trackMenuTitle: {
-    fontSize: 11,
-    fontWeight: "600",
-    letterSpacing: 0.5,
-    textTransform: "uppercase",
-    paddingHorizontal: 16,
-    paddingTop: 6,
-    paddingBottom: 8,
-  },
-  trackMenuItem: {
+  panelRow: {
+    flex: 1,
     flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingVertical: 11,
-    marginHorizontal: 4,
-    borderRadius: 8,
+    width: "200%",
   },
-  trackMenuItemText: { fontSize: 14, fontWeight: "500" },
-  trackMenuCheck: {
-    width: 18, height: 18,
-    borderRadius: 9,
-    alignItems: "center",
+  panel: {
+    flex: 1,
+  },
+  pageDots: {
+    position: "absolute",
+    bottom: 6,
+    left: 0,
+    right: 0,
+    flexDirection: "row",
     justifyContent: "center",
+    gap: 5,
+  },
+  dot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
   },
 
   // Empty / error

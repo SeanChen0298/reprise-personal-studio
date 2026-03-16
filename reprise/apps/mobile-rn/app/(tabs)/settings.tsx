@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -9,26 +9,43 @@ import {
   ActivityIndicator,
   Switch,
   Pressable,
+  Modal,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import * as WebBrowser from "expo-web-browser";
 import { useAuthStore } from "../../src/stores/auth-store";
 import { useSongFilesStore } from "../../src/stores/song-files-store";
 import { buildDriveAuthUrl } from "../../src/lib/google-drive-download";
-import { useTheme, isDark } from "../../src/lib/theme";
-import { usePreferencesStore, type ThemeMode } from "../../src/stores/preferences-store";
+import { useTheme, isDark, ACCENT_DOT } from "../../src/lib/theme";
+import { usePreferencesStore, type ThemeMode, type AccentKey } from "../../src/stores/preferences-store";
+
+const ACCENT_OPTIONS: { key: AccentKey; label: string }[] = [
+  { key: "blue",     label: "Blue"     },
+  { key: "violet",   label: "Violet"   },
+  { key: "emerald",  label: "Emerald"  },
+  { key: "red",      label: "Red"      },
+  { key: "amber",    label: "Amber"    },
+  { key: "midnight", label: "Midnight" },
+];
 
 export default function SettingsScreen() {
   const C = useTheme();
+  const st = useMemo(() => makeStyles(C), [C]);
+
   const user = useAuthStore((s) => s.user);
   const signOut = useAuthStore((s) => s.signOut);
   const driveToken      = useSongFilesStore((s) => s.driveToken);
   const setDriveToken   = useSongFilesStore((s) => s.setDriveToken);
   const autoDownload    = useSongFilesStore((s) => s.autoDownload);
   const setAutoDownload = useSongFilesStore((s) => s.setAutoDownload);
-  const themeMode = usePreferencesStore((s) => s.themeMode);
+  const localFiles      = useSongFilesStore((s) => s.localFiles);
+  const themeMode    = usePreferencesStore((s) => s.themeMode);
   const setThemeMode = usePreferencesStore((s) => s.setThemeMode);
+  const accentKey    = usePreferencesStore((s) => s.accentKey);
+  const setAccentKey = usePreferencesStore((s) => s.setAccentKey);
+
   const [connectingDrive, setConnectingDrive] = useState(false);
+  const [storageVisible, setStorageVisible] = useState(false);
 
   const connectDrive = async () => {
     setConnectingDrive(true);
@@ -68,20 +85,23 @@ export default function SettingsScreen() {
     { key: "dark", label: "Dark" },
   ];
 
+  const storageEntries = Object.entries(localFiles);
+
   return (
     <>
       <StatusBar style={isDark(C) ? "light" : "dark"} />
-      <ScrollView style={[st.container, { backgroundColor: C.bg }]} contentContainerStyle={st.content}>
-        <View style={[st.header, { backgroundColor: C.bg }]}>
-          <Text style={[st.headerTitle, { color: C.text }]}>Settings</Text>
+      <ScrollView style={st.container} contentContainerStyle={st.content}>
+        <View style={st.header}>
+          <Text style={st.headerTitle}>Settings</Text>
         </View>
 
-        {/* Appearance */}
+        {/* ── Appearance ─────────────────────────────────────────── */}
         <View style={st.section}>
-          <Text style={[st.sectionLabel, { color: C.muted }]}>APPEARANCE</Text>
-          <View style={[st.card, { backgroundColor: C.surface }]}>
-            <Text style={[st.rowLabel, { color: C.muted }]}>Theme</Text>
-            <View style={[st.segmented, { backgroundColor: C.bg, borderColor: C.border }]}>
+          <Text style={st.sectionLabel}>APPEARANCE</Text>
+          <View style={st.card}>
+            {/* Light / System / Dark */}
+            <Text style={st.rowLabel}>Theme</Text>
+            <View style={st.segmented}>
               {THEME_OPTIONS.map(({ key, label }) => {
                 const active = themeMode === key;
                 return (
@@ -101,34 +121,54 @@ export default function SettingsScreen() {
                 );
               })}
             </View>
+
+            {/* Accent color */}
+            <Text style={[st.rowLabel, { marginTop: 18 }]}>Accent color</Text>
+            <View style={st.accentRow}>
+              {ACCENT_OPTIONS.map(({ key, label }) => {
+                const active = accentKey === key;
+                return (
+                  <Pressable key={key} onPress={() => setAccentKey(key)} style={st.accentItem}>
+                    <View style={[
+                      st.accentDot,
+                      { backgroundColor: ACCENT_DOT[key] },
+                      active && { borderWidth: 2.5, borderColor: C.text },
+                    ]}>
+                      {active && <View style={st.accentInner} />}
+                    </View>
+                    <Text style={[st.accentLabel, { color: active ? C.text : C.muted }]}>{label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
           </View>
         </View>
 
-        {/* Account */}
+        {/* ── Account ────────────────────────────────────────────── */}
         <View style={st.section}>
-          <Text style={[st.sectionLabel, { color: C.muted }]}>ACCOUNT</Text>
-          <View style={[st.card, { backgroundColor: C.surface }]}>
-            <Text style={[st.rowLabel, { color: C.muted }]}>Signed in as</Text>
-            <Text style={[st.rowValue, { color: C.text }]} numberOfLines={1}>{user?.email ?? "—"}</Text>
+          <Text style={st.sectionLabel}>ACCOUNT</Text>
+          <View style={st.card}>
+            <Text style={st.rowLabel}>Signed in as</Text>
+            <Text style={st.rowValue} numberOfLines={1}>{user?.email ?? "—"}</Text>
           </View>
-          <TouchableOpacity style={[st.card, st.dangerCard, { backgroundColor: C.surface }]} onPress={handleSignOut} activeOpacity={0.7}>
+          <TouchableOpacity style={[st.card, st.dangerCard]} onPress={handleSignOut} activeOpacity={0.7}>
             <Text style={st.dangerText}>Sign Out</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Google Drive */}
+        {/* ── Google Drive ───────────────────────────────────────── */}
         <View style={st.section}>
-          <Text style={[st.sectionLabel, { color: C.muted }]}>GOOGLE DRIVE SYNC</Text>
-          <View style={[st.card, { backgroundColor: C.surface }]}>
+          <Text style={st.sectionLabel}>GOOGLE DRIVE SYNC</Text>
+          <View style={st.card}>
             <View style={st.driveRow}>
               <View style={st.driveInfo}>
-                <Text style={[st.rowLabel, { color: C.muted }]}>Status</Text>
-                <Text style={[st.rowValue, { color: C.text }, driveToken ? st.connected : { color: C.muted }]}>
+                <Text style={st.rowLabel}>Status</Text>
+                <Text style={[st.rowValue, driveToken ? st.connected : { color: C.muted }]}>
                   {driveToken ? "Connected" : "Not connected"}
                 </Text>
               </View>
               {driveToken ? (
-                <TouchableOpacity style={[st.smallBtn, { borderColor: C.border, backgroundColor: C.bg }]} onPress={disconnectDrive} activeOpacity={0.7}>
+                <TouchableOpacity style={st.smallBtnOutline} onPress={disconnectDrive} activeOpacity={0.7}>
                   <Text style={[st.smallBtnText, { color: C.muted }]}>Disconnect</Text>
                 </TouchableOpacity>
               ) : (
@@ -147,15 +187,15 @@ export default function SettingsScreen() {
               )}
             </View>
           </View>
-          <Text style={[st.hint, { color: C.muted }]}>
+          <Text style={st.hint}>
             Connect Google Drive to download audio files synced from the Reprise desktop app.
           </Text>
 
           {driveToken && (
-            <View style={[st.card, st.toggleRow, { backgroundColor: C.surface }]}>
+            <View style={[st.card, st.toggleRow]}>
               <View style={st.toggleInfo}>
-                <Text style={[st.rowValue, { color: C.text }]}>Auto-download</Text>
-                <Text style={[st.rowLabel, { color: C.muted }]}>Download new songs automatically on open</Text>
+                <Text style={st.rowValue}>Auto-download</Text>
+                <Text style={st.rowLabel}>Download new songs automatically on open</Text>
               </View>
               <Switch
                 value={autoDownload}
@@ -166,83 +206,217 @@ export default function SettingsScreen() {
             </View>
           )}
         </View>
+
+        {/* ── Local Storage ──────────────────────────────────────── */}
+        <View style={st.section}>
+          <Text style={st.sectionLabel}>LOCAL STORAGE</Text>
+          <TouchableOpacity style={st.card} onPress={() => setStorageVisible(true)} activeOpacity={0.7}>
+            <View style={st.driveRow}>
+              <View style={st.driveInfo}>
+                <Text style={st.rowValue}>Stored song files</Text>
+                <Text style={st.rowLabel}>
+                  {storageEntries.length === 0
+                    ? "No files downloaded"
+                    : `${storageEntries.length} song${storageEntries.length !== 1 ? "s" : ""} with local data`}
+                </Text>
+              </View>
+              <Text style={[st.chevron, { color: C.muted }]}>›</Text>
+            </View>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
+
+      {/* ── Storage modal ──────────────────────────────────────────── */}
+      <Modal visible={storageVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setStorageVisible(false)}>
+        <View style={[st.modalContainer, { backgroundColor: C.bg }]}>
+          <View style={[st.modalHeader, { borderBottomColor: C.border }]}>
+            <Text style={[st.modalTitle, { color: C.text }]}>Local Storage</Text>
+            <Pressable onPress={() => setStorageVisible(false)} style={st.modalClose} android_ripple={{ color: "rgba(0,0,0,0.08)" }}>
+              <Text style={[st.modalCloseText, { color: C.theme }]}>Done</Text>
+            </Pressable>
+          </View>
+          <ScrollView style={st.modalScroll} contentContainerStyle={st.modalContent}>
+            {storageEntries.length === 0 ? (
+              <Text style={[st.emptyText, { color: C.muted }]}>No downloaded files.</Text>
+            ) : (
+              storageEntries.map(([songId, files]) => (
+                <View key={songId} style={[st.storageCard, { backgroundColor: C.surface, borderColor: C.border }]}>
+                  <Text style={[st.storageId, { color: C.muted }]} numberOfLines={1}>
+                    {songId}
+                  </Text>
+                  <View style={st.fileRow}>
+                    <FileBadge label="Audio"  present={!!files.audioPath}  C={C} />
+                    <FileBadge label="Vocals" present={!!files.vocalsPath} C={C} />
+                    <FileBadge label="Instr"  present={!!files.instrPath}  C={C} />
+                  </View>
+                  {files.driveAudioFileId && (
+                    <Text style={[st.driveIdText, { color: C.muted }]} numberOfLines={1}>
+                      Drive audio: {files.driveAudioFileId}
+                    </Text>
+                  )}
+                  {files.driveVocalsFileId && (
+                    <Text style={[st.driveIdText, { color: C.muted }]} numberOfLines={1}>
+                      Drive vocals: {files.driveVocalsFileId}
+                    </Text>
+                  )}
+                  {files.driveInstrFileId && (
+                    <Text style={[st.driveIdText, { color: C.muted }]} numberOfLines={1}>
+                      Drive instr: {files.driveInstrFileId}
+                    </Text>
+                  )}
+                </View>
+              ))
+            )}
+          </ScrollView>
+        </View>
+      </Modal>
     </>
   );
 }
 
-const st = StyleSheet.create({
-  container: { flex: 1 },
-  content:   { paddingBottom: 48 },
-  header: {
-    paddingTop: 56,
-    paddingBottom: 16,
-    paddingHorizontal: 20,
-  },
-  headerTitle: { fontSize: 24, fontWeight: "600", letterSpacing: -0.3 },
+function FileBadge({ label, present, C }: { label: string; present: boolean; C: ReturnType<typeof useTheme> }) {
+  return (
+    <View style={[
+      fileBadgeSt.badge,
+      { backgroundColor: present ? C.theme + "22" : C.border, borderColor: present ? C.theme + "55" : "transparent" },
+    ]}>
+      <Text style={[fileBadgeSt.text, { color: present ? C.theme : C.muted }]}>
+        {present ? "✓ " : "— "}{label}
+      </Text>
+    </View>
+  );
+}
 
-  section:      { marginTop: 28, paddingHorizontal: 16 },
-  sectionLabel: {
-    fontSize: 10,
-    fontWeight: "600",
-    letterSpacing: 1.2,
-    marginBottom: 10,
-  },
-
-  card: {
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 8,
-    shadowColor: "#000",
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 1,
-  },
-  dangerCard:   { alignItems: "center" },
-  rowLabel:     { fontSize: 11, marginBottom: 3 },
-  rowValue:     { fontSize: 14, fontWeight: "500" },
-  dangerText:   { fontSize: 14, fontWeight: "500", color: "#EF4444" },
-  connected:    { color: "#16A34A" },
-
-  // Segmented control for theme
-  segmented: {
-    flexDirection: "row",
-    borderRadius: 10,
-    borderWidth: 0.5,
-    padding: 3,
-    marginTop: 10,
-  },
-  segmentBtn: {
-    flex: 1,
-    paddingVertical: 7,
-    borderRadius: 8,
-    alignItems: "center",
-  },
-  segmentText: { fontSize: 13, fontWeight: "500" },
-
-  driveRow:  { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  driveInfo: { flex: 1 },
-
-  smallBtn: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
-  smallBtnText: { fontSize: 13, fontWeight: "500" },
-
-  hint: {
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 6,
-    paddingHorizontal: 4,
-  },
-  toggleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: 0,
-  },
-  toggleInfo: { flex: 1, marginRight: 12 },
+const fileBadgeSt = StyleSheet.create({
+  badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, borderWidth: 1, marginRight: 6 },
+  text:  { fontSize: 11, fontWeight: "500" },
 });
+
+import type { ThemeColors } from "../../src/lib/theme";
+
+function makeStyles(C: ThemeColors) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: C.bg },
+    content:   { paddingBottom: 48 },
+    header: {
+      paddingTop: 56,
+      paddingBottom: 16,
+      paddingHorizontal: 20,
+      backgroundColor: C.bg,
+    },
+    headerTitle: { fontSize: 24, fontWeight: "600", letterSpacing: -0.3, color: C.text },
+
+    section:      { marginTop: 28, paddingHorizontal: 16 },
+    sectionLabel: {
+      fontSize: 10,
+      fontWeight: "600",
+      letterSpacing: 1.2,
+      marginBottom: 10,
+      color: C.muted,
+    },
+
+    card: {
+      borderRadius: 12,
+      padding: 16,
+      marginBottom: 8,
+      backgroundColor: C.surface,
+      shadowColor: "#000",
+      shadowOpacity: 0.04,
+      shadowRadius: 4,
+      shadowOffset: { width: 0, height: 1 },
+      elevation: 1,
+    },
+    dangerCard:   { alignItems: "center" },
+    rowLabel:     { fontSize: 11, marginBottom: 3, color: C.muted },
+    rowValue:     { fontSize: 14, fontWeight: "500", color: C.text },
+    dangerText:   { fontSize: 14, fontWeight: "500", color: "#EF4444" },
+    connected:    { color: "#16A34A" },
+    chevron:      { fontSize: 22, fontWeight: "300" },
+
+    // Segmented
+    segmented: {
+      flexDirection: "row",
+      borderRadius: 10,
+      borderWidth: 0.5,
+      borderColor: C.border,
+      backgroundColor: C.bg,
+      padding: 3,
+      marginTop: 10,
+    },
+    segmentBtn: {
+      flex: 1,
+      paddingVertical: 7,
+      borderRadius: 8,
+      alignItems: "center",
+    },
+    segmentText: { fontSize: 13, fontWeight: "500" },
+
+    // Accent picker
+    accentRow:  { flexDirection: "row", marginTop: 12, gap: 16 },
+    accentItem: { alignItems: "center", gap: 4 },
+    accentDot:  { width: 30, height: 30, borderRadius: 15, justifyContent: "center", alignItems: "center" },
+    accentInner:{ width: 10, height: 10, borderRadius: 5, backgroundColor: "rgba(255,255,255,0.6)" },
+    accentLabel:{ fontSize: 10, fontWeight: "500" },
+
+    driveRow:  { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+    driveInfo: { flex: 1 },
+
+    smallBtn: {
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      borderRadius: 8,
+      borderWidth: 1,
+    },
+    smallBtnOutline: {
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: C.border,
+      backgroundColor: C.bg,
+    },
+    smallBtnText: { fontSize: 13, fontWeight: "500" },
+
+    hint: {
+      fontSize: 12,
+      lineHeight: 18,
+      marginTop: 6,
+      paddingHorizontal: 4,
+      color: C.muted,
+    },
+    toggleRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    toggleInfo: { flex: 1, marginRight: 12 },
+
+    // Modal
+    modalContainer: { flex: 1 },
+    modalHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingHorizontal: 20,
+      paddingTop: 16,
+      paddingBottom: 14,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+    },
+    modalTitle:     { fontSize: 17, fontWeight: "600", color: C.text },
+    modalClose:     { padding: 4 },
+    modalCloseText: { fontSize: 16, fontWeight: "500" },
+    modalScroll:    { flex: 1 },
+    modalContent:   { padding: 16, gap: 10 },
+    emptyText:      { fontSize: 14, textAlign: "center", marginTop: 40 },
+
+    storageCard: {
+      borderRadius: 10,
+      borderWidth: StyleSheet.hairlineWidth,
+      padding: 12,
+      gap: 8,
+    },
+    storageId:    { fontSize: 10, fontFamily: "monospace" },
+    fileRow:      { flexDirection: "row" },
+    driveIdText:  { fontSize: 10, fontFamily: "monospace" },
+  });
+}

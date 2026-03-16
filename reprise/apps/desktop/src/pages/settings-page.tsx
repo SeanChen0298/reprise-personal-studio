@@ -10,6 +10,10 @@ import { checkTorchcrepeInstalled } from "../lib/audio-analysis";
 import { useHighlightStore } from "../lib/highlight-config";
 import { usePreferencesStore } from "../stores/preferences-store";
 import { useAudioDevices } from "../hooks/use-audio-devices";
+import { getStoredToken, getValidAccessToken, purgeDriveAll } from "../lib/google-drive";
+import { useSongStore } from "../stores/song-store";
+import { useDriveSyncStore } from "../stores/drive-sync-store";
+import { supabase } from "../lib/supabase";
 
 type Tab = "highlights" | "account" | "preferences" | "downloads" | "audio";
 
@@ -56,6 +60,68 @@ export function SettingsPage() {
   const setAutoPitch = usePreferencesStore((s) => s.setAutoPitch);
   const [confirmDelete, setConfirmDelete] = useState(true);
   const [autoSync, setAutoSync] = useState(true);
+
+  // Google Drive bulk reset
+  const songs = useSongStore((s) => s.songs);
+  const setResetInProgress = useDriveSyncStore((s) => s.setResetInProgress);
+  const [driveResetStatus, setDriveResetStatus] = useState<"idle" | "running" | "done" | "error">("idle");
+  const [driveResetMsg, setDriveResetMsg] = useState<string | null>(null);
+
+  const handleFullDriveReset = useCallback(async () => {
+    const confirmed = window.confirm(
+      "⚠️ Delete ALL Reprise files from Google Drive and reset sync?\n\n" +
+      "This will:\n" +
+      "  • Permanently delete every audio file uploaded by Reprise from your Drive\n" +
+      "  • Clear all Drive file IDs from every song in your library\n" +
+      "  • The mobile app will lose access to all audio until you re-sync\n\n" +
+      "Files on your local machine are NOT affected.\n\n" +
+      "This cannot be undone. Continue?"
+    );
+    if (!confirmed) return;
+
+    setDriveResetStatus("running");
+    setDriveResetMsg("Connecting to Drive…");
+    // Block auto-sync for the entire duration of the reset
+    setResetInProgress(true);
+    try {
+      // 1. Delete everything from Drive
+      if (!getStoredToken()) throw new Error("Google Drive is not connected. Connect Drive first.");
+      console.log("[drive-reset] Getting access token…");
+      const accessToken = await getValidAccessToken();
+
+      console.log("[drive-reset] Purging Drive folder…");
+      setDriveResetMsg("Deleting files from Drive…");
+      const deleted = await purgeDriveAll(accessToken);
+      console.log("[drive-reset] Purge done, deleted:", deleted);
+
+      // 2. Clear drive IDs from all songs in DB (single bulk update)
+      setDriveResetMsg("Clearing sync records…");
+      const songIds = songs.map((s) => s.id);
+      console.log("[drive-reset] Clearing DB for", songIds.length, "songs…");
+      if (songIds.length > 0) {
+        const { error } = await supabase
+          .from("songs")
+          .update({ drive_audio_file_id: null, drive_vocals_file_id: null, drive_instrumental_file_id: null })
+          .in("id", songIds);
+        if (error) throw error;
+      }
+
+      // 3. Reload store so UI reflects cleared IDs immediately
+      console.log("[drive-reset] Reloading store…");
+      await useSongStore.getState().loadAllData();
+
+      setDriveResetStatus("done");
+      setDriveResetMsg(`Done. ${deleted} item${deleted !== 1 ? "s" : ""} deleted from Drive. Auto-sync will re-upload your files.`);
+      console.log("[drive-reset] Complete.");
+    } catch (err) {
+      console.error("[drive-reset] Error:", err);
+      setDriveResetStatus("error");
+      setDriveResetMsg(err instanceof Error ? err.message : "Failed");
+    } finally {
+      // Re-enable auto-sync now that Drive is clean and IDs are reset
+      setResetInProgress(false);
+    }
+  }, [songs, setResetInProgress]);
 
   // Audio I/O tab
   const audioDevices = useAudioDevices();
@@ -768,6 +834,38 @@ export function SettingsPage() {
                     toggle(autoPitch, setAutoPitch),
                     true,
                   )}
+                </div>
+
+                {/* Google Drive danger zone */}
+                <div className="mb-7">
+                  {sectionHeader("Google Drive")}
+                  <div className="p-4 bg-[#FEF2F2] border border-[#FECACA] rounded-[var(--radius)]">
+                    <div className="text-[13px] font-medium text-[#991B1B] mb-1">Delete all Drive files & reset sync</div>
+                    <p className="text-[12px] text-[#B91C1C] leading-relaxed mb-3">
+                      Permanently deletes every audio file Reprise has uploaded to your Google Drive and clears all sync records.
+                      The mobile app will lose access to all audio until you re-sync each song.
+                      Your local files are not affected.
+                    </p>
+                    <button
+                      onClick={handleFullDriveReset}
+                      disabled={driveResetStatus === "running"}
+                      className="px-3 py-[6px] rounded-[6px] bg-[#DC2626] text-white text-[12px] font-medium hover:bg-[#B91C1C] transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                    >
+                      {driveResetStatus === "running" ? (
+                        <>
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="animate-spin">
+                            <circle cx="12" cy="12" r="10" /><path d="M12 6v6" />
+                          </svg>
+                          Deleting…
+                        </>
+                      ) : "Delete all & reset"}
+                    </button>
+                    {driveResetMsg && (
+                      <p className={`mt-2 text-[11.5px] leading-relaxed ${driveResetStatus === "error" ? "text-[#DC2626]" : "text-[#15803D]"}`}>
+                        {driveResetMsg}
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
             )}

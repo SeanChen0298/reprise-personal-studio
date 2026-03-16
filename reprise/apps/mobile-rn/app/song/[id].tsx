@@ -21,7 +21,7 @@ import {
   type DownloadProgress,
 } from "../../src/lib/google-drive-download";
 import { AnnotatedText } from "../../src/components/annotated-text";
-import { C } from "../../src/lib/theme";
+import { useTheme } from "../../src/lib/theme";
 import { IconChevronLeft, IconMusic, IconDownload, IconPlay } from "../../src/components/icons";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -75,6 +75,7 @@ function parseFurigana(html: string): FuriganaPart[] {
 }
 
 function FuriganaText({ html, fontSize = 15 }: { html: string; fontSize?: number }) {
+  const C = useTheme();
   const parts = parseFurigana(html);
   return (
     <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "flex-end" }}>
@@ -110,8 +111,8 @@ const STATUS_CONFIG: Record<LineStatus, { label: string; color: string; bg: stri
 function StatusPill({ status }: { status: string }) {
   const cfg = STATUS_CONFIG[status as LineStatus] ?? STATUS_CONFIG.new;
   return (
-    <View style={[ll.pill, { backgroundColor: cfg.bg }]}>
-      <Text style={[ll.pillText, { color: cfg.color }]}>{cfg.label}</Text>
+    <View style={[{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }, { backgroundColor: cfg.bg }]}>
+      <Text style={[{ fontSize: 10, fontWeight: "600" }, { color: cfg.color }]}>{cfg.label}</Text>
     </View>
   );
 }
@@ -119,6 +120,25 @@ function StatusPill({ status }: { status: string }) {
 // ─── Single lyrics line ───────────────────────────────────────────────────────
 
 function LyricsLine({ line, translation }: { line: Line; translation?: string }) {
+  const C = useTheme();
+  const ll = useMemo(() => StyleSheet.create({
+    container: {
+      paddingVertical: 10,
+      borderBottomWidth: 0.5,
+      borderBottomColor: C.border,
+    },
+    metaRow:   { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 5 },
+    timestamp: { fontSize: 11, color: C.muted, fontVariant: ["tabular-nums"], width: 36 },
+    pill: {
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 4,
+    },
+    pillText:    { fontSize: 10, fontWeight: "600" },
+    text:        { fontSize: 15, color: C.text, lineHeight: 22 },
+    translation: { fontSize: 12.5, color: C.muted, marginTop: 4, lineHeight: 18, fontStyle: "italic" },
+  }), [C]);
+
   const displayText = line.custom_text ?? line.text;
   const hasFurigana  = !!line.furigana_html;
   const hasAnnotations = !!(line.annotations && (line.annotations as Annotation[]).length > 0);
@@ -133,9 +153,17 @@ function LyricsLine({ line, translation }: { line: Line; translation?: string })
         <StatusPill status={line.status} />
       </View>
 
-      {/* Lyrics text */}
+      {/* Lyrics text: furigana as main, annotations as secondary row below (mirrors desktop) */}
       {hasFurigana ? (
-        <FuriganaText html={line.furigana_html!} fontSize={15} />
+        <>
+          <AnnotatedText
+            text={displayText}
+            annotations={line.annotations as Annotation[]}
+            fontSize={15}
+            color={C.text}
+          />
+          <FuriganaText html={line.furigana_html!} fontSize={10} />
+        </>
       ) : hasAnnotations ? (
         <AnnotatedText
           text={displayText}
@@ -155,29 +183,20 @@ function LyricsLine({ line, translation }: { line: Line; translation?: string })
   );
 }
 
-const ll = StyleSheet.create({
-  container: {
-    paddingVertical: 10,
-    borderBottomWidth: 0.5,
-    borderBottomColor: C.border,
-  },
-  metaRow:   { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 5 },
-  timestamp: { fontSize: 11, color: C.muted, fontVariant: ["tabular-nums"], width: 36 },
-  pill: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  pillText:    { fontSize: 10, fontWeight: "600" },
-  text:        { fontSize: 15, color: C.text, lineHeight: 22 },
-  translation: { fontSize: 12.5, color: C.muted, marginTop: 4, lineHeight: 18, fontStyle: "italic" },
-});
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const DRIVE_ID_KEY_MAP: Record<"audioPath" | "vocalsPath" | "instrPath", "driveAudioFileId" | "driveVocalsFileId" | "driveInstrFileId"> = {
+  audioPath:  "driveAudioFileId",
+  vocalsPath: "driveVocalsFileId",
+  instrPath:  "driveInstrFileId",
+};
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function SongDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const C = useTheme();
 
   const [song, setSong] = useState<Song | null>(null);
   const [lines, setLines] = useState<Line[]>([]);
@@ -240,7 +259,7 @@ export default function SongDetailScreen() {
             : 0;
           setter({ state: "downloading", progress: pct });
         });
-        await setLocalFiles(id, { [localKey]: destPath });
+        await setLocalFiles(id, { [localKey]: destPath, [DRIVE_ID_KEY_MAP[localKey]]: fileId });
         setter({ state: "done", progress: 100 });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -281,6 +300,145 @@ export default function SongDetailScreen() {
     }
     return { primaryLines: primary, translationByOrder: transMap };
   }, [lines, song]);
+
+  // ── Styles ──────────────────────────────────────────────────────────────────
+
+  const styles = useMemo(() => StyleSheet.create({
+    container: { flex: 1, backgroundColor: C.bg },
+    content:   { paddingBottom: 48 },
+    center:    { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, backgroundColor: C.bg },
+    errorText: { fontSize: 14, color: C.muted },
+    backBtn:   { padding: 8 },
+    backBtnText: { fontSize: 14, color: C.theme },
+
+    headerBack: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingTop: 56,
+      paddingHorizontal: 16,
+      paddingBottom: 8,
+      gap: 4,
+    },
+    backLabel: { fontSize: 15, color: C.theme },
+
+    // Song header
+    songHeader: { alignItems: "center", paddingVertical: 20, paddingHorizontal: 20 },
+    thumb: {
+      width: 88, height: 88,
+      borderRadius: 16,
+      overflow: "hidden",
+      marginBottom: 14,
+      shadowColor: "#000",
+      shadowOpacity: 0.08,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 4,
+    },
+    thumbImg: { width: "100%", height: "100%" },
+    thumbPlaceholder: {
+      width: "100%", height: "100%",
+      backgroundColor: C.surface,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    songTitle:  { fontSize: 20, fontWeight: "700", color: C.text, textAlign: "center" },
+    songArtist: { fontSize: 13, color: C.muted, marginTop: 4, textAlign: "center" },
+
+    metaBadgeRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      justifyContent: "center",
+      gap: 6,
+      marginTop: 12,
+    },
+    metaBadge: {
+      backgroundColor: C.surface,
+      borderWidth: 1,
+      borderColor: C.border,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 20,
+    },
+    metaBadgeText: { fontSize: 11.5, color: C.muted, fontWeight: "500" },
+
+    masterySection: { width: "100%", marginTop: 16 },
+    masteryLabelRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 6 },
+    masteryLabel: { fontSize: 12, color: C.muted },
+    masteryPct:   { fontSize: 12, color: C.theme, fontWeight: "600" },
+    masteryTrack: {
+      height: 4,
+      backgroundColor: C.border,
+      borderRadius: 2,
+      overflow: "hidden",
+    },
+    masteryFill: {
+      height: "100%",
+      backgroundColor: C.theme,
+      borderRadius: 2,
+    },
+
+    section:      { paddingHorizontal: 16, marginBottom: 20 },
+    sectionLabel: {
+      fontSize: 10,
+      fontWeight: "600",
+      color: C.muted,
+      letterSpacing: 1.2,
+      marginBottom: 8,
+    },
+    card: {
+      backgroundColor: C.surface,
+      borderRadius: 14,
+      padding: 14,
+      shadowColor: "#000",
+      shadowOpacity: 0.04,
+      shadowRadius: 4,
+      shadowOffset: { width: 0, height: 1 },
+      elevation: 1,
+    },
+
+    primaryBtn: {
+      marginTop: 10,
+      backgroundColor: C.theme,
+      borderRadius: 10,
+      paddingVertical: 13,
+      alignItems: "center",
+    },
+    primaryBtnDisabled: { opacity: 0.6 },
+    primaryBtnText: { fontSize: 14, fontWeight: "600", color: "#fff" },
+
+    allDoneRow:  { marginTop: 10, alignItems: "center", paddingVertical: 8 },
+    allDoneText: { fontSize: 13, color: "#16A34A", fontWeight: "500" },
+
+    hint: { fontSize: 12, color: C.muted, lineHeight: 17, marginTop: 8, paddingHorizontal: 2 },
+
+    emptyDriveCard: {
+      backgroundColor: C.surface,
+      borderRadius: 14,
+      padding: 20,
+      alignItems: "center",
+      borderWidth: 1,
+      borderColor: C.border,
+      borderStyle: "dashed",
+    },
+    emptyDriveTitle:    { fontSize: 14, fontWeight: "600", color: C.muted, marginBottom: 6 },
+    emptyDriveSubtitle: { fontSize: 12.5, color: C.muted, textAlign: "center", lineHeight: 19 },
+
+    practiceBtn: {
+      backgroundColor: C.theme,
+      borderRadius: 14,
+      paddingVertical: 16,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 10,
+      shadowColor: C.theme,
+      shadowOpacity: 0.2,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 4,
+    },
+    practiceBtnText: { fontSize: 16, fontWeight: "700", color: "#fff" },
+  }), [C]);
 
   // ── Loading / error states ──────────────────────────────────────────────────
 
@@ -510,6 +668,25 @@ function FileRow({
   status: FileDownloadStatus;
   onDownload?: () => void;
 }) {
+  const C = useTheme();
+  const fileStyles = useMemo(() => StyleSheet.create({
+    row: { flexDirection: "row", alignItems: "flex-start", paddingVertical: 10, gap: 10 },
+    dot:      { width: 7, height: 7, borderRadius: 4, marginTop: 5, flexShrink: 0 },
+    info:     { flex: 1 },
+    label:    { fontSize: 13.5, fontWeight: "600", color: C.text },
+    sublabel: { fontSize: 11.5, color: C.muted, marginTop: 1 },
+    progressTrack: { marginTop: 6, height: 2, backgroundColor: C.border, borderRadius: 1, overflow: "hidden" },
+    progressFill:  { height: "100%", backgroundColor: C.theme },
+    btn: {
+      width: 32, height: 32,
+      borderRadius: 8,
+      backgroundColor: "#EEEEFF",
+      alignItems: "center",
+      justifyContent: "center",
+      flexShrink: 0,
+    },
+  }), [C]);
+
   const dotColor =
     status.state === "done"        ? "#16A34A" :
     status.state === "downloading" ? "#F59E0B" :
@@ -544,160 +721,3 @@ function FileRow({
     </View>
   );
 }
-
-const fileStyles = StyleSheet.create({
-  row: { flexDirection: "row", alignItems: "flex-start", paddingVertical: 10, gap: 10 },
-  dot:      { width: 7, height: 7, borderRadius: 4, marginTop: 5, flexShrink: 0 },
-  info:     { flex: 1 },
-  label:    { fontSize: 13.5, fontWeight: "600", color: C.text },
-  sublabel: { fontSize: 11.5, color: C.muted, marginTop: 1 },
-  progressTrack: { marginTop: 6, height: 2, backgroundColor: C.border, borderRadius: 1, overflow: "hidden" },
-  progressFill:  { height: "100%", backgroundColor: C.theme },
-  btn: {
-    width: 32, height: 32,
-    borderRadius: 8,
-    backgroundColor: "#EEEEFF",
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
-  },
-});
-
-// ─── Styles ───────────────────────────────────────────────────────────────────
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg },
-  content:   { paddingBottom: 48 },
-  center:    { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, backgroundColor: C.bg },
-  errorText: { fontSize: 14, color: C.muted },
-  backBtn:   { padding: 8 },
-  backBtnText: { fontSize: 14, color: C.theme },
-
-  headerBack: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingTop: 56,
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-    gap: 4,
-  },
-  backLabel: { fontSize: 15, color: C.theme },
-
-  // Song header
-  songHeader: { alignItems: "center", paddingVertical: 20, paddingHorizontal: 20 },
-  thumb: {
-    width: 88, height: 88,
-    borderRadius: 16,
-    overflow: "hidden",
-    marginBottom: 14,
-    shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
-  },
-  thumbImg: { width: "100%", height: "100%" },
-  thumbPlaceholder: {
-    width: "100%", height: "100%",
-    backgroundColor: C.surface,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  songTitle:  { fontSize: 20, fontWeight: "700", color: C.text, textAlign: "center" },
-  songArtist: { fontSize: 13, color: C.muted, marginTop: 4, textAlign: "center" },
-
-  metaBadgeRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "center",
-    gap: 6,
-    marginTop: 12,
-  },
-  metaBadge: {
-    backgroundColor: C.surface,
-    borderWidth: 1,
-    borderColor: C.border,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 20,
-  },
-  metaBadgeText: { fontSize: 11.5, color: C.muted, fontWeight: "500" },
-
-  masterySection: { width: "100%", marginTop: 16 },
-  masteryLabelRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 6 },
-  masteryLabel: { fontSize: 12, color: C.muted },
-  masteryPct:   { fontSize: 12, color: C.theme, fontWeight: "600" },
-  masteryTrack: {
-    height: 4,
-    backgroundColor: C.border,
-    borderRadius: 2,
-    overflow: "hidden",
-  },
-  masteryFill: {
-    height: "100%",
-    backgroundColor: C.theme,
-    borderRadius: 2,
-  },
-
-  section:      { paddingHorizontal: 16, marginBottom: 20 },
-  sectionLabel: {
-    fontSize: 10,
-    fontWeight: "600",
-    color: C.muted,
-    letterSpacing: 1.2,
-    marginBottom: 8,
-  },
-  card: {
-    backgroundColor: C.surface,
-    borderRadius: 14,
-    padding: 14,
-    shadowColor: "#000",
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 1,
-  },
-
-  primaryBtn: {
-    marginTop: 10,
-    backgroundColor: C.theme,
-    borderRadius: 10,
-    paddingVertical: 13,
-    alignItems: "center",
-  },
-  primaryBtnDisabled: { opacity: 0.6 },
-  primaryBtnText: { fontSize: 14, fontWeight: "600", color: "#fff" },
-
-  allDoneRow:  { marginTop: 10, alignItems: "center", paddingVertical: 8 },
-  allDoneText: { fontSize: 13, color: "#16A34A", fontWeight: "500" },
-
-  hint: { fontSize: 12, color: C.muted, lineHeight: 17, marginTop: 8, paddingHorizontal: 2 },
-
-  emptyDriveCard: {
-    backgroundColor: C.surface,
-    borderRadius: 14,
-    padding: 20,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: C.border,
-    borderStyle: "dashed",
-  },
-  emptyDriveTitle:    { fontSize: 14, fontWeight: "600", color: C.muted, marginBottom: 6 },
-  emptyDriveSubtitle: { fontSize: 12.5, color: C.muted, textAlign: "center", lineHeight: 19 },
-
-  practiceBtn: {
-    backgroundColor: C.theme,
-    borderRadius: 14,
-    paddingVertical: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    shadowColor: C.theme,
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
-  },
-  practiceBtnText: { fontSize: 16, fontWeight: "700", color: "#fff" },
-});

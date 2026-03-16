@@ -17,6 +17,10 @@ import { useTaskQueueStore } from "../stores/task-queue-store";
 import { buildDriveFolderName } from "../lib/audio-download";
 import { readFile } from "@tauri-apps/plugin-fs";
 
+// Module-level lock so concurrent uploads can't start even if the component remounts
+// mid-upload (e.g. user navigates away and back while a large file is uploading).
+let _driveUploadInProgress = false;
+
 export function SongSetupPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -133,9 +137,22 @@ export function SongSetupPage() {
     setDriveConnected(false);
   }, []);
 
+  const resetDriveSync = useCallback(async () => {
+    const confirmed = window.confirm(
+      "Reset Drive sync for this song?\n\nThis clears the stored file IDs so the next sync will upload fresh copies. It does NOT delete anything from Google Drive."
+    );
+    if (!confirmed) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await updateSong(song.id, { drive_audio_file_id: null, drive_vocals_file_id: null, drive_instrumental_file_id: null } as any);
+    setAudioUpload("idle");
+    setVocalsUpload("idle");
+    setInstrUpload("idle");
+  }, [song.id, updateSong]);
+
   const uploadToDrive = useCallback(async () => {
-    if (uploadingRef.current) return;
+    if (uploadingRef.current || _driveUploadInProgress) return;
     uploadingRef.current = true;
+    _driveUploadInProgress = true;
     setDriveError(null);
 
     try {
@@ -150,7 +167,8 @@ export function SongSetupPage() {
 
       const updates: Partial<typeof song> = {};
 
-      // audio.m4a
+      // audio.m4a — if a Drive file ID already exists, update in-place (PATCH) to avoid
+      // creating a duplicate. Only upload if local state is not already "done".
       if (song.audio_path && audioUpload !== "done") {
         setAudioUpload("uploading");
         setAudioProgress(0);
@@ -161,7 +179,8 @@ export function SongSetupPage() {
           "audio.m4a",
           "audio/mp4",
           folderId,
-          makeProgress(setAudioProgress)
+          makeProgress(setAudioProgress),
+          song.drive_audio_file_id // undefined = create new; set = update existing
         );
         setAudioUpload("done");
         updates.drive_audio_file_id = fileId;
@@ -178,7 +197,8 @@ export function SongSetupPage() {
           "vocals.wav",
           "audio/wav",
           folderId,
-          makeProgress(setVocalsProgress)
+          makeProgress(setVocalsProgress),
+          song.drive_vocals_file_id
         );
         setVocalsUpload("done");
         updates.drive_vocals_file_id = fileId;
@@ -195,7 +215,8 @@ export function SongSetupPage() {
           "no_vocals.wav",
           "audio/wav",
           folderId,
-          makeProgress(setInstrProgress)
+          makeProgress(setInstrProgress),
+          song.drive_instrumental_file_id
         );
         setInstrUpload("done");
         updates.drive_instrumental_file_id = fileId;
@@ -213,6 +234,7 @@ export function SongSetupPage() {
       setInstrUpload((s) => (s === "uploading" ? "idle" : s));
     } finally {
       uploadingRef.current = false;
+      _driveUploadInProgress = false;
     }
   }, [song, audioUpload, vocalsUpload, instrUpload, updateSong]);
 
@@ -646,12 +668,22 @@ export function SongSetupPage() {
                       <span className="w-[6px] h-[6px] rounded-full bg-[#22C55E]" />
                       Google Drive connected
                     </div>
-                    <button
-                      onClick={disconnectDrive}
-                      className="text-[11px] text-[var(--text-muted)] hover:text-red-500 transition-colors"
-                    >
-                      Disconnect
-                    </button>
+                    <div className="flex items-center gap-3">
+                      {hasDriveIds && (
+                        <button
+                          onClick={resetDriveSync}
+                          className="text-[11px] text-[var(--text-muted)] hover:text-orange-500 transition-colors"
+                        >
+                          Reset sync
+                        </button>
+                      )}
+                      <button
+                        onClick={disconnectDrive}
+                        className="text-[11px] text-[var(--text-muted)] hover:text-red-500 transition-colors"
+                      >
+                        Disconnect
+                      </button>
+                    </div>
                   </div>
 
                   {/* audio.m4a */}

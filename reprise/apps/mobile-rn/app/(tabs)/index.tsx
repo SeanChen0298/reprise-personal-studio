@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -19,7 +19,8 @@ import {
   localFileExists,
   localPathForFile,
 } from "../../src/lib/google-drive-download";
-import { C } from "../../src/lib/theme";
+import { useTheme } from "../../src/lib/theme";
+import type { ThemeColors } from "../../src/lib/theme";
 import { IconMusic, IconChevronRight, IconCheck, IconCloud } from "../../src/components/icons";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -33,13 +34,15 @@ interface DownloadJob {
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function SongsScreen() {
+  const C = useTheme();
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
 
-  const autoDownload  = useSongFilesStore((s) => s.autoDownload);
-  const driveToken    = useSongFilesStore((s) => s.driveToken);
-  const localFiles    = useSongFilesStore((s) => s.localFiles);   // full map for reactivity
-  const setLocalFiles = useSongFilesStore((s) => s.setLocalFiles);
+  const autoDownload   = useSongFilesStore((s) => s.autoDownload);
+  const driveToken     = useSongFilesStore((s) => s.driveToken);
+  const localFiles     = useSongFilesStore((s) => s.localFiles);   // full map for reactivity
+  const setLocalFiles  = useSongFilesStore((s) => s.setLocalFiles);
+  const clearLocalFiles = useSongFilesStore((s) => s.clearLocalFiles);
 
   const [songs, setSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState(true);
@@ -62,6 +65,33 @@ export default function SongsScreen() {
         if (!a.pinned && b.pinned) return 1;
         return 0;
       });
+
+      // ── Orphan detection: flag stale local files when Drive IDs have changed ──
+      // Old files are NOT deleted here — they remain playable until the new download
+      // overwrites them. Only the stored Drive ID is cleared so auto-download re-queues.
+      const currentLocalFiles = useSongFilesStore.getState().localFiles;
+      for (const song of data) {
+        const local = currentLocalFiles[song.id];
+        if (!local) continue;
+
+        // Stale if: we recorded a Drive ID and it has since changed (new ID or removed)
+        const audioDirty  = !!local.driveAudioFileId  &&
+          local.driveAudioFileId  !== (song.drive_audio_file_id          ?? null);
+        const vocalsDirty = !!local.driveVocalsFileId &&
+          local.driveVocalsFileId !== (song.drive_vocals_file_id          ?? null);
+        const instrDirty  = !!local.driveInstrFileId  &&
+          local.driveInstrFileId  !== (song.drive_instrumental_file_id   ?? null);
+
+        if (!audioDirty && !vocalsDirty && !instrDirty) continue;
+
+        // Clear only the Drive IDs — paths/files stay intact for continued playback
+        await useSongFilesStore.getState().setLocalFiles(song.id, {
+          ...(audioDirty  ? { driveAudioFileId: undefined }  : {}),
+          ...(vocalsDirty ? { driveVocalsFileId: undefined } : {}),
+          ...(instrDirty  ? { driveInstrFileId: undefined }  : {}),
+        });
+      }
+
       setSongs(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load songs");
@@ -89,7 +119,9 @@ export default function SongsScreen() {
         const local = useSongFilesStore.getState().localFiles[song.id];
         const destPath = local?.audioPath ?? localPathForFile(song.id, "audio.m4a");
         const exists = local?.audioPath ? await localFileExists(destPath) : false;
-        if (!exists) toDownload.push(song);
+        // Queue if: no local file, OR local file is stale (Drive ID changed)
+        const stale = exists && local?.driveAudioFileId !== song.drive_audio_file_id;
+        if (!exists || stale) toDownload.push(song);
       }
 
       if (toDownload.length === 0 || cancelled) return;
@@ -107,7 +139,7 @@ export default function SongsScreen() {
           const token = await getValidDriveToken();
           const destPath = localPathForFile(song.id, "audio.m4a");
           await downloadDriveFile(song.drive_audio_file_id!, destPath, token);
-          await setLocalFiles(song.id, { audioPath: destPath });
+          await setLocalFiles(song.id, { audioPath: destPath, driveAudioFileId: song.drive_audio_file_id });
           setDownloadJobs((prev) =>
             prev.map((j) => j.songId === song.id ? { ...j, state: "done" } : j)
           );
@@ -133,6 +165,126 @@ export default function SongsScreen() {
       if (dismissTimerRef.current) clearTimeout(dismissTimerRef.current);
     };
   }, [autoDownload, driveToken, songs, setLocalFiles]);
+
+  // ── Styles (depend on C) ────────────────────────────────────────────────────
+
+  const st = useMemo(() => StyleSheet.create({
+    container: { flex: 1, backgroundColor: C.bg },
+    center:    { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: C.bg },
+
+    header: {
+      paddingTop: 56,
+      paddingBottom: 12,
+      paddingHorizontal: 20,
+      backgroundColor: C.bg,
+    },
+    headerTitle: { fontSize: 24, fontWeight: "600", color: C.text, letterSpacing: -0.3 },
+    headerCount: { fontSize: 13, color: C.muted, marginTop: 2 },
+
+    // Download queue panel
+    downloadPanel: {
+      marginHorizontal: 16,
+      marginBottom: 8,
+      backgroundColor: C.surface,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: C.border,
+      overflow: "hidden",
+    },
+    downloadPanelHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      borderBottomWidth: 1,
+      borderBottomColor: C.border,
+    },
+    downloadPanelLeft:    { flexDirection: "row", alignItems: "center", gap: 8, flex: 1 },
+    panelSpinner:         { transform: [{ scale: 0.8 }] },
+    panelDot:             { width: 7, height: 7, borderRadius: 4 },
+    downloadPanelTitle:   { fontSize: 13, fontWeight: "500", color: C.text, flex: 1 },
+    downloadPanelDismiss: { fontSize: 12, color: C.muted },
+    downloadJobRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      gap: 10,
+      borderBottomWidth: 0.5,
+      borderBottomColor: C.border,
+    },
+    jobDot:   { width: 6, height: 6, borderRadius: 3, flexShrink: 0 },
+    jobTitle: { flex: 1, fontSize: 12.5, color: C.text },
+    jobState: { fontSize: 11.5, color: C.muted },
+
+    errorBanner: { margin: 16, padding: 12, backgroundColor: "#FEF2F2", borderRadius: 8 },
+    errorText:   { fontSize: 13, color: "#EF4444" },
+
+    separator:      { height: 0.5, backgroundColor: C.border, marginLeft: 76 },
+    emptyList:      { flex: 1 },
+    emptyContainer: { flex: 1, alignItems: "center", justifyContent: "center", padding: 40 },
+    emptyIcon: {
+      width: 52, height: 52,
+      borderRadius: 26,
+      backgroundColor: C.surface,
+      alignItems: "center",
+      justifyContent: "center",
+      marginBottom: 14,
+      shadowColor: "#000",
+      shadowOpacity: 0.04,
+      shadowRadius: 4,
+      shadowOffset: { width: 0, height: 1 },
+      elevation: 1,
+    },
+    emptyTitle:    { fontSize: 15, fontWeight: "500", color: C.text, marginBottom: 6 },
+    emptySubtitle: { fontSize: 13, color: C.muted, textAlign: "center", lineHeight: 20 },
+
+    row: {
+      flexDirection: "row",
+      alignItems: "center",
+      backgroundColor: C.bg,
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+      gap: 12,
+    },
+    thumb:            { width: 48, height: 48, borderRadius: 8, overflow: "hidden", flexShrink: 0 },
+    thumbImg:         { width: "100%", height: "100%" },
+    thumbPlaceholder: {
+      width: "100%",
+      height: "100%",
+      backgroundColor: C.surface,
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: 8,
+    },
+    pinnedDot: {
+      position: "absolute",
+      top: 3, right: 3,
+      width: 5, height: 5,
+      borderRadius: 3,
+      backgroundColor: C.theme,
+      opacity: 0.5,
+    },
+    rowBody:   { flex: 1, minWidth: 0 },
+    rowTitle:  { fontSize: 14, fontWeight: "500", color: C.text },
+    rowArtist: { fontSize: 12, color: C.muted, marginTop: 2 },
+
+    badge: {
+      marginTop: 5,
+      alignSelf: "flex-start",
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 3,
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 4,
+      borderWidth: 1,
+    },
+    badgeDevice: { backgroundColor: "#F0FDF4", borderColor: "#BBF7D0" },
+    badgeDrive:  { backgroundColor: C.surface,  borderColor: C.border },
+    badgeText:   { fontSize: 10, color: C.muted, fontWeight: "500" },
+  }), [C]);
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
@@ -290,7 +442,7 @@ export default function SongsScreen() {
               </View>
 
               {/* Mastery ring */}
-              <MasteryRing value={song.mastery} />
+              <MasteryRing value={song.mastery} C={C} />
 
               {/* Chevron */}
               <IconChevronRight size={16} color={C.border} />
@@ -304,7 +456,7 @@ export default function SongsScreen() {
 
 // ─── Mastery ring ─────────────────────────────────────────────────────────────
 
-function MasteryRing({ value }: { value: number }) {
+function MasteryRing({ value, C }: { value: number; C: ThemeColors }) {
   const size = 26;
   return (
     <View
@@ -319,123 +471,3 @@ function MasteryRing({ value }: { value: number }) {
     />
   );
 }
-
-// ─── Styles ───────────────────────────────────────────────────────────────────
-
-const st = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg },
-  center:    { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: C.bg },
-
-  header: {
-    paddingTop: 56,
-    paddingBottom: 12,
-    paddingHorizontal: 20,
-    backgroundColor: C.bg,
-  },
-  headerTitle: { fontSize: 24, fontWeight: "600", color: C.text, letterSpacing: -0.3 },
-  headerCount: { fontSize: 13, color: C.muted, marginTop: 2 },
-
-  // Download queue panel
-  downloadPanel: {
-    marginHorizontal: 16,
-    marginBottom: 8,
-    backgroundColor: C.surface,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: C.border,
-    overflow: "hidden",
-  },
-  downloadPanelHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: C.border,
-  },
-  downloadPanelLeft:    { flexDirection: "row", alignItems: "center", gap: 8, flex: 1 },
-  panelSpinner:         { transform: [{ scale: 0.8 }] },
-  panelDot:             { width: 7, height: 7, borderRadius: 4 },
-  downloadPanelTitle:   { fontSize: 13, fontWeight: "500", color: C.text, flex: 1 },
-  downloadPanelDismiss: { fontSize: 12, color: C.muted },
-  downloadJobRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    gap: 10,
-    borderBottomWidth: 0.5,
-    borderBottomColor: C.border,
-  },
-  jobDot:   { width: 6, height: 6, borderRadius: 3, flexShrink: 0 },
-  jobTitle: { flex: 1, fontSize: 12.5, color: C.text },
-  jobState: { fontSize: 11.5, color: C.muted },
-
-  errorBanner: { margin: 16, padding: 12, backgroundColor: "#FEF2F2", borderRadius: 8 },
-  errorText:   { fontSize: 13, color: "#EF4444" },
-
-  separator:      { height: 0.5, backgroundColor: C.border, marginLeft: 76 },
-  emptyList:      { flex: 1 },
-  emptyContainer: { flex: 1, alignItems: "center", justifyContent: "center", padding: 40 },
-  emptyIcon: {
-    width: 52, height: 52,
-    borderRadius: 26,
-    backgroundColor: C.surface,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 14,
-    shadowColor: "#000",
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 1,
-  },
-  emptyTitle:    { fontSize: 15, fontWeight: "500", color: C.text, marginBottom: 6 },
-  emptySubtitle: { fontSize: 13, color: C.muted, textAlign: "center", lineHeight: 20 },
-
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: C.bg,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    gap: 12,
-  },
-  thumb:            { width: 48, height: 48, borderRadius: 8, overflow: "hidden", flexShrink: 0 },
-  thumbImg:         { width: "100%", height: "100%" },
-  thumbPlaceholder: {
-    width: "100%",
-    height: "100%",
-    backgroundColor: C.surface,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 8,
-  },
-  pinnedDot: {
-    position: "absolute",
-    top: 3, right: 3,
-    width: 5, height: 5,
-    borderRadius: 3,
-    backgroundColor: C.theme,
-    opacity: 0.5,
-  },
-  rowBody:   { flex: 1, minWidth: 0 },
-  rowTitle:  { fontSize: 14, fontWeight: "500", color: C.text },
-  rowArtist: { fontSize: 12, color: C.muted, marginTop: 2 },
-
-  badge: {
-    marginTop: 5,
-    alignSelf: "flex-start",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    borderWidth: 1,
-  },
-  badgeDevice: { backgroundColor: "#F0FDF4", borderColor: "#BBF7D0" },
-  badgeDrive:  { backgroundColor: C.surface,  borderColor: C.border },
-  badgeText:   { fontSize: 10, color: C.muted, fontWeight: "500" },
-});

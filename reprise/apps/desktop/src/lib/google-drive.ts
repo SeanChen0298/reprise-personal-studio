@@ -215,39 +215,53 @@ export async function getValidAccessToken(): Promise<string> {
 
 // ─── Drive folder helpers ─────────────────────────────────────────────────────
 
+// Deduplicates concurrent findOrCreateFolder calls for the same folder key so
+// parallel song uploads never race to create the same folder simultaneously.
+const _folderInFlight = new Map<string, Promise<string>>();
+
 async function findOrCreateFolder(
   accessToken: string,
   name: string,
   parentId?: string
 ): Promise<string> {
-  const q = [
-    `name = '${name.replace(/'/g, "\\'")}'`,
-    "mimeType = 'application/vnd.google-apps.folder'",
-    "trashed = false",
-    parentId ? `'${parentId}' in parents` : "'root' in parents",
-  ].join(" and ");
+  const key = `${parentId ?? "root"}::${name}`;
+  const inflight = _folderInFlight.get(key);
+  if (inflight) return inflight;
 
-  const search = await fetch(
-    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)`,
-    { headers: { Authorization: `Bearer ${accessToken}` } }
-  );
-  const { files } = await search.json() as { files: { id: string }[] };
-  if (files.length > 0) return files[0].id;
+  const promise = (async () => {
+    const q = [
+      `name = '${name.replace(/'/g, "\\'")}'`,
+      "mimeType = 'application/vnd.google-apps.folder'",
+      "trashed = false",
+      parentId ? `'${parentId}' in parents` : "'root' in parents",
+    ].join(" and ");
 
-  const create = await fetch("https://www.googleapis.com/drive/v3/files", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      name,
-      mimeType: "application/vnd.google-apps.folder",
-      parents: parentId ? [parentId] : [],
-    }),
-  });
-  const folder = await create.json() as { id: string };
-  return folder.id;
+    const search = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    const { files } = await search.json() as { files: { id: string }[] };
+    if (files.length > 0) return files[0].id;
+
+    const create = await fetch("https://www.googleapis.com/drive/v3/files", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        name,
+        mimeType: "application/vnd.google-apps.folder",
+        parents: parentId ? [parentId] : [],
+      }),
+    });
+    const folder = await create.json() as { id: string };
+    return folder.id;
+  })();
+
+  _folderInFlight.set(key, promise);
+  promise.finally(() => _folderInFlight.delete(key));
+  return promise;
 }
 
 export async function ensureSongFolder(
@@ -289,23 +303,30 @@ export async function uploadFileResumable(
   fileName: string,
   mimeType: string,
   folderId: string,
-  onProgress?: (p: DriveUploadProgress) => void
+  onProgress?: (p: DriveUploadProgress) => void,
+  existingFileId?: string
 ): Promise<string> {
   const totalBytes = data.byteLength;
 
-  const initRes = await fetch(
-    "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-        "X-Upload-Content-Type": mimeType,
-        "X-Upload-Content-Length": String(totalBytes),
-      },
-      body: JSON.stringify({ name: fileName, parents: [folderId] }),
-    }
-  );
+  // If an existing file ID is provided, update the file in-place (PATCH) to avoid
+  // creating a duplicate. Otherwise, create a new file (POST).
+  const initUrl = existingFileId
+    ? `https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=resumable&fields=id`
+    : "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id";
+  const initBody = existingFileId
+    ? JSON.stringify({ name: fileName }) // no parents when updating
+    : JSON.stringify({ name: fileName, parents: [folderId] });
+
+  const initRes = await fetch(initUrl, {
+    method: existingFileId ? "PATCH" : "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      "X-Upload-Content-Type": mimeType,
+      "X-Upload-Content-Length": String(totalBytes),
+    },
+    body: initBody,
+  });
   if (!initRes.ok) {
     throw new Error(`Failed to initiate Drive upload: ${await initRes.text()}`);
   }
@@ -343,4 +364,64 @@ export async function uploadFileResumable(
 /** Returns a direct download URL for a Drive file (requires access token on mobile). */
 export function getDriveDownloadUrl(fileId: string): string {
   return `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
+}
+
+/**
+ * Delete ALL files and folders inside the Reprise root folder on Drive.
+ * This permanently removes every audio file synced by this app for every song.
+ * Returns the total number of items deleted.
+ */
+export async function purgeDriveAll(accessToken: string): Promise<number> {
+  const delOne = async (id: string): Promise<number> => {
+    const r = await fetch(`https://www.googleapis.com/drive/v3/files/${id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    return r.ok || r.status === 404 ? 1 : 0;
+  };
+
+  // Find the root folder
+  const q = [
+    "name = '[Reprise Audio Files - DO NOT MODIFY]'",
+    "mimeType = 'application/vnd.google-apps.folder'",
+    "trashed = false",
+    "'root' in parents",
+  ].join(" and ");
+  const rootRes = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  const { files: rootFiles } = await rootRes.json() as { files: { id: string }[] };
+  console.log("[purgeDriveAll] root folders found:", rootFiles.length);
+  if (rootFiles.length === 0) return 0;
+
+  let deleted = 0;
+  for (const root of rootFiles) {
+    const childQ = `'${root.id}' in parents and trashed = false`;
+    const childRes = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(childQ)}&fields=files(id,mimeType)&pageSize=100`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    const { files: children } = await childRes.json() as { files: { id: string; mimeType: string }[] };
+    console.log("[purgeDriveAll] song folders + files found:", children.length);
+
+    for (const child of children) {
+      if (child.mimeType === "application/vnd.google-apps.folder") {
+        const gcQ = `'${child.id}' in parents and trashed = false`;
+        const gcRes = await fetch(
+          `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(gcQ)}&fields=files(id)&pageSize=100`,
+          { headers: { Authorization: `Bearer ${accessToken}` } }
+        );
+        const { files: grandChildren } = await gcRes.json() as { files: { id: string }[] };
+        console.log("[purgeDriveAll] deleting", grandChildren.length, "files in folder", child.id);
+        for (const gc of grandChildren) {
+          deleted += await delOne(gc.id);
+        }
+      }
+      deleted += await delOne(child.id);
+    }
+    await delOne(root.id);
+  }
+  console.log("[purgeDriveAll] total deleted:", deleted);
+  return deleted;
 }

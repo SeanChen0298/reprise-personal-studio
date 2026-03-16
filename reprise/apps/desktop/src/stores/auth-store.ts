@@ -40,13 +40,16 @@ export const useAuthStore = create<AuthStore>((set) => ({
       set({ loading: false });
     }
 
-    supabase.auth.onAuthStateChange((_event: string, session: import("@supabase/supabase-js").Session | null) => {
+    supabase.auth.onAuthStateChange((event: string, session: import("@supabase/supabase-js").Session | null) => {
       set({ session, user: session?.user ?? null });
 
       if (session?.user) {
-        // User just signed in — load their data
-        useSongStore.getState().loadAllData();
-        loadPreferences(session.user.id).then(() => startPrefSync(session.user.id));
+        // Only reload data when the user actively signs in (not on token refresh or
+        // initial session — those are handled by initialize() above or don't need a reload).
+        if (event === "SIGNED_IN") {
+          useSongStore.getState().loadAllData();
+          loadPreferences(session.user.id).then(() => startPrefSync(session.user.id));
+        }
       } else {
         // User signed out — clear song data and stop syncing preferences
         useSongStore.getState().clearData();

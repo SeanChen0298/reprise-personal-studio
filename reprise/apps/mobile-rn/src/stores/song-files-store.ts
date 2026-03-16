@@ -22,6 +22,10 @@ export interface SongLocalFiles {
   audioPath?: string;     // absolute local path to audio.m4a
   vocalsPath?: string;    // absolute local path to vocals.wav
   instrPath?: string;     // absolute local path to no_vocals.wav
+  // Drive file IDs at time of download — used to detect orphaned files after metadata changes
+  driveAudioFileId?: string;
+  driveVocalsFileId?: string;
+  driveInstrFileId?: string;
 }
 
 interface SongFilesState {

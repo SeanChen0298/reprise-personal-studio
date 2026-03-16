@@ -1,8 +1,9 @@
 import { Tabs } from "expo-router";
-import { C } from "../../src/lib/theme";
+import { useTheme } from "../../src/lib/theme";
 import { IconMusic, IconSettings } from "../../src/components/icons";
 
 export default function TabLayout() {
+  const C = useTheme();
   return (
     <Tabs
       screenOptions={{
@@ -12,9 +13,9 @@ export default function TabLayout() {
         tabBarInactiveTintColor: C.muted,
         tabBarStyle: {
           backgroundColor: C.surface,
-          borderTopColor: C.border,
-          borderTopWidth: 0.5,
+          borderTopWidth: 0,
           height: 56,
+          elevation: 0,
         },
       }}
     >

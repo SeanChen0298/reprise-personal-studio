@@ -173,6 +173,8 @@ export const useSongStore = create<SongStore>()((set, get) => ({
         (sections[row.song_id] ??= []).push(dbRowToSection(row));
       }
 
+      const totalLines = Object.values(lines).reduce((sum, arr) => sum + arr.length, 0);
+      console.log("[loadAllData] DONE", { songs: songsRes.data.length, totalLines, linesBySong: Object.fromEntries(Object.entries(lines).map(([k, v]) => [k, v.length])) });
       set({
         songs: songsRes.data.map(dbRowToSong),
         lines,
@@ -447,6 +449,8 @@ export const useSongStore = create<SongStore>()((set, get) => ({
     // Everything else (primary language, language change, etc.) is a "primary save".
     const isTranslationSave = translationLang != null && language === translationLang;
 
+    console.log("[setLinesForLanguage] START", { songId, language, lineCount: lines.length, translationLang, isTranslationSave, userId });
+
     // Optimistic: for primary saves keep only translation lines; for translation saves keep
     // everything EXCEPT lines of this translation language (null-language primary lines are preserved).
     set((s) => ({
@@ -487,15 +491,21 @@ export const useSongStore = create<SongStore>()((set, get) => ({
       ({ error: delError } = await deleteQuery);
     }
 
+    console.log("[setLinesForLanguage] DELETE done", { delError });
+
     if (delError) {
       await get().loadAllData();
       throw delError;
     }
 
     if (lines.length > 0) {
-      const { error: insError } = await db
+      const rowsToInsert = lines.map((l) => lineToDbRow(l, userId));
+      console.log("[setLinesForLanguage] INSERT", { count: rowsToInsert.length, sample: rowsToInsert[0] });
+      const { error: insError, data: insData } = await db
         .from("lines")
-        .insert(lines.map((l) => lineToDbRow(l, userId)));
+        .insert(rowsToInsert)
+        .select("id");
+      console.log("[setLinesForLanguage] INSERT done", { insError, insertedCount: insData?.length ?? 0 });
       if (insError) {
         await get().loadAllData();
         throw insError;
@@ -504,6 +514,7 @@ export const useSongStore = create<SongStore>()((set, get) => ({
         get().generateFuriganaForSong(songId).catch(() => {});
       }
     }
+    console.log("[setLinesForLanguage] DONE");
   },
 
   addLine: async (songId, text, order) => {
@@ -615,10 +626,55 @@ export const useSongStore = create<SongStore>()((set, get) => ({
         console.error("[furigana] failed for line:", line.id, line.text.slice(0, 30), err);
       }
     }
+
+    // Backfill: generate custom_furigana_html for lines with custom_text but no custom_furigana_html
+    const KANJI_RE = /[\u4E00-\u9FAF\u3400-\u4DBF]/;
+    const customTargets = targets.filter(
+      (l) => l.custom_text && !l.custom_furigana_html && KANJI_RE.test(l.custom_text)
+    );
+    for (const line of customTargets) {
+      try {
+        const html = await generateFurigana(line.custom_text!);
+        await supabase.from("lines").update({ custom_furigana_html: html }).eq("id", line.id);
+        set((s) => ({
+          lines: {
+            ...s.lines,
+            [songId]: (s.lines[songId] ?? []).map((l) =>
+              l.id === line.id ? { ...l, custom_furigana_html: html } : l
+            ),
+          },
+        }));
+      } catch (err) {
+        console.error("[furigana] custom_text furigana failed for line:", line.id, err);
+      }
+    }
   },
 
   updateLineCustomText: async (songId, lineId, customText) => {
-    await get().updateLine(songId, lineId, { custom_text: customText });
+    await get().updateLine(songId, lineId, { custom_text: customText, custom_furigana_html: undefined });
+
+    // Fire-and-forget: generate furigana for custom_text (Japanese songs only)
+    const song = get().songs.find((s) => s.id === songId);
+    const KANJI_RE = /[\u4E00-\u9FAF\u3400-\u4DBF]/;
+    if (song?.language?.startsWith("ja") && customText && KANJI_RE.test(customText)) {
+      (async () => {
+        try {
+          const { generateFurigana } = await import("@reprise/shared");
+          const html = await generateFurigana(customText);
+          await supabase.from("lines").update({ custom_furigana_html: html }).eq("id", lineId);
+          set((s) => ({
+            lines: {
+              ...s.lines,
+              [songId]: (s.lines[songId] ?? []).map((l) =>
+                l.id === lineId ? { ...l, custom_furigana_html: html } : l
+              ),
+            },
+          }));
+        } catch {
+          // fail silently
+        }
+      })();
+    }
   },
 
   updateLineAnnotations: async (songId, lineId, annotations) => {
@@ -925,6 +981,9 @@ function dbRowToSong(row: Record<string, unknown>): Song {
     stem_error: row.stem_error as string | undefined,
     pitch_status: (row.pitch_status as Song["pitch_status"]) ?? "idle",
     pitch_error: row.pitch_error as string | undefined,
+    drive_audio_file_id: row.drive_audio_file_id as string | undefined,
+    drive_vocals_file_id: row.drive_vocals_file_id as string | undefined,
+    drive_instrumental_file_id: row.drive_instrumental_file_id as string | undefined,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -958,6 +1017,9 @@ function songToDbRow(song: Song): Record<string, unknown> {
     stem_error: song.stem_error ?? null,
     pitch_status: song.pitch_status ?? "idle",
     pitch_error: song.pitch_error ?? null,
+    drive_audio_file_id: song.drive_audio_file_id ?? null,
+    drive_vocals_file_id: song.drive_vocals_file_id ?? null,
+    drive_instrumental_file_id: song.drive_instrumental_file_id ?? null,
     created_at: song.created_at,
     updated_at: song.updated_at,
   };
@@ -980,6 +1042,7 @@ function dbRowToLine(row: Record<string, unknown>): Line {
     status: row.status as LineStatus,
     play_count: (row.play_count as number | undefined) ?? 0,
     furigana_html: (row.furigana_html as string | undefined) ?? undefined,
+    custom_furigana_html: (row.custom_furigana_html as string | undefined) ?? undefined,
     language: row.language as string | undefined,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
@@ -1000,6 +1063,7 @@ function lineToDbRow(line: Line, userId: string): Record<string, unknown> {
     status: line.status,
     play_count: line.play_count ?? 0,
     furigana_html: line.furigana_html ?? null,
+    custom_furigana_html: line.custom_furigana_html ?? null,
     language: line.language ?? null,
     created_at: line.created_at,
     updated_at: line.updated_at,

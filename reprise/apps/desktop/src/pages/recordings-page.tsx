@@ -585,15 +585,12 @@ export function RecordingsPage() {
                         </span>
                         <div className="flex-1 min-w-0">
                           <div className="text-[14px] leading-[1.6] text-[var(--text-primary)]">
-                            {!line.custom_text && line.furigana_html ? (
-                              <span dangerouslySetInnerHTML={{ __html: line.furigana_html }} />
-                            ) : (
-                              <AnnotatedText
-                                text={line.custom_text ?? line.text}
-                                annotations={line.annotations}
-                                highlights={highlights}
-                              />
-                            )}
+                            <AnnotatedText
+                              text={line.custom_text ?? line.text}
+                              annotations={line.annotations}
+                              highlights={highlights}
+                              lineFuriganaHtml={line.custom_text ? line.custom_furigana_html : line.furigana_html}
+                            />
                           </div>
                           {translation && (
                             <div className="text-[12px] leading-snug text-[var(--text-muted)] mt-0.5">
