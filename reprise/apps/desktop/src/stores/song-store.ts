@@ -547,10 +547,6 @@ export const useSongStore = create<SongStore>()((set, get) => ({
     }));
 
     const dbData: Record<string, unknown> = { ...updated };
-    // Serialize annotations if present
-    if (dbData.annotations !== undefined) {
-      dbData.annotations = JSON.stringify(dbData.annotations);
-    }
 
     const { error } = await db.from("lines").update(dbData).eq("id", lineId);
     if (error) {
@@ -975,7 +971,9 @@ function dbRowToLine(row: Record<string, unknown>): Line {
     custom_text: row.custom_text as string | undefined,
     annotations: Array.isArray(row.annotations)
       ? (row.annotations as Annotation[])
-      : [],
+      : typeof row.annotations === "string"
+        ? (JSON.parse(row.annotations) as Annotation[])
+        : [],
     order: row.order as number,
     start_ms: row.start_ms as number | undefined,
     end_ms: row.end_ms as number | undefined,
@@ -995,7 +993,7 @@ function lineToDbRow(line: Line, userId: string): Record<string, unknown> {
     user_id: userId,
     text: line.text,
     custom_text: line.custom_text ?? null,
-    annotations: JSON.stringify(line.annotations ?? []),
+    annotations: line.annotations ?? [],
     order: line.order,
     start_ms: line.start_ms ?? null,
     end_ms: line.end_ms ?? null,

@@ -5,6 +5,7 @@ import * as Linking from "expo-linking";
 import { Alert, View, ActivityIndicator } from "react-native";
 import { useAuthStore } from "../src/stores/auth-store";
 import { useSongFilesStore } from "../src/stores/song-files-store";
+import { usePreferencesStore } from "../src/stores/preferences-store";
 import type { DriveToken } from "../src/lib/google-drive-download";
 import { AuthScreen } from "../src/screens/auth-screen";
 
@@ -16,12 +17,18 @@ export default function RootLayout() {
   const loading = useAuthStore((s) => s.loading);
   const hydrate = useSongFilesStore((s) => s.hydrate);
   const hydrated = useSongFilesStore((s) => s.hydrated);
+  const loadHighlights = usePreferencesStore((s) => s.loadHighlights);
 
   useEffect(() => {
     const unsub = initialize();
     hydrate();
     return unsub;
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load user's custom highlight config whenever the user changes
+  useEffect(() => {
+    if (user?.id) loadHighlights(user.id);
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Handle Google Drive OAuth deep link callback: reprise://auth/drive-callback?tokens...
   const url = Linking.useURL();

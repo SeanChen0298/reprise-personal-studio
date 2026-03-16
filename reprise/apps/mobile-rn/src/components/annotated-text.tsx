@@ -1,13 +1,7 @@
+import { useMemo } from "react";
 import { Text } from "react-native";
-import type { Annotation } from "@reprise/shared";
-
-const HIGHLIGHT_COLORS: Record<string, { bg: string; color: string }> = {
-  falsetto: { bg: "rgba(96,165,250,0.15)",  color: "#60A5FA" },
-  whisper:  { bg: "rgba(74,222,128,0.15)",  color: "#4ADE80" },
-  accent:   { bg: "rgba(248,113,113,0.15)", color: "#F87171" },
-  vibrato:  { bg: "rgba(167,139,250,0.15)", color: "#A78BFA" },
-  breath:   { bg: "rgba(251,146,60,0.15)",  color: "#FB923C" },
-};
+import type { Annotation, HighlightType } from "@reprise/shared";
+import { DEFAULT_HIGHLIGHTS } from "@reprise/shared";
 
 interface Segment {
   text: string;
@@ -46,19 +40,25 @@ function buildSegments(text: string, annotations?: Annotation[]): Segment[] {
 interface Props {
   text: string;
   annotations?: Annotation[];
+  highlights?: HighlightType[];
   fontSize?: number;
   color?: string;
   bold?: boolean;
 }
 
-export function AnnotatedText({ text, annotations, fontSize = 18, color = "#1C1C1E", bold = false }: Props) {
+export function AnnotatedText({ text, annotations, highlights = DEFAULT_HIGHLIGHTS, fontSize = 18, color = "#1C1C1E", bold = false }: Props) {
   const segments = buildSegments(text, annotations);
   const weight = bold ? "600" : "400";
+
+  const hlMap = useMemo(
+    () => new Map(highlights.map((h) => [h.id, { bg: h.bg, color: h.color }])),
+    [highlights]
+  );
 
   return (
     <Text style={{ fontSize, color, lineHeight: fontSize * 1.4, textAlign: "center", flexWrap: "wrap", fontFamily: "serif", fontWeight: weight }}>
       {segments.map((seg, i) => {
-        const hl = seg.type ? HIGHLIGHT_COLORS[seg.type] : null;
+        const hl = seg.type ? hlMap.get(seg.type) : null;
         if (hl) {
           return (
             <Text

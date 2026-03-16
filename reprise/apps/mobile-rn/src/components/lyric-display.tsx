@@ -1,9 +1,15 @@
 /**
- * LyricDisplay — carousel conveyor lyric animation for the practice screen.
+ * LyricDisplay — circular-buffer carousel animation.
  *
- * 5 absolutely-positioned slots driven by a single `scrollPos` shared value.
- * Forward: everything shifts up — prev vanishes, center→prev, next→center, next-next→next.
- * Backward: mirror image — everything shifts down.
+ * 5 physical slots rotate through roles (prev-prev, prev, center, next, next-next).
+ * physicalCenter (Reanimated shared value) tracks which slot is center.
+ *
+ * On animation complete (worklet, UI thread):
+ *   physicalCenter += dir   ← ATOMIC with
+ *   scrollPos = 0           ← no JS thread involvement → zero race condition
+ *
+ * Only the recycled (invisible) slot's content updates via React state.
+ * Visible slots never change content mid-animation → no flash.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -23,7 +29,7 @@ import Animated, {
   Extrapolation,
   runOnJS,
 } from "react-native-reanimated";
-import type { Line } from "@reprise/shared";
+import type { Line, HighlightType } from "@reprise/shared";
 import { AnnotatedText } from "./annotated-text";
 import type { ThemeColors } from "../lib/theme";
 import { STATUS_CONFIG, formatMs } from "../lib/line-status-config";
@@ -31,21 +37,30 @@ import { STATUS_CONFIG, formatMs } from "../lib/line-status-config";
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const LARGE_FONT  = 36;
-const SMALL_SCALE = 24 / 36;   // ~0.667  (24 px visual size for prev/next)
-const CENTER_FRAC = 0.36;       // center slot top-edge as fraction of container height
-const STEP_FRAC   = 0.20;       // vertical gap between slots (fraction)
+const SMALL_SCALE = 24 / 36;   // 0.667 — visual prev/next size
+const CENTER_FRAC = 0.36;
+const STEP_FRAC   = 0.20;
 
-// ─── Worklet helper ───────────────────────────────────────────────────────────
+// ─── Worklet helpers ──────────────────────────────────────────────────────────
 
-function slotAnimStyle(offset: number, scrollPosVal: number, h: number) {
+// Compute circular offset for physical slot s, given physicalCenter PC
+// All values are 0–4; arithmetic keeps numerator positive so JS % works.
+function circularOffset(s: number, PC: number): number {
   "worklet";
-  const eo      = offset - scrollPosVal;
+  return ((s - PC + 2 + 5) % 5) - 2;
+}
+
+function slotAnimStyle(eo: number, h: number) {
+  "worklet";
   const opacity = interpolate(eo, [-2, -1, 0, 1, 2], [0, 1, 1, 1, 0], Extrapolation.CLAMP);
-  const scale   = interpolate(
-    Math.abs(eo), [0, 1, 2], [1.0, SMALL_SCALE, SMALL_SCALE], Extrapolation.CLAMP,
-  );
-  const translateY = h * CENTER_FRAC + eo * h * STEP_FRAC;
-  return { opacity, transform: [{ translateY }, { scale }] as any };
+  const scale   = interpolate(Math.abs(eo), [0, 1, 2], [1.0, 0.6667, 0.6667], Extrapolation.CLAMP);
+  return {
+    opacity,
+    transform: [
+      { translateY: h * CENTER_FRAC + eo * h * STEP_FRAC },
+      { scale },
+    ] as any,
+  };
 }
 
 // ─── Furigana / ruby renderer ────────────────────────────────────────────────
@@ -67,10 +82,10 @@ function parseRubyHtml(html: string): RubySegment[] {
 }
 
 function RubyText({ html, color }: { html: string; color: string }) {
-  const segments = parseRubyHtml(html);
+  const segs = parseRubyHtml(html);
   return (
     <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "flex-end", justifyContent: "center" }}>
-      {segments.map((seg, i) =>
+      {segs.map((seg, i) =>
         seg.rt ? (
           <View key={i} style={{ alignItems: "center" }}>
             <Text style={{ fontSize: LARGE_FONT * 0.36, color, opacity: 0.55, fontFamily: "serif" }}>{seg.rt}</Text>
@@ -91,6 +106,7 @@ export interface LyricDisplayProps {
   currentIndex: number;
   showTranslation: boolean;
   translationByOrder: Map<number, string>;
+  highlights: HighlightType[];
   C: ThemeColors;
   onTapLine: (idx: number) => void;
   onNext?: () => void;
@@ -104,17 +120,29 @@ export function LyricDisplay({
   currentIndex,
   showTranslation,
   translationByOrder,
+  highlights,
   C,
   onTapLine,
   onNext,
   onPrev,
 }: LyricDisplayProps) {
+  // slotLines[s] = the line rendered in physical slot s (0–4)
+  // Initially: slots 0–4 show lines at offsets -2,-1,0,+1,+2 from currentIndex
+  const [slotLines, setSlotLines] = useState<(Line | null)[]>(() =>
+    [-2, -1, 0, 1, 2].map(o => lines[currentIndex + o] ?? null)
+  );
+  // physicalCenterState mirrors physicalCenter.value for React rendering
+  const [physicalCenterState, setPhysicalCenterState] = useState(2);
+  // committedIndex: index of the line currently in the center slot (for meta + tap)
   const [committedIndex, setCommittedIndex] = useState(currentIndex);
+
   const committedIndexRef = useRef(currentIndex);
   const isAnimatingRef    = useRef(false);
 
-  const scrollPos  = useSharedValue(0);
-  const containerH = useSharedValue(480);
+  // Reanimated shared values (UI thread)
+  const scrollPos     = useSharedValue(0);
+  const physicalCenter = useSharedValue(2);
+  const containerH    = useSharedValue(480);
 
   // ── Swipe gesture ──────────────────────────────────────────────────────────
   const panResponder = useRef(
@@ -129,16 +157,39 @@ export function LyricDisplay({
     })
   ).current;
 
-  // ── Animation finish (JS thread) ───────────────────────────────────────────
-  // Reset scrollPos AND update committedIndex in the same JS call so Fabric
-  // commits both to the native layer in the same frame (New Architecture / JSI).
-  const onAnimationFinish = useCallback(() => {
+  // ── JS callbacks ───────────────────────────────────────────────────────────
+
+  // Called after animation: update the recycled (invisible) slot + bookkeeping
+  const recycleSlot = useCallback((
+    recycledSlotIdx: number,
+    newLineIdx: number,
+    newCommittedIndex: number,
+    newPhysCenter: number,
+  ) => {
     isAnimatingRef.current = false;
-    scrollPos.value = 0;
-    setCommittedIndex(committedIndexRef.current);
+    setSlotLines(prev => {
+      const next = [...prev] as (Line | null)[];
+      next[recycledSlotIdx] = lines[newLineIdx] ?? null;
+      return next;
+    });
+    setCommittedIndex(newCommittedIndex);
+    setPhysicalCenterState(newPhysCenter);
+  }, [lines]);
+
+  // Called on animation cancel (rapid navigation)
+  const snapToIndex = useCallback((target: number) => {
+    isAnimatingRef.current = false;
+    setSlotLines([-2, -1, 0, 1, 2].map(o => lines[target + o] ?? null));
+    setCommittedIndex(target);
+    setPhysicalCenterState(2);
+  }, [lines]);
+
+  // Stable callback to clear isAnimatingRef from worklet via runOnJS
+  const clearAnimating = useCallback(() => {
+    isAnimatingRef.current = false;
   }, []);
 
-  // ── Trigger carousel transition ────────────────────────────────────────────
+  // ── Animation trigger ─────────────────────────────────────────────────────
   useEffect(() => {
     const target = currentIndex;
     if (target === committedIndexRef.current) return;
@@ -147,35 +198,61 @@ export function LyricDisplay({
     committedIndexRef.current = target;
 
     if (isAnimatingRef.current) {
-      // Already animating — snap both together
-      isAnimatingRef.current = false;
+      // Cancel in-flight animation, snap
       scrollPos.value = 0;
-      setCommittedIndex(target); // same-frame as scrollPos reset
+      physicalCenter.value = 2;
+      snapToIndex(target);
       return;
     }
 
     const dir = target > prevIdx ? 1 : -1;
     isAnimatingRef.current = true;
 
+    // Pre-compute on JS thread — captured by value in the worklet closure,
+    // so the worklet never needs to read from a ref on the UI thread.
+    const newLineIdx      = target + (dir === 1 ? 2 : -2);
+    const capturedTarget  = target;
+
     scrollPos.value = withTiming(
       dir,
       { duration: 320, easing: Easing.out(Easing.cubic) },
       (finished) => {
-        if (finished) {
-          runOnJS(onAnimationFinish)();
-        } else {
-          runOnJS(() => { isAnimatingRef.current = false; })();
+        "worklet";
+        if (!finished) {
+          runOnJS(clearAnimating)();
+          return;
         }
+
+        const P = physicalCenter.value;
+        // New center: the slot that was at offset +dir
+        const newPC        = (P + (dir === 1 ? 1 : 4)) % 5;
+        // Recycled slot: the slot leaving the visible range
+        const recycledSlot = dir === 1 ? (P + 3) % 5 : (P + 2) % 5;
+
+        // ── ATOMIC on UI thread (same worklet frame = same UI frame) ─────────
+        physicalCenter.value = newPC;
+        scrollPos.value      = 0;
+        // ────────────────────────────────────────────────────────────────────
+
+        // Async: update the invisible recycled slot + React bookkeeping
+        runOnJS(recycleSlot)(recycledSlot, newLineIdx, capturedTarget, newPC);
       },
     );
-  }, [currentIndex, onAnimationFinish]);
+  }, [currentIndex, recycleSlot, snapToIndex, clearAnimating]);
 
-  // ── Animated styles (one per slot offset) ─────────────────────────────────
-  const anim_m2 = useAnimatedStyle(() => slotAnimStyle(-2, scrollPos.value, containerH.value));
-  const anim_m1 = useAnimatedStyle(() => slotAnimStyle(-1, scrollPos.value, containerH.value));
-  const anim_0  = useAnimatedStyle(() => slotAnimStyle(0,  scrollPos.value, containerH.value));
-  const anim_p1 = useAnimatedStyle(() => slotAnimStyle(1,  scrollPos.value, containerH.value));
-  const anim_p2 = useAnimatedStyle(() => slotAnimStyle(2,  scrollPos.value, containerH.value));
+  // ── Animated styles (one per physical slot) ───────────────────────────────
+  const anim0 = useAnimatedStyle(() => slotAnimStyle(circularOffset(0, physicalCenter.value) - scrollPos.value, containerH.value));
+  const anim1 = useAnimatedStyle(() => slotAnimStyle(circularOffset(1, physicalCenter.value) - scrollPos.value, containerH.value));
+  const anim2 = useAnimatedStyle(() => slotAnimStyle(circularOffset(2, physicalCenter.value) - scrollPos.value, containerH.value));
+  const anim3 = useAnimatedStyle(() => slotAnimStyle(circularOffset(3, physicalCenter.value) - scrollPos.value, containerH.value));
+  const anim4 = useAnimatedStyle(() => slotAnimStyle(circularOffset(4, physicalCenter.value) - scrollPos.value, containerH.value));
+
+  const animStyles = [anim0, anim1, anim2, anim3, anim4];
+
+  // ── Slot role helpers ─────────────────────────────────────────────────────
+  const PC = physicalCenterState;
+  const prevSlot   = (PC + 4) % 5;  // offset -1
+  const nextSlot   = (PC + 1) % 5;  // offset +1
 
   // ── Line content renderer ─────────────────────────────────────────────────
   const renderLine = (line: Line | null, isCenter: boolean) => {
@@ -190,6 +267,7 @@ export function LyricDisplay({
         <AnnotatedText
           text={text}
           annotations={line.annotations}
+          highlights={highlights}
           fontSize={LARGE_FONT}
           color={color}
           bold={isCenter}
@@ -208,8 +286,8 @@ export function LyricDisplay({
     );
   };
 
-  // ── Meta row data ─────────────────────────────────────────────────────────
-  const centerLine  = lines[committedIndex] ?? null;
+  // ── Meta row ──────────────────────────────────────────────────────────────
+  const centerLine  = slotLines[PC] ?? null;
   const statusCfg   = centerLine ? STATUS_CONFIG[centerLine.status] : null;
   const hasTs       = centerLine?.start_ms !== undefined && centerLine?.end_ms !== undefined;
   const timestampTx = hasTs ? `${formatMs(centerLine!.start_ms!)} – ${formatMs(centerLine!.end_ms!)}` : null;
@@ -220,53 +298,38 @@ export function LyricDisplay({
       onLayout={(e) => { containerH.value = e.nativeEvent.layout.height; }}
       {...panResponder.panHandlers}
     >
-      {/* Slot −2: hidden above (no touch) */}
-      <Animated.View style={[styles.slot, anim_m2]} pointerEvents="none">
-        {renderLine(lines[committedIndex - 2] ?? null, false)}
-      </Animated.View>
+      {/* 5 physical slots rendered in z-order: hidden first, center last */}
+      {([0, 1, 2, 3, 4] as const).map(s => {
+        const isCenter = s === PC;
+        const isPrev   = s === prevSlot;
+        const isNext   = s === nextSlot;
+        const interactive = isCenter || isPrev || isNext;
 
-      {/* Slot −1: prev */}
-      <Animated.View style={[styles.slot, anim_m1]}>
-        <Pressable
-          onPress={() => committedIndex - 1 >= 0 && onTapLine(committedIndex - 1)}
-          style={styles.touch}
-          android_ripple={{ color: "rgba(0,0,0,0.04)" }}
-        >
-          {renderLine(lines[committedIndex - 1] ?? null, false)}
-        </Pressable>
-      </Animated.View>
-
-      {/* Slot 0: center (rendered last = highest z-order) */}
-      <Animated.View style={[styles.slot, anim_0, { zIndex: 10 }]}>
-        <Pressable
-          onPress={() => centerLine && onTapLine(committedIndex)}
-          style={styles.touch}
-          android_ripple={{ color: "rgba(0,0,0,0.04)" }}
-        >
-          {renderLine(centerLine, true)}
-          {showTranslation && centerLine && translationByOrder.has(centerLine.order) && (
-            <Text style={[styles.translation, { color: C.muted }]}>
-              {translationByOrder.get(centerLine.order)}
-            </Text>
-          )}
-        </Pressable>
-      </Animated.View>
-
-      {/* Slot +1: next */}
-      <Animated.View style={[styles.slot, anim_p1]}>
-        <Pressable
-          onPress={() => committedIndex + 1 < lines.length && onTapLine(committedIndex + 1)}
-          style={styles.touch}
-          android_ripple={{ color: "rgba(0,0,0,0.04)" }}
-        >
-          {renderLine(lines[committedIndex + 1] ?? null, false)}
-        </Pressable>
-      </Animated.View>
-
-      {/* Slot +2: hidden below (no touch) */}
-      <Animated.View style={[styles.slot, anim_p2]} pointerEvents="none">
-        {renderLine(lines[committedIndex + 2] ?? null, false)}
-      </Animated.View>
+        return (
+          <Animated.View
+            key={s}
+            style={[styles.slot, animStyles[s], isCenter && { zIndex: 10 }]}
+            pointerEvents={interactive ? "auto" : "none"}
+          >
+            <Pressable
+              onPress={() => {
+                if (isCenter) { centerLine && onTapLine(committedIndex); }
+                else if (isPrev) { committedIndex - 1 >= 0 && onTapLine(committedIndex - 1); }
+                else if (isNext) { committedIndex + 1 < lines.length && onTapLine(committedIndex + 1); }
+              }}
+              style={styles.touch}
+              android_ripple={{ color: "rgba(0,0,0,0.04)" }}
+            >
+              {renderLine(slotLines[s], isCenter)}
+              {isCenter && showTranslation && centerLine && translationByOrder.has(centerLine.order) && (
+                <Text style={[styles.translation, { color: C.muted }]}>
+                  {translationByOrder.get(centerLine.order)}
+                </Text>
+              )}
+            </Pressable>
+          </Animated.View>
+        );
+      })}
 
       {/* Meta row — fixed at bottom */}
       {lines.length > 0 && (

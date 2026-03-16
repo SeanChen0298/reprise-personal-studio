@@ -15,6 +15,10 @@ config.resolver.nodeModulesPaths = [
   path.resolve(monorepoRoot, 'node_modules'),
 ];
 
+// Prefer react-native field in package.json so workspace packages can provide
+// mobile-safe entry points (e.g. @reprise/shared omits kuromoji/Node.js deps).
+config.resolver.mainFields = ['react-native', 'browser', 'main'];
+
 // Force react and react-native to always resolve from the app's own node_modules.
 // pnpm's isolated node_modules can cause Metro to find multiple copies, leading to
 // "Cannot read property 'useMemo' of null" / "Invalid hook call" errors.

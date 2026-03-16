@@ -15,6 +15,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import type { Song, Line } from "@reprise/shared";
 import { fetchSong, fetchLines } from "../../src/lib/supabase";
 import { useSongFilesStore } from "../../src/stores/song-files-store";
+import { usePreferencesStore } from "../../src/stores/preferences-store";
 import { useLinePlayer } from "../../src/hooks/use-line-player";
 import { useTheme, isDark } from "../../src/lib/theme";
 import { LyricDisplay } from "../../src/components/lyric-display";
@@ -35,6 +36,7 @@ export default function PracticeScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const C = useTheme();
+  const highlights = usePreferencesStore((s) => s.highlights);
   // Always use pure white surface for practice screen
   const bg = C.surface;
 
@@ -269,6 +271,7 @@ export default function PracticeScreen() {
                 currentIndex={currentLineIndex}
                 showTranslation={showTranslation}
                 translationByOrder={translationByOrder}
+                highlights={highlights}
                 C={C}
                 onTapLine={(idx) => goToLine(idx, true)}
                 onNext={() => void nextLine()}
