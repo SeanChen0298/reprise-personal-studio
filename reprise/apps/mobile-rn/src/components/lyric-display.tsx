@@ -50,10 +50,14 @@ function circularOffset(s: number, PC: number): number {
 
 function slotAnimStyle(eo: number, h: number) {
   "worklet";
-  const opacity = interpolate(eo, [-2, -1, 0, 1, 2], [0, 1, 1, 1, 0], Extrapolation.CLAMP);
-  const scale   = interpolate(Math.abs(eo), [0, 1, 2], [1.0, 0.6667, 0.6667], Extrapolation.CLAMP);
+  const opacity  = interpolate(eo, [-2, -1, 0, 1, 2], [0, 1, 1, 1, 0], Extrapolation.CLAMP);
+  const scale    = interpolate(Math.abs(eo), [0, 1, 2], [1.0, 0.6667, 0.6667], Extrapolation.CLAMP);
+  // maxHeight prevents long lines from bleeding into adjacent slots
+  const maxH     = eo === 0 ? h * 0.34 : h * 0.24;
   return {
     opacity,
+    overflow: "hidden" as const,
+    maxHeight: maxH,
     transform: [
       { translateY: h * CENTER_FRAC + eo * h * STEP_FRAC },
       { scale },
@@ -336,33 +340,36 @@ export function LyricDisplay({
     if (!line) return null;
     const color = C.text;
 
+    // Scale font down for longer lines to avoid multi-line overflow
+    const mainText  = line.custom_text ?? line.text ?? "";
+    const len       = mainText.length;
+    const fontSize  = len > 30 ? 20 : len > 22 ? 24 : len > 14 ? 28 : LARGE_FONT;
+
     if (line.custom_text) {
-      // Annotated lyric: show custom text + furigana (for custom text) + subtext (original)
       return (
         <View style={{ alignItems: "center" }}>
           <AnnotatedText
             text={line.custom_text}
             annotations={line.annotations}
             highlights={highlights}
-            fontSize={LARGE_FONT}
+            fontSize={fontSize}
             color={color}
             bold
             lineFuriganaHtml={line.custom_furigana_html}
           />
-          <Text selectable={false} style={{ fontSize: Math.round(LARGE_FONT * 0.5), color, opacity: 0.4, fontFamily: "serif", marginTop: 4, textAlign: "center" }}>
+          <Text selectable={false} style={{ fontSize: Math.round(fontSize * 0.5), color, opacity: 0.4, fontFamily: "serif", marginTop: 4, textAlign: "center" }}>
             {line.text}
           </Text>
         </View>
       );
     }
 
-    // Original lyric: show text + furigana integrated via AnnotatedText
     return (
       <AnnotatedText
         text={line.text}
         annotations={line.annotations}
         highlights={highlights}
-        fontSize={LARGE_FONT}
+        fontSize={fontSize}
         color={color}
         bold
         lineFuriganaHtml={line.furigana_html}

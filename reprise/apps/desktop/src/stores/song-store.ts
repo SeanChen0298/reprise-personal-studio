@@ -144,21 +144,43 @@ export const useSongStore = create<SongStore>()((set, get) => ({
     try {
       const userId = await getUserId();
 
-      const [songsRes, linesRes, recordingsRes, sectionsRes] = await Promise.all([
-        db.from("songs").select("*").eq("user_id", userId).order("created_at"),
-        db.from("lines").select("*").eq("user_id", userId),
-        db.from("recordings").select("*").eq("user_id", userId),
-        db.from("sections").select("*").eq("user_id", userId),
+      const PAGE = 1000;
+      async function fetchAllRows<T>(
+        table: string,
+        extraFilter: (q: ReturnType<typeof db.from>) => ReturnType<typeof db.from>
+      ): Promise<T[]> {
+        const rows: T[] = [];
+        let from = 0;
+        while (true) {
+          const q = extraFilter(db.from(table).select("*")).range(from, from + PAGE - 1) as ReturnType<typeof db.from>;
+          const res = await q;
+          if (res.error) throw res.error;
+          rows.push(...(res.data as T[]));
+          if ((res.data as T[]).length < PAGE) break;
+          from += PAGE;
+        }
+        return rows;
+      }
+
+      const [songsRes, recordingsRes, sectionsRes] = await Promise.all([
+        db.from("songs").select("*").eq("user_id", userId).order("created_at").limit(5000),
+        db.from("recordings").select("*").eq("user_id", userId).limit(50000),
+        db.from("sections").select("*").eq("user_id", userId).limit(5000),
       ]);
 
       if (songsRes.error) throw songsRes.error;
-      if (linesRes.error) throw linesRes.error;
       if (recordingsRes.error) throw recordingsRes.error;
       if (sectionsRes.error) throw sectionsRes.error;
 
+      const allLineRows = await fetchAllRows<Record<string, unknown>>(
+        "lines",
+        (q) => q.eq("user_id", userId)
+      );
+      console.log("[loadAllData] raw lines from DB:", allLineRows.length);
+
       // Group lines/recordings/sections by song_id
       const lines: Record<string, Line[]> = {};
-      for (const row of linesRes.data) {
+      for (const row of allLineRows) {
         const line = dbRowToLine(row);
         (lines[line.song_id] ??= []).push(line);
       }
@@ -174,7 +196,7 @@ export const useSongStore = create<SongStore>()((set, get) => ({
       }
 
       const totalLines = Object.values(lines).reduce((sum, arr) => sum + arr.length, 0);
-      console.log("[loadAllData] DONE", { songs: songsRes.data.length, totalLines, linesBySong: Object.fromEntries(Object.entries(lines).map(([k, v]) => [k, v.length])) });
+      console.log("[loadAllData] DONE", { songs: songsRes.data.length, rawLines: allLineRows.length, totalLines, linesBySong: Object.fromEntries(Object.entries(lines).map(([k, v]) => [k, v.length])) });
       set({
         songs: songsRes.data.map(dbRowToSong),
         lines,

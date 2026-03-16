@@ -16,14 +16,14 @@ export function PracticePage() {
   const song = useSongStore((s) => s.songs.find((s) => s.id === id));
   const rawLines = useSongStore((s) => (id ? s.lines[id] : undefined));
 
-  // Main practice lines: those matching the song's primary language, or null-language (legacy)
+  // Main practice lines: all lines except translation lines
   const lines = useMemo(() => {
     if (!rawLines) return [];
-    const mainLang = song?.language;
+    const transLang = song?.translation_language;
     return [...rawLines]
-      .filter((l) => !mainLang || !l.language || l.language === mainLang)
+      .filter((l) => !transLang || l.language !== transLang)
       .sort((a, b) => a.order - b.order);
-  }, [rawLines, song?.language]);
+  }, [rawLines, song?.translation_language]);
 
   // Translation lines: those tagged with the song's translation_language
   const translationLines = useMemo(() => {

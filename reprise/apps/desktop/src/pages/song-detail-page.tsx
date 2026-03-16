@@ -19,13 +19,9 @@ export function SongDetailPage() {
   // Main lines: primary language (or no language for legacy) — exclude translation lines
   const lines = useMemo(() => {
     if (!rawLines) return [];
-    const mainLang = song?.language;
     const transLang = song?.translation_language;
     return [...rawLines]
-      .filter((l) => {
-        if (transLang && l.language === transLang) return false;
-        return !mainLang || !l.language || l.language === mainLang;
-      })
+      .filter((l) => !transLang || l.language !== transLang)
       .sort((a, b) => a.order - b.order);
   }, [rawLines, song?.language, song?.translation_language]);
 

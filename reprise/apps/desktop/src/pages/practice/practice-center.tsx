@@ -706,12 +706,25 @@ const lineIdx = lines.findIndex((l) => l.id === line.id);
                         onClickAnnotation={handleRemoveAnnotation}
                       />
                     </div>
-                    <button
-                      onClick={exitEditMode}
-                      className="mt-1 text-[10px] font-medium text-[var(--theme)] hover:underline cursor-pointer bg-transparent border-none"
-                    >
-                      ✓ Done
-                    </button>
+                    <div className="flex items-center justify-center gap-2 mt-1">
+                      {hasTimestamps && (
+                        <button
+                          onClick={() => player.playLineOnce(activeLineIndex)}
+                          className="w-6 h-6 rounded-full bg-[var(--theme)] text-white border-none cursor-pointer flex items-center justify-center hover:opacity-80 transition-opacity"
+                          title="Preview this line"
+                        >
+                          <svg width="9" height="9" viewBox="0 0 24 24" fill="#fff" style={{ marginLeft: 1 }}>
+                            <polygon points="5,3 19,12 5,21" />
+                          </svg>
+                        </button>
+                      )}
+                      <button
+                        onClick={exitEditMode}
+                        className="text-[10px] font-medium text-[var(--theme)] hover:underline cursor-pointer bg-transparent border-none"
+                      >
+                        ✓ Done
+                      </button>
+                    </div>
                     <FloatingToolbar
                       highlights={highlights}
                       symbols={symbols}
@@ -869,12 +882,25 @@ const lineIdx = lines.findIndex((l) => l.id === line.id);
                 <div className="text-[9.5px] text-[var(--text-muted)] mt-1 opacity-60">
                   Select text above to highlight · Click highlight to remove
                 </div>
-                <button
-                  onClick={exitEditMode}
-                  className="mt-2 text-[11px] font-medium text-[var(--theme)] hover:underline cursor-pointer bg-transparent border-none"
-                >
-                  ✓ Done
-                </button>
+                <div className="flex items-center justify-center gap-2 mt-2">
+                  {hasTimestamps && (
+                    <button
+                      onClick={() => player.playLineOnce(activeLineIndex)}
+                      className="w-6 h-6 rounded-full bg-[var(--theme)] text-white border-none cursor-pointer flex items-center justify-center hover:opacity-80 transition-opacity"
+                      title="Preview this line"
+                    >
+                      <svg width="9" height="9" viewBox="0 0 24 24" fill="#fff" style={{ marginLeft: 1 }}>
+                        <polygon points="5,3 19,12 5,21" />
+                      </svg>
+                    </button>
+                  )}
+                  <button
+                    onClick={exitEditMode}
+                    className="text-[11px] font-medium text-[var(--theme)] hover:underline cursor-pointer bg-transparent border-none"
+                  >
+                    ✓ Done
+                  </button>
+                </div>
                 {/* Annotation toolbar */}
                 <FloatingToolbar
                   highlights={highlights}

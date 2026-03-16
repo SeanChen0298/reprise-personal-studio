@@ -134,11 +134,11 @@ export function LyricsInputPage() {
 
   // Main-language lines only (exclude translation lines)
   const mainStoredLines = useMemo(() => {
-    const mainLang = song?.language;
+    const transLang = song?.translation_language;
     return storedLines
-      .filter((l) => !mainLang || !l.language || l.language === mainLang)
+      .filter((l) => !transLang || l.language !== transLang)
       .sort((a, b) => a.order - b.order);
-  }, [storedLines, song?.language]);
+  }, [storedLines, song?.translation_language]);
 
   // Translation lines (read-only in the editor)
   const translationStoredLines = useMemo(() => {

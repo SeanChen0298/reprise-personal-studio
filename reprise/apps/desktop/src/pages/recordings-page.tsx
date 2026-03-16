@@ -11,7 +11,7 @@ import { useHighlightStore } from "../lib/highlight-config";
 import { useRecorder } from "../hooks/use-recorder";
 import { playRecordingWithGain, type RecordingPlaybackHandle } from "../lib/play-recording";
 import { formatMs } from "../lib/status-config";
-import type { Recording, Line } from "../types/song";
+import type { Recording, Line, Section } from "../types/song";
 
 // ---------------------------------------------------------------------------
 // WaveSurfer thumbnail (renders peaks from the recording file, display-only)
@@ -243,15 +243,11 @@ export function RecordingsPage() {
   // Main lines: exclude translation lines from the lyric list
   const lines = useMemo(() => {
     if (!rawLines) return [];
-    const mainLang = song?.language;
     const transLang = song?.translation_language;
     return [...rawLines]
-      .filter((l) => {
-        if (transLang && l.language === transLang) return false;
-        return !mainLang || !l.language || l.language === mainLang;
-      })
+      .filter((l) => !transLang || l.language !== transLang)
       .sort((a, b) => a.order - b.order);
-  }, [rawLines, song?.language, song?.translation_language]);
+  }, [rawLines, song?.translation_language]);
 
   // Translation subtext by line order
   const translationByOrder = useMemo(() => {
@@ -489,6 +485,112 @@ export function RecordingsPage() {
 
   const sectionById = useMemo(() => new Map(sections.map((s) => [s.id, s])), [sections]);
 
+  // ── Song playback (lyrics panel) ─────────────────────────────────────────
+  const songAudioRef = useRef<HTMLAudioElement | null>(null);
+  const songRafRef = useRef<number>(0);
+  const [songSrcKey, setSongSrcKey] = useState<"original" | "vocal" | "instrumental">("original");
+  const [songPlaying, setSongPlaying] = useState(false);
+  const [songCurrentMs, setSongCurrentMs] = useState(0);
+
+  const songAudioSources = useMemo(() => {
+    const srcs: Array<{ key: "original" | "vocal" | "instrumental"; label: string; path: string }> = [];
+    if (song?.audio_path) srcs.push({ key: "original", label: "Original", path: song.audio_path });
+    if (song?.vocals_path) srcs.push({ key: "vocal", label: "Vocal", path: song.vocals_path });
+    if (song?.instrumental_path) srcs.push({ key: "instrumental", label: "Inst.", path: song.instrumental_path });
+    return srcs;
+  }, [song?.audio_path, song?.vocals_path, song?.instrumental_path]);
+
+  const currentSongPath = useMemo(() => {
+    const src = songAudioSources.find((s) => s.key === songSrcKey) ?? songAudioSources[0];
+    return src?.path;
+  }, [songSrcKey, songAudioSources]);
+
+  // Build flat lyric items: section headers interleaved before their first line
+  const lyricItems = useMemo(() => {
+    const sorted = [...sections].sort((a, b) => a.start_line_order - b.start_line_order);
+    type Item = { kind: "section"; section: Section } | { kind: "line"; line: Line };
+    const items: Item[] = [];
+    const sectionAtOrder = new Map(sorted.map((s) => [s.start_line_order, s]));
+    for (const line of lines) {
+      const sec = sectionAtOrder.get(line.order);
+      if (sec) items.push({ kind: "section", section: sec });
+      items.push({ kind: "line", line });
+    }
+    return items;
+  }, [lines, sections]);
+
+  // Which line is currently playing
+  const playingLineId = useMemo(() => {
+    if (!songPlaying) return null;
+    return lines.find(
+      (l) => l.start_ms != null && l.end_ms != null && songCurrentMs >= l.start_ms && songCurrentMs < l.end_ms
+    )?.id ?? null;
+  }, [songPlaying, songCurrentMs, lines]);
+
+  // RAF loop — track song position
+  useEffect(() => {
+    const tick = () => {
+      const audio = songAudioRef.current;
+      if (audio && !audio.paused) setSongCurrentMs(audio.currentTime * 1000);
+      songRafRef.current = requestAnimationFrame(tick);
+    };
+    songRafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(songRafRef.current);
+  }, []);
+
+  // Load new source when key changes
+  useEffect(() => {
+    const audio = songAudioRef.current;
+    if (!audio) return;
+    if (currentSongPath) {
+      audio.pause();
+      audio.src = convertFileSrc(currentSongPath);
+      setSongPlaying(false);
+      setSongCurrentMs(0);
+    }
+  }, [currentSongPath]);
+
+  // Track ended
+  useEffect(() => {
+    const audio = songAudioRef.current;
+    if (!audio) return;
+    const onEnded = () => setSongPlaying(false);
+    audio.addEventListener("ended", onEnded);
+    return () => audio.removeEventListener("ended", onEnded);
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => () => {
+    cancelAnimationFrame(songRafRef.current);
+    songAudioRef.current?.pause();
+  }, []);
+
+  const toggleSongPlay = useCallback(() => {
+    const audio = songAudioRef.current;
+    if (!audio || !currentSongPath) return;
+    if (audio.paused) {
+      audio.play().then(() => setSongPlaying(true)).catch(() => {});
+    } else {
+      audio.pause();
+      setSongPlaying(false);
+    }
+  }, [currentSongPath]);
+
+  const seekToLine = useCallback((line: Line) => {
+    const audio = songAudioRef.current;
+    if (!audio || !currentSongPath || line.start_ms == null) return;
+    audio.currentTime = line.start_ms / 1000;
+    // Don't call setSongCurrentMs here — the RAF loop reads audio.currentTime
+    // which is synchronously updated by the seek. Two competing state setters
+    // were causing the highlight to flicker between lines.
+    if (audio.paused) audio.play().then(() => setSongPlaying(true)).catch(() => {});
+  }, [currentSongPath]);
+
+  const seekToSection = useCallback((section: Section) => {
+    const first = lines.find((l) => l.order >= section.start_line_order && l.start_ms != null);
+    if (first) seekToLine(first);
+  }, [lines, seekToLine]);
+
   // ── Early return ─────────────────────────────────────────────────────────
   if (!song) {
     return (
@@ -504,6 +606,8 @@ export function RecordingsPage() {
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--bg)]">
       <Sidebar />
+
+      <audio ref={songAudioRef} preload="metadata" />
 
       <div className="flex flex-col flex-1 min-w-0">
         {/* Topbar */}
@@ -562,29 +666,96 @@ export function RecordingsPage() {
 
         {/* Body: split panels */}
         <div className="flex flex-1 min-h-0">
-          {/* Left panel — lyrics (read-only) */}
-          <div className="w-[42%] flex-shrink-0 border-r border-[var(--border)] flex flex-col min-h-0">
-            <div className="px-6 py-4 border-b border-[var(--border-subtle)] flex-shrink-0">
-              <span className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-[var(--text-muted)]">
-                Lyrics
-              </span>
+          {/* Left panel — lyrics with playback */}
+          <div className="w-1/2 flex-shrink-0 border-r border-[var(--border)] flex flex-col min-h-0">
+            {/* Header + player */}
+            <div className="px-5 pt-4 pb-3 border-b border-[var(--border-subtle)] flex-shrink-0 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-[var(--text-muted)]">
+                  Lyrics
+                </span>
+                {songAudioSources.length > 0 && (
+                  <div className="flex items-center gap-1">
+                    {songAudioSources.map((src) => (
+                      <button
+                        key={src.key}
+                        onClick={() => setSongSrcKey(src.key)}
+                        className={`px-[7px] py-[2px] text-[9.5px] font-medium rounded-[4px] border cursor-pointer transition-colors ${
+                          songSrcKey === src.key
+                            ? "bg-[var(--theme)] text-white border-[var(--theme)]"
+                            : "bg-transparent text-[var(--text-muted)] border-[var(--border)] hover:border-[#888]"
+                        }`}
+                      >
+                        {src.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {songAudioSources.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={toggleSongPlay}
+                    disabled={!currentSongPath}
+                    className="w-7 h-7 rounded-full bg-[var(--theme)] text-white flex items-center justify-center border-none cursor-pointer hover:opacity-85 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
+                  >
+                    {songPlaying ? (
+                      <svg width="9" height="9" viewBox="0 0 24 24" fill="#fff">
+                        <rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" />
+                      </svg>
+                    ) : (
+                      <svg width="9" height="9" viewBox="0 0 24 24" fill="#fff" style={{ marginLeft: 1 }}>
+                        <polygon points="5,3 19,12 5,21" />
+                      </svg>
+                    )}
+                  </button>
+                  <span className="text-[11px] tabular-nums text-[var(--text-muted)]">
+                    {formatMs(Math.round(songCurrentMs))}
+                  </span>
+                  <span className="text-[10px] text-[var(--text-muted)] opacity-50">
+                    Click a line to jump
+                  </span>
+                </div>
+              )}
             </div>
-            <div className="flex-1 overflow-y-auto px-6 py-4">
+
+            {/* Lines */}
+            <div className="flex-1 overflow-y-auto px-4 py-3">
               {lines.length === 0 ? (
                 <p className="text-[13px] text-[var(--text-muted)] text-center py-8">
                   No lyrics added yet.
                 </p>
               ) : (
-                <div className="flex flex-col gap-[6px]">
-                  {lines.map((line, i) => {
+                <div className="flex flex-col">
+                  {lyricItems.map((item) => {
+                    if (item.kind === "section") {
+                      return (
+                        <button
+                          key={`sec-${item.section.id}`}
+                          onClick={() => seekToSection(item.section)}
+                          className="flex items-center gap-2 mt-3 mb-1 w-full text-left cursor-pointer bg-transparent border-none group"
+                        >
+                          <span className="text-[9.5px] font-semibold uppercase tracking-[0.09em] text-[var(--text-muted)] group-hover:text-[var(--theme-text)] transition-colors flex-shrink-0">
+                            {item.section.name}
+                          </span>
+                          <div className="flex-1 h-px bg-[var(--border-subtle)]" />
+                        </button>
+                      );
+                    }
+                    const { line } = item;
+                    const isPlaying = playingLineId === line.id;
                     const translation = translationByOrder.get(line.order);
+                    const canSeek = line.start_ms != null && currentSongPath;
                     return (
-                      <div key={line.id} className="flex items-start gap-3 py-[5px]">
-                        <span className="text-[10.5px] text-[var(--text-muted)] tabular-nums w-5 text-right flex-shrink-0 mt-[2px]">
-                          {i + 1}
-                        </span>
+                      <div
+                        key={line.id}
+                        onClick={() => canSeek && seekToLine(line)}
+                        className={`flex items-start px-2 py-[5px] rounded-[6px] transition-colors ${
+                          canSeek ? "hover:bg-[var(--bg)] cursor-pointer" : ""
+                        }`}
+                      >
                         <div className="flex-1 min-w-0">
-                          <div className="text-[14px] leading-[1.6] text-[var(--text-primary)]">
+                          <div className={`text-[14px] leading-[1.6] text-[var(--text-primary)] transition-all ${isPlaying ? "font-semibold" : "font-normal"}`}>
                             <AnnotatedText
                               text={line.custom_text ?? line.text}
                               annotations={line.annotations}
