@@ -9,7 +9,8 @@ import { ConfirmDialog } from "../components/confirm-dialog";
 import { useSongStore } from "../stores/song-store";
 import { useHighlightStore } from "../lib/highlight-config";
 import { useRecorder } from "../hooks/use-recorder";
-import { playRecordingWithGain, type RecordingPlaybackHandle } from "../lib/play-recording";
+import { playRecordingWithGain } from "../lib/play-recording";
+import { usePreferencesStore } from "../stores/preferences-store";
 import { formatMs } from "../lib/status-config";
 import type { Recording, Line, Section } from "../types/song";
 
@@ -17,9 +18,24 @@ import type { Recording, Line, Section } from "../types/song";
 // WaveSurfer thumbnail (renders peaks from the recording file, display-only)
 // ---------------------------------------------------------------------------
 
-function RecordingWaveform({ filePath }: { filePath: string }) {
+function RecordingWaveform({
+  filePath,
+  isPlaying,
+  onEnded,
+}: {
+  filePath: string;
+  isPlaying: boolean;
+  onEnded: () => void;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WaveSurfer | null>(null);
+  const gainNodeRef = useRef<GainNode | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const onEndedRef = useRef(onEnded);
+  onEndedRef.current = onEnded;
+  const gain = usePreferencesStore((s) => s.recordingPlaybackGain);
+  const gainRef = useRef(gain);
+  gainRef.current = gain;
 
   useEffect(() => {
     const el = containerRef.current;
@@ -33,18 +49,56 @@ function RecordingWaveform({ filePath }: { filePath: string }) {
       barWidth: 2,
       barGap: 1,
       barRadius: 1,
-      interact: false,
+      interact: true,
       normalize: true,
     });
 
     wsRef.current = ws;
     ws.load(convertFileSrc(filePath)).catch(() => {});
+    ws.on("finish", () => onEndedRef.current());
+
+    // Route audio through Web Audio GainNode so gain can exceed 1.0
+    ws.on("ready", () => {
+      try {
+        const mediaEl = ws.getMediaElement();
+        const ctx = new AudioContext();
+        const source = ctx.createMediaElementSource(mediaEl);
+        const gainNode = ctx.createGain();
+        gainNode.gain.value = gainRef.current;
+        source.connect(gainNode);
+        gainNode.connect(ctx.destination);
+        gainNodeRef.current = gainNode;
+        audioCtxRef.current = ctx;
+      } catch {
+        // fallback: no amplification beyond 1.0
+      }
+    });
 
     return () => {
       ws.destroy();
       wsRef.current = null;
+      gainNodeRef.current = null;
+      audioCtxRef.current?.close().catch(() => {});
+      audioCtxRef.current = null;
     };
-  }, [filePath]);
+  }, [filePath]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sync gain when preference changes
+  useEffect(() => {
+    if (gainNodeRef.current) gainNodeRef.current.gain.value = gain;
+  }, [gain]);
+
+  // Sync play/pause from parent
+  useEffect(() => {
+    const ws = wsRef.current;
+    if (!ws) return;
+    if (isPlaying) {
+      audioCtxRef.current?.resume().catch(() => {});
+      ws.play().catch(() => {});
+    } else {
+      ws.pause();
+    }
+  }, [isPlaying]);
 
   return <div ref={containerRef} className="flex-1 min-w-0 overflow-hidden" />;
 }
@@ -65,6 +119,7 @@ interface RecordingEntryProps {
   onToggleBestTake: (id: string) => void;
   onDelete: (id: string) => void;
   onPlay: (rec: Recording) => void;
+  onPlayEnded: (id: string) => void;
   onCompare: (rec: Recording) => void;
   playingId: string | null;
   comparingId: string | null;
@@ -80,6 +135,7 @@ function RecordingEntry({
   onToggleBestTake,
   onDelete,
   onPlay,
+  onPlayEnded,
   onCompare,
   playingId,
   comparingId,
@@ -128,7 +184,11 @@ function RecordingEntry({
       </button>
 
       {/* Waveform */}
-      <RecordingWaveform filePath={rec.file_path} />
+      <RecordingWaveform
+        filePath={rec.file_path}
+        isPlaying={isPlaying}
+        onEnded={() => onPlayEnded(rec.id)}
+      />
 
       {/* Meta */}
       <div className="flex-shrink-0 flex flex-col items-end gap-[2px] min-w-[80px]">
@@ -332,34 +392,28 @@ export function RecordingsPage() {
   // ── Playback ─────────────────────────────────────────────────────────────
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [comparingId, setComparingId] = useState<string | null>(null);
-  const playHandleRef = useRef<RecordingPlaybackHandle | null>(null);
   const compareLineAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const stopAllPlayback = useCallback(() => {
-    playHandleRef.current?.stop();
-    playHandleRef.current = null;
     compareLineAudioRef.current?.pause();
     compareLineAudioRef.current = null;
     setPlayingId(null);
     setComparingId(null);
   }, []);
 
+  // WaveSurfer handles actual playback — just toggle the ID
   const handlePlay = useCallback((rec: Recording) => {
     if (playingId === rec.id) {
-      stopAllPlayback();
+      setPlayingId(null);
       return;
     }
     stopAllPlayback();
     setPlayingId(rec.id);
-    playRecordingWithGain(rec.file_path, () => {
-      setPlayingId((prev) => (prev === rec.id ? null : prev));
-      playHandleRef.current = null;
-    })
-      .then((handle) => {
-        playHandleRef.current = handle;
-      })
-      .catch(() => setPlayingId((prev) => (prev === rec.id ? null : prev)));
   }, [playingId, stopAllPlayback]);
+
+  const handlePlayEnded = useCallback((id: string) => {
+    setPlayingId((prev) => (prev === id ? null : prev));
+  }, []);
 
   const handleCompare = useCallback((rec: Recording) => {
     if (comparingId === rec.id) {
@@ -394,10 +448,7 @@ export function RecordingsPage() {
         // Then play the recording
         playRecordingWithGain(rec.file_path, () => {
           setComparingId((prev) => (prev === rec.id ? null : prev));
-          playHandleRef.current = null;
-        })
-          .then((handle) => { playHandleRef.current = handle; })
-          .catch(() => setComparingId((prev) => (prev === rec.id ? null : prev)));
+        }).catch(() => setComparingId((prev) => (prev === rec.id ? null : prev)));
       }
     };
 
@@ -612,15 +663,27 @@ export function RecordingsPage() {
       <div className="flex flex-col flex-1 min-w-0">
         {/* Topbar */}
         <header className="h-[54px] px-7 flex items-center justify-between bg-[var(--surface)] border-b border-[var(--border)] flex-shrink-0">
-          <button
-            onClick={() => navigate(`/song/${id}`)}
-            className="flex items-center gap-[6px] text-[13px] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors bg-transparent border-none cursor-pointer"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M19 12H5M12 19l-7-7 7-7" />
-            </svg>
-            {song.title}
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => navigate(`/song/${id}`)}
+              className="flex items-center gap-[6px] text-[13px] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors bg-transparent border-none cursor-pointer"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M19 12H5M12 19l-7-7 7-7" />
+              </svg>
+              {song.title}
+            </button>
+            <button
+              onClick={() => navigate(`/song/${id}/practice`)}
+              className="flex items-center gap-[5px] px-3 py-[5px] rounded-[7px] border border-[var(--border)] bg-transparent text-[12px] text-[var(--text-muted)] hover:border-[#888] hover:text-[var(--text-primary)] transition-all cursor-pointer"
+              title="Go to practice"
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="5,3 19,12 5,21" />
+              </svg>
+              Practice
+            </button>
+          </div>
 
           <div className="flex items-center gap-2">
             {selectMode ? (
@@ -755,7 +818,7 @@ export function RecordingsPage() {
                         }`}
                       >
                         <div className="flex-1 min-w-0">
-                          <div className={`text-[14px] leading-[1.6] text-[var(--text-primary)] transition-all ${isPlaying ? "font-semibold" : "font-normal"}`}>
+                          <div className={`text-[14px] leading-[1.6] text-[var(--text-primary)] transition-all ${isPlaying ? "font-medium" : "font-normal"}`}>
                             <AnnotatedText
                               text={line.custom_text ?? line.text}
                               annotations={line.annotations}
@@ -887,6 +950,7 @@ export function RecordingsPage() {
                           onToggleBestTake={(recId) => updateRecording(id!, recId, { is_best_take: !rec.is_best_take })}
                           onDelete={setDeleteTarget}
                           onPlay={handlePlay}
+                          onPlayEnded={handlePlayEnded}
                           onCompare={handleCompare}
                           playingId={playingId}
                           comparingId={comparingId}
@@ -913,6 +977,7 @@ export function RecordingsPage() {
                           onToggleBestTake={(recId) => updateRecording(id!, recId, { is_best_take: !rec.is_best_take })}
                           onDelete={setDeleteTarget}
                           onPlay={handlePlay}
+                          onPlayEnded={handlePlayEnded}
                           onCompare={handleCompare}
                           playingId={playingId}
                           comparingId={comparingId}
@@ -947,6 +1012,7 @@ export function RecordingsPage() {
                           onToggleBestTake={(recId) => updateRecording(id!, recId, { is_best_take: !rec.is_best_take })}
                           onDelete={setDeleteTarget}
                           onPlay={handlePlay}
+                          onPlayEnded={handlePlayEnded}
                           onCompare={handleCompare}
                           playingId={playingId}
                           comparingId={comparingId}

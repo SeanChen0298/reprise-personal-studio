@@ -337,7 +337,18 @@ export function TimestampPage() {
     }
   }, [undoStack]);
 
-  // Keyboard: Space to tap, Ctrl+Z to undo, M to insert [Music], ←/→ to skip ±5s
+  // Natural cursor position: first line without a start timestamp, or end of list
+  const naturalCursorIdx = useMemo(() => {
+    const first = timestamps.findIndex((t) => t.start_ms == null);
+    return first === -1 ? timestamps.length : first;
+  }, [timestamps]);
+
+  // Exit remap mode — return cursor to the natural end-of-mapped-lines position
+  const exitRemap = useCallback(() => {
+    setCurrentIdx(naturalCursorIdx);
+  }, [naturalCursorIdx]);
+
+  // Keyboard: Space to tap, Ctrl+Z to undo, M to insert [Music], ←/→ to skip ±5s, Escape to exit remap
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       // Don't capture when editing an input
@@ -362,10 +373,13 @@ export function TimestampPage() {
         e.preventDefault();
         skipBy(5);
       }
+      if (e.code === "Escape") {
+        exitRemap();
+      }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [doTap, doUndo, doInsertMusic, skipBy, editingLine]);
+  }, [doTap, doUndo, doInsertMusic, skipBy, editingLine, exitRemap]);
 
   // Seek to a line's start time
   const seekToLine = useCallback((startMs: number) => {
@@ -412,7 +426,7 @@ export function TimestampPage() {
     setEditEnd(formatMsForInput(endMs));
   }, []);
 
-  // Confirm edit
+  // Confirm edit — chains neighbor timestamps when they were seamlessly joined
   const confirmEdit = useCallback(() => {
     if (!editingLine) return;
     const newStart = parseMsInput(editStart);
@@ -422,13 +436,43 @@ export function TimestampPage() {
       const next = [...prev];
       const idx = next.findIndex((t) => t.lineId === editingLine);
       if (idx === -1) return prev;
+
+      const oldStart = next[idx].start_ms;
+      const oldEnd = next[idx].end_ms;
+
       next[idx] = { ...next[idx], start_ms: newStart, end_ms: newEnd };
+
+      // If previous line's end_ms was seamlessly joined to this start, update it too
+      if (idx > 0 && oldStart != null && next[idx - 1].end_ms === oldStart) {
+        next[idx - 1] = { ...next[idx - 1], end_ms: newStart };
+      }
+      // If next line's start_ms was seamlessly joined to this end, update it too
+      if (idx < next.length - 1 && oldEnd != null && next[idx + 1].start_ms === oldEnd) {
+        next[idx + 1] = { ...next[idx + 1], start_ms: newEnd };
+      }
+
       return next;
     });
 
     setEditingLine(null);
     setDirty(true);
   }, [editingLine, editStart, editEnd]);
+
+  // Nudge start_ms by ±500ms; if prev line's end_ms was seamlessly joined, move it too
+  const nudgeStart = useCallback((i: number, deltaMs: number) => {
+    setTimestamps((prev) => {
+      const next = [...prev];
+      const oldStart = next[i].start_ms;
+      if (oldStart == null) return prev;
+      const newStart = Math.max(0, oldStart + deltaMs);
+      next[i] = { ...next[i], start_ms: newStart };
+      if (i > 0 && next[i - 1].end_ms === oldStart) {
+        next[i - 1] = { ...next[i - 1], end_ms: newStart };
+      }
+      return next;
+    });
+    setDirty(true);
+  }, []);
 
   // Cancel edit
   const cancelEdit = useCallback(() => {
@@ -596,6 +640,8 @@ export function TimestampPage() {
               const isPending = !isDone && !isCurrent;
               const isEditing = editingLine === line.id;
               const isPlayingLine = i === playingLineIndex;
+              // True when cursor is on an already-mapped line (remap mode)
+              const isRemap = isCurrent && ts?.start_ms != null;
               // Show seamless-snap button when this line and the next both have start_ms
               const canSnapToNext = isDone && !isEditing && i + 1 < localLines.length && timestamps[i + 1]?.start_ms != null;
 
@@ -603,9 +649,15 @@ export function TimestampPage() {
                 <div
                   key={line.id}
                   onClick={() => {
-                    if (!isEditing && ts?.start_ms != null) {
-                      seekToLine(ts.start_ms);
-                      setCurrentIdx(i);
+                    if (isEditing) return;
+                    if (ts?.start_ms != null) {
+                      if (isCurrent) {
+                        // Clicking the active line again exits remap mode
+                        exitRemap();
+                      } else {
+                        seekToLine(ts.start_ms);
+                        setCurrentIdx(i);
+                      }
                     }
                   }}
                   className={`flex items-center gap-3 px-4 py-3 rounded-[9px] mb-1 transition-colors ${
@@ -662,6 +714,17 @@ export function TimestampPage() {
                     {line.text}
                   </span>
 
+                  {/* Remap mode hint — click line or press Esc to exit */}
+                  {isRemap && !isEditing && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); exitRemap(); }}
+                      className="flex-shrink-0 text-[9.5px] font-medium px-[7px] py-[2px] rounded-[20px] border border-[var(--theme)] text-[var(--theme-text)] bg-transparent cursor-pointer hover:bg-[var(--theme)] hover:text-white transition-all"
+                      title="Exit remap mode (Esc)"
+                    >
+                      Esc to exit
+                    </button>
+                  )}
+
                   {/* Timestamps display / edit */}
                   {isEditing ? (
                     <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -709,17 +772,33 @@ export function TimestampPage() {
                       </button>
                     </div>
                   ) : (
-                    <span
-                      className={`text-[11px] tabular-nums flex-shrink-0 min-w-[80px] text-right ${
-                        isCurrent ? "text-[var(--theme-text)]" : "text-[var(--text-muted)]"
-                      }`}
-                    >
-                      {ts?.start_ms != null
-                        ? `${formatMsForInput(ts.start_ms)} — ${ts.end_ms != null ? formatMsForInput(ts.end_ms) : "..."}`
-                        : isCurrent
-                          ? "Waiting..."
-                          : "—"}
-                    </span>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      {isDone && ts?.start_ms != null && (
+                        <>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); nudgeStart(i, -500); }}
+                            className="w-[22px] h-[18px] text-[9px] font-bold rounded-[3px] border border-[var(--border)] bg-transparent text-[var(--text-muted)] hover:border-[var(--theme)] hover:text-[var(--theme-text)] cursor-pointer transition-all"
+                            title="Move start −0.5s"
+                          >−½</button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); nudgeStart(i, 500); }}
+                            className="w-[22px] h-[18px] text-[9px] font-bold rounded-[3px] border border-[var(--border)] bg-transparent text-[var(--text-muted)] hover:border-[var(--theme)] hover:text-[var(--theme-text)] cursor-pointer transition-all"
+                            title="Move start +0.5s"
+                          >+½</button>
+                        </>
+                      )}
+                      <span
+                        className={`text-[11px] tabular-nums min-w-[80px] text-right ${
+                          isCurrent ? "text-[var(--theme-text)]" : "text-[var(--text-muted)]"
+                        }`}
+                      >
+                        {ts?.start_ms != null
+                          ? `${formatMsForInput(ts.start_ms)} — ${ts.end_ms != null ? formatMsForInput(ts.end_ms) : "..."}`
+                          : isCurrent
+                            ? "Waiting..."
+                            : "—"}
+                      </span>
+                    </div>
                   )}
 
                   {/* Seamless snap button — sets end_ms to exactly the next line's start_ms */}

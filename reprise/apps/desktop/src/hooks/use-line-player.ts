@@ -35,6 +35,12 @@ export interface UseLinePlayerReturn {
   goToLine: (index: number, autoPlay?: boolean) => void;
   /** Play a specific line once (from start_ms to end_ms) then stop */
   playLineOnce: (index: number) => void;
+  /** Loop a specific line until stopLineRepeat() is called */
+  playLineRepeat: (index: number) => void;
+  /** Stop looping and pause */
+  stopLineRepeat: () => void;
+  /** True while annotation repeat mode is active */
+  isLineRepeat: boolean;
   nextLine: () => void;
   prevLine: () => void;
   seekWithinLine: (fraction: number) => void;
@@ -101,6 +107,9 @@ export function useLinePlayer(opts: Options): UseLinePlayerReturn {
   const skipSeekRef = useRef(false);
   // One-shot playback: when set, audio stops when reaching this time (seconds)
   const playOnceEndRef = useRef<number | null>(null);
+  // Repeat playback: when set, seek back to this time (seconds) instead of stopping
+  const playRepeatStartRef = useRef<number | null>(null);
+  const [isLineRepeat, setIsLineRepeat] = useState(false);
 
   // Seek to line start when line changes (only in loop mode or user-initiated)
   useEffect(() => {
@@ -177,11 +186,17 @@ export function useLinePlayer(opts: Options): UseLinePlayerReturn {
         }
         wasAtEndRef.current = atEnd;
 
-        // One-shot playback: stop when reaching the end time
+        // One-shot / repeat playback: triggered when audio reaches the end time
         if (playOnceEndRef.current != null && t >= playOnceEndRef.current) {
-          audio.pause();
-          setIsPlaying(false);
-          playOnceEndRef.current = null;
+          if (playRepeatStartRef.current != null) {
+            // Repeat mode: seek back to line start and keep playing
+            audio.currentTime = playRepeatStartRef.current;
+            wasAtEndRef.current = false;
+          } else {
+            audio.pause();
+            setIsPlaying(false);
+            playOnceEndRef.current = null;
+          }
           rafRef.current = requestAnimationFrame(tick);
           return;
         }
@@ -328,6 +343,36 @@ export function useLinePlayer(opts: Options): UseLinePlayerReturn {
     [lines, onLineChange]
   );
 
+  const playLineRepeat = useCallback(
+    (index: number) => {
+      if (index < 0 || index >= lines.length) return;
+      const line = lines[index];
+      if (line?.start_ms == null || line?.end_ms == null) return;
+      const audio = audioRef.current;
+      if (!audio) return;
+      const startSec = line.start_ms / 1000;
+      playOnceEndRef.current = line.end_ms / 1000;
+      playRepeatStartRef.current = startSec;
+      userNavigatedRef.current = true;
+      wasAtEndRef.current = false;
+      setCurrentLineIndex(index);
+      setLoopCount(1);
+      onLineChange?.(index);
+      audio.currentTime = startSec;
+      audio.play().then(() => setIsPlaying(true)).catch(() => {});
+      setIsLineRepeat(true);
+    },
+    [lines, onLineChange]
+  );
+
+  const stopLineRepeat = useCallback(() => {
+    playOnceEndRef.current = null;
+    playRepeatStartRef.current = null;
+    setIsLineRepeat(false);
+    audioRef.current?.pause();
+    setIsPlaying(false);
+  }, []);
+
   const nextLine = useCallback(() => {
     goToLine(currentLineIndex + 1);
   }, [currentLineIndex, goToLine]);
@@ -393,6 +438,9 @@ export function useLinePlayer(opts: Options): UseLinePlayerReturn {
     togglePlay,
     goToLine,
     playLineOnce,
+    playLineRepeat,
+    stopLineRepeat,
+    isLineRepeat,
     nextLine,
     prevLine,
     seekWithinLine,

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import type { Line, Section } from "../../types/song";
 import { playRecordingWithGain, type RecordingPlaybackHandle } from "../../lib/play-recording";
@@ -20,6 +20,7 @@ interface Props {
 export function RecordingsBar({ songId, activeLineId, activeLineOrder, sections, onABPlay, onABStop }: Props) {
   const allRecordings = useSongStore((s) => s.recordings[songId]);
   const allLines = useSongStore((s) => s.lines[songId]);
+  const [collapsed, setCollapsed] = useState(true);
 
   // Find section containing the active line
   const activeSection = useMemo(() => {
@@ -132,28 +133,47 @@ export function RecordingsBar({ songId, activeLineId, activeLineOrder, sections,
     setDeleteTarget(null);
   };
 
+  // Auto-expand when a new recording appears for this line
+  const prevCountRef = useRef(0);
+  useEffect(() => {
+    if (recordings.length > prevCountRef.current) setCollapsed(false);
+    prevCountRef.current = recordings.length;
+  }, [recordings.length]);
+
+  // Hide entirely when no recordings for this line/section
+  if (recordings.length === 0) return null;
+
   const formatDate = (iso: string) => {
     const d = new Date(iso);
     return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   };
 
   return (
-    <div className="border-t border-[var(--border)] bg-[var(--surface)] px-6 py-3 flex-shrink-0">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-[10.5px] font-medium tracking-[0.09em] uppercase text-[var(--text-muted)]">
+    <div className="border-t border-[var(--border)] bg-[var(--surface)] flex-shrink-0">
+      {/* Collapse toggle header */}
+      <button
+        onClick={() => setCollapsed((v) => !v)}
+        className="w-full px-6 py-2 flex items-center justify-between cursor-pointer bg-transparent border-none group"
+      >
+        <span className="text-[10.5px] font-medium tracking-[0.09em] uppercase text-[var(--text-muted)] group-hover:text-[var(--text-primary)] transition-colors">
           Your recordings
         </span>
-        <span className="text-[11px] text-[var(--text-muted)]">
-          {recordings.length} take{recordings.length !== 1 ? "s" : ""}
-        </span>
-      </div>
-
-      {recordings.length === 0 ? (
-        <div className="text-[12.5px] text-[var(--text-muted)] py-4 text-center">
-          No recordings yet — hit the red button!
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-[var(--text-muted)]">
+            {recordings.length} take{recordings.length !== 1 ? "s" : ""}
+          </span>
+          <svg
+            width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+            className={`text-[var(--text-muted)] transition-transform ${collapsed ? "" : "rotate-180"}`}
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
         </div>
-      ) : (
-        <div className="flex flex-col gap-1 max-h-[120px] overflow-y-auto">
+      </button>
+
+      {!collapsed && (
+        <div className="px-4 pb-3">
+        <div className="flex flex-col gap-1 max-h-[140px] overflow-y-auto">
           {recordings.map((rec) => (
             <div
               key={rec.id}
@@ -234,6 +254,7 @@ export function RecordingsBar({ songId, activeLineId, activeLineOrder, sections,
               </button>
             </div>
           ))}
+        </div>
         </div>
       )}
 

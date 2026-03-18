@@ -239,6 +239,7 @@ export function PracticePage() {
           onRecordThroughToggle={() => setRecordThrough((v) => !v)}
           volume={player.volume}
           onVolumeChange={player.setVolume}
+          onNavigateRecordings={() => navigate(`/song/${id}/recordings`)}
         />
         <PracticeCenter
           lines={lines}

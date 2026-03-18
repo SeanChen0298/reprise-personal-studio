@@ -708,18 +708,32 @@ const lineIdx = lines.findIndex((l) => l.id === line.id);
                     </div>
                     <div className="flex items-center justify-center gap-2 mt-1">
                       {hasTimestamps && (
-                        <button
-                          onClick={() => player.playLineOnce(activeLineIndex)}
-                          className="w-6 h-6 rounded-full bg-[var(--theme)] text-white border-none cursor-pointer flex items-center justify-center hover:opacity-80 transition-opacity"
-                          title="Preview this line"
-                        >
-                          <svg width="9" height="9" viewBox="0 0 24 24" fill="#fff" style={{ marginLeft: 1 }}>
-                            <polygon points="5,3 19,12 5,21" />
-                          </svg>
-                        </button>
+                        <>
+                          <button
+                            onClick={() => { player.stopLineRepeat(); player.playLineOnce(activeLineIndex); }}
+                            className="w-6 h-6 rounded-full bg-[var(--theme)] text-white border-none cursor-pointer flex items-center justify-center hover:opacity-80 transition-opacity"
+                            title="Preview this line"
+                          >
+                            <svg width="9" height="9" viewBox="0 0 24 24" fill="#fff" style={{ marginLeft: 1 }}>
+                              <polygon points="5,3 19,12 5,21" />
+                            </svg>
+                          </button>
+                          <button
+                            onClick={() => player.isLineRepeat ? player.stopLineRepeat() : player.playLineRepeat(activeLineIndex)}
+                            className={`w-6 h-6 rounded-full border-none cursor-pointer flex items-center justify-center transition-all ${player.isLineRepeat ? "bg-[var(--theme)] text-white opacity-100" : "bg-transparent border border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--theme)] hover:text-[var(--theme-text)]"}`}
+                            title={player.isLineRepeat ? "Stop repeat" : "Repeat this line"}
+                          >
+                            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                              <polyline points="17 1 21 5 17 9" />
+                              <path d="M3 11V9a4 4 0 014-4h14" />
+                              <polyline points="7 23 3 19 7 15" />
+                              <path d="M21 13v2a4 4 0 01-4 4H3" />
+                            </svg>
+                          </button>
+                        </>
                       )}
                       <button
-                        onClick={exitEditMode}
+                        onClick={() => { player.stopLineRepeat(); exitEditMode(); }}
                         className="text-[10px] font-medium text-[var(--theme)] hover:underline cursor-pointer bg-transparent border-none"
                       >
                         ✓ Done
@@ -884,18 +898,32 @@ const lineIdx = lines.findIndex((l) => l.id === line.id);
                 </div>
                 <div className="flex items-center justify-center gap-2 mt-2">
                   {hasTimestamps && (
-                    <button
-                      onClick={() => player.playLineOnce(activeLineIndex)}
-                      className="w-6 h-6 rounded-full bg-[var(--theme)] text-white border-none cursor-pointer flex items-center justify-center hover:opacity-80 transition-opacity"
-                      title="Preview this line"
-                    >
-                      <svg width="9" height="9" viewBox="0 0 24 24" fill="#fff" style={{ marginLeft: 1 }}>
-                        <polygon points="5,3 19,12 5,21" />
-                      </svg>
-                    </button>
+                    <>
+                      <button
+                        onClick={() => { player.stopLineRepeat(); player.playLineOnce(activeLineIndex); }}
+                        className="w-6 h-6 rounded-full bg-[var(--theme)] text-white border-none cursor-pointer flex items-center justify-center hover:opacity-80 transition-opacity"
+                        title="Preview this line"
+                      >
+                        <svg width="9" height="9" viewBox="0 0 24 24" fill="#fff" style={{ marginLeft: 1 }}>
+                          <polygon points="5,3 19,12 5,21" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={() => player.isLineRepeat ? player.stopLineRepeat() : player.playLineRepeat(activeLineIndex)}
+                        className={`w-6 h-6 rounded-full border-none cursor-pointer flex items-center justify-center transition-all ${player.isLineRepeat ? "bg-[var(--theme)] text-white opacity-100" : "bg-transparent border border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--theme)] hover:text-[var(--theme-text)]"}`}
+                        title={player.isLineRepeat ? "Stop repeat" : "Repeat this line"}
+                      >
+                        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                          <polyline points="17 1 21 5 17 9" />
+                          <path d="M3 11V9a4 4 0 014-4h14" />
+                          <polyline points="7 23 3 19 7 15" />
+                          <path d="M21 13v2a4 4 0 01-4 4H3" />
+                        </svg>
+                      </button>
+                    </>
                   )}
                   <button
-                    onClick={exitEditMode}
+                    onClick={() => { player.stopLineRepeat(); exitEditMode(); }}
                     className="text-[11px] font-medium text-[var(--theme)] hover:underline cursor-pointer bg-transparent border-none"
                   >
                     ✓ Done

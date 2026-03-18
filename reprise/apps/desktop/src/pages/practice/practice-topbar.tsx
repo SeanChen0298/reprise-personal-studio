@@ -21,13 +21,14 @@ interface Props {
   onRecordThroughToggle?: () => void;
   volume?: number;
   onVolumeChange?: (v: number) => void;
+  onNavigateRecordings?: () => void;
 }
 
 export function PracticeTopbar({
   player, activeTrack, onTrackChange, onClearRange, hasStemSeparation,
   inputDevices, outputDevices, selectedInputId, selectedOutputId, onInputChange, onOutputChange,
   skipCountdown, onSkipCountdownToggle, recordThrough, onRecordThroughToggle,
-  volume, onVolumeChange,
+  volume, onVolumeChange, onNavigateRecordings,
 }: Props) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const gearRef = useRef<HTMLButtonElement>(null);
@@ -185,6 +186,20 @@ export function PracticeTopbar({
             </svg>
           }
         />
+
+        {/* Recordings link */}
+        {onNavigateRecordings && (
+          <button
+            onClick={onNavigateRecordings}
+            className="w-8 h-8 rounded-[6px] border border-[var(--border)] flex items-center justify-center cursor-pointer transition-all bg-transparent text-[var(--text-muted)] hover:border-[#888] hover:text-[var(--text-primary)]"
+            title="View recordings"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="9" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+          </button>
+        )}
 
         {/* Settings gear */}
         <button

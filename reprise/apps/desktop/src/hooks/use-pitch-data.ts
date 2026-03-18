@@ -56,9 +56,9 @@ export function usePitchData(
       return [];
     }
 
-    // Filter: confidence > 0.3 removes silence, breaths, and unreliable harmony frames.
+    // Filter: confidence >= 0.5 keeps only well-tracked frames, removing silence/breaths/harmonics.
     // Frequency range 65–1047 Hz (C2–C6) covers human vocal range.
-    const MIN_CONFIDENCE = 0.3;
+    const MIN_CONFIDENCE = 0.5;
     const MIN_FREQ = 65;   // C2
     const MAX_FREQ = 1047; // C6
 
