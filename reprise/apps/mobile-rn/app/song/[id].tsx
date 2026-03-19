@@ -161,6 +161,7 @@ function LyricsLine({ line, translation }: { line: Line; translation?: string })
             annotations={line.annotations as Annotation[]}
             fontSize={15}
             color={C.text}
+            textAlign="left"
           />
           <FuriganaText html={line.furigana_html!} fontSize={10} />
         </>
@@ -170,12 +171,16 @@ function LyricsLine({ line, translation }: { line: Line; translation?: string })
           annotations={line.annotations as Annotation[]}
           fontSize={15}
           color={C.text}
+          textAlign="left"
         />
       ) : (
         <Text style={ll.text}>{displayText}</Text>
       )}
-
-      {/* Translation sub-text */}
+      {/* Original text below custom annotation */}
+      {line.custom_text && (
+        <Text style={[ll.text, { fontSize: 12, opacity: 0.45, marginTop: 3 }]}>{line.text}</Text>
+      )}
+      {/* Translation */}
       {translation && (
         <Text style={ll.translation}>{translation}</Text>
       )}

@@ -1,100 +1,251 @@
-# CLAUDE.md — Reprise Project Memory
+# CLAUDE.md — Reprise Agent Reference
 
-## Project: Reprise
-Personal practice studio for singers. Cross-platform (Tauri/React Native).
-**Motto:** "Return to a passage and make it yours."
+## Project
+Reprise — personal vocal practice studio. Cross-platform: **desktop** (Tauri/React) for production/editing, **mobile** (React Native/Expo) for practice/recording.
 
-## Architecture & Monorepo (pnpm)
-- `apps/desktop`: Tauri (Rust) + React (TS). Production/Editing client.
-- `apps/mobile`: React Native + Expo. Practice/Recording companion.
-- `packages/shared`: Common TS types, Zod schemas, constants.
-- `packages/ui`: Shared React components.
-- `src-tauri/sidecars`: Python binaries (`demucs`, `whisperx`, `yt-dlp`).
-- `supabase/`: Database migrations, RLS, and Edge Functions.
+---
 
-## Tech Stack & Standards
-- **State:** `Zustand` for playback and global UI state.
-- **Database:** Offline-first. `tauri-plugin-sql` (Desktop) / `expo-sqlite` (Mobile).
-- **Styling:** Tailwind CSS (Desktop) / NativeWind or StyleSheet (Mobile).
-- **Audio:** `ms` (milliseconds) for all timing. 0.5x–1.0x speed range.
-- **Sync:** Supabase (Postgres) with `updated_at` last-write-wins conflict resolution.
+## Monorepo Layout (pnpm workspaces)
 
-## UI/UX Goals: Clean, Japanese-style aesthetic. High information density but quiet. Focus on vocal pedagogy accessibility.
+```
+reprise/
+├── apps/desktop/          Tauri v2 + React 19 + Vite 6
+│   ├── src/               React frontend (pages, components, hooks, stores, lib)
+│   └── src-tauri/         Rust binary, capabilities, sidecars (Python scripts)
+├── apps/mobile-rn/        React Native 0.79 + Expo 53 + Expo Router 5
+│   ├── app/               File-based routes ((tabs)/, song/[id], practice/[id])
+│   └── src/               Components, hooks, stores, lib
+├── packages/shared/       Shared TS types, Zod schemas, Supabase client
+├── packages/ui/           Shared React components (minimal use currently)
+└── supabase/              Migrations (13), RLS policies, Edge Functions (Google Drive OAuth)
+```
+
+> `apps/mobile/` is a deprecated Vite-based app — ignore it.
+
+---
 
 ## Common Commands
-- **Install:** `pnpm install`
-- **Run Desktop:** `pnpm --filter desktop tauri dev`
-- **Run Mobile:** `pnpm --filter mobile expo start`
-- **Supabase:** `supabase start` | `supabase db reset`
-- **Clean:** `find . -name "node_modules" -type d -prune -exec rm -rf '{}' +`
+
+```bash
+pnpm install                                  # install all workspaces
+pnpm --filter desktop tauri dev               # run desktop (Vite on 127.0.0.1:5173)
+pnpm --filter mobile-rn expo start            # run mobile (Expo Go / dev client)
+supabase start | supabase db reset            # local Supabase
+find . -name "node_modules" -type d -prune -exec rm -rf '{}' +   # full clean
+```
+
+**Vite port is 5173** (`host: 127.0.0.1` required on Windows to avoid EACCES). Tauri devUrl matches.
+
+---
+
+## Tech Stack
+
+| Concern | Desktop | Mobile |
+|---|---|---|
+| Framework | Tauri v2 + React 19 | React Native 0.79 + Expo 53 |
+| Routing | React Router 7 | Expo Router 5 (file-based) |
+| State | Zustand 5 | Zustand 5 |
+| DB | Supabase Postgres (cloud sync) | Supabase Postgres (cloud sync) |
+| Local storage | — | AsyncStorage (preferences, file paths) |
+| Audio | wavesurfer.js 7 (waveform) | expo-av 15 (playback + recording) |
+| Animation | — | Reanimated 3 + Gesture Handler 2 |
+| Styling | Tailwind CSS v4 (`@import "tailwindcss"`, `@theme` block) | React Native StyleSheet |
+| Japanese | kuroshiro + kuromoji (furigana) | Same |
+| BPM | music-tempo | — |
+
+---
+
+## Data Models (actual schema in Supabase)
+
+### Song
+```ts
+id, user_id, title, artist, youtube_url, language, translation_language
+tags: string[], notes, pinned: boolean, mastery: 0–100
+thumbnail_url, thumbnail_b64              // base64 JPEG from yt-dlp
+audio_path, audio_folder                 // desktop local paths
+vocals_path, instrumental_path, pitch_data_path
+download_status, stem_status, pitch_status  // 'idle'|'downloading'|'processing'|'done'|'error'
+drive_audio_file_id, drive_vocals_file_id, drive_instrumental_file_id  // Google Drive
+created_at, updated_at
+```
+
+### Line
+```ts
+id, song_id, user_id
+text: string                  // original lyrics
+custom_text?: string          // user-edited version
+annotations: Annotation[]     // JSONB — [{start, end, type, furigana_html?}]
+order: number
+start_ms?, end_ms?
+status: 'new'|'listened'|'annotated'|'practiced'|'recorded'|'best_take_set'
+play_count: number            // auto-incremented by playback engine
+language?: string             // null = primary, 'ja' etc. = translation row
+furigana_html?: string        // auto-generated <ruby> HTML
+custom_furigana_html?: string
+created_at, updated_at
+```
+
+### Recording
+```ts
+id, song_id, line_id?, user_id, section_id?
+file_path, duration_ms
+is_master_take: boolean
+is_best_take: boolean         // independent star toggle
+note?: string
+created_at, updated_at
+```
+
+### Other tables: `sections` (start/end line_order), `profiles`, `preferences` (highlights JSONB)
+
+### Annotation structure
+```ts
+{ start: number, end: number, type: string }  // start/end = char indices in custom_text
+```
+
+### Line status progression (behavior-based, not user-set)
+```
+new → listened (play_count ≥ 1) → annotated (annotation added) →
+practiced (play_count ≥ 10) → recorded (recording saved) → best_take_set
+```
+
+---
+
+## Desktop Key Files
+
+```
+src/pages/         library-page, practice-page, timestamp-page, song-setup-page, recordings-page
+src/components/    audio-player, full-waveform, waveform, pitch-curve, annotated-text
+src/hooks/         use-line-player (core playback), use-recorder, use-waveform-data, use-pitch-data
+src/stores/        song-store (master), preferences-store, auth-store, task-queue-store, drive-sync-store
+src/lib/           audio-download.ts (yt-dlp), audio-analysis.ts (torchcrepe), google-drive.ts
+```
+
+**`use-line-player.ts`** — single-line and range looping, speed 0.5x–1.0x (0.05x steps), auto-advance, `onLinePlayed` callback increments `play_count`.
+
+**`task-queue-store.ts`** — persisted queue for Demucs, torchcrepe, Drive uploads. Processed by `use-task-queue-processor.ts`.
+
+---
+
+## Mobile Key Files
+
+```
+app/(tabs)/index.tsx     Songs list (fetch from Supabase, Drive auto-download)
+app/(tabs)/settings.tsx  Theme, Drive auth, highlight config
+app/song/[id].tsx        Song detail, line status pills, tap-to-practice
+app/practice/[id].tsx    Carousel + transport controls
+src/components/lyric-display.tsx    Reanimated 3 carousel (5-slot circular buffer)
+src/components/transport-controls.tsx
+src/stores/song-files-store.ts      songId → {audioPath, vocalsPath, instrPath, driveFileIds}
+src/hooks/use-line-player.ts        expo-av based, same logic as desktop
+```
+
+**Gesture map in `lyric-display.tsx`:**
+- Tap (<350ms, <15px) → seek to line
+- Vertical swipe (dy > 40px) → prev/next line
+- Hold + horizontal drag → speed scrub
+
+---
 
 ## Coding Rules
-- **TypeScript:** Strict typing. Use `packages/shared` for any type used by both apps.
-- **Audio Logic:** Keep heavy processing (compilation, stems) in Rust sidecars/core.
-- **Components:** Functional components only. Atomic design in `packages/ui`.
-- **Naming:** `PascalCase` for components, `camelCase` for functions/variables, `kebab-case` for files.
-- **Sync:** Always include `updated_at` and `user_id` in DB-related schemas.
 
-## Core Data Entities
-- **Song:** Metadata, file paths (vocals/inst/ref), bpm, mastery %, `thumbnail_b64` (base64 JPEG from yt-dlp), `pinned` (bool).
-- **Line:** `start_ms`, `end_ms`, `status` (not_started/learning/mastered).
-- **Annotation:** JSON array: `[{ text: string, type: HighlightType }]`.
-- **Recording:** `line_id`, `file_path`, `is_master_take`.
+- **TypeScript strict.** Types shared by both apps → `packages/shared`.
+- **All timing in milliseconds.** Never use seconds in audio logic.
+- **Playback speed:** 0.5x–1.0x only (0.05x increments).
+- **Functional components only.** No class components.
+- **Naming:** `PascalCase` components, `camelCase` functions/vars, `kebab-case` files.
+- **DB rows:** Always include `updated_at` and `user_id`.
+- **Audio processing** (Demucs, torchcrepe) → Python sidecars on desktop only.
+- **Do not use `apps/mobile/`** — use `apps/mobile-rn/`.
 
-## yt-dlp Setup (YouTube Downloads)
-yt-dlp is used to download audio and subtitles from YouTube. It requires:
-1. **Node.js** in PATH (used as JS runtime for YouTube extraction via `--js-runtimes node`)
-2. **Cookies file** at `C:/Reprise/cookies.txt` (YouTube requires auth to avoid bot detection)
-3. **Remote challenge solver** enabled via `--remote-components ejs:github`
+---
 
-### Exporting cookies (when downloads fail with "Sign in to confirm you're not a bot")
-1. Install a Netscape cookie export extension in Chrome (e.g. "Get cookies.txt LOCALLY")
-2. Navigate to `youtube.com` while logged in
-3. Export cookies and save to `C:/Reprise/cookies.txt`
-4. The cookies file may expire periodically — re-export if downloads start failing again
+## yt-dlp (YouTube Downloads)
 
-### Known Tauri shell issues
-- **Non-UTF-8 output:** Tauri's shell plugin can't decode non-ASCII characters (e.g. Japanese) in yt-dlp's stderr. Folder names are sanitized to ASCII-only to reduce this. The `error` event is treated as non-fatal.
-- **Chrome cookie DB locked:** `--cookies-from-browser chrome` fails while Chrome is running. Use a cookies.txt file instead.
+Requires:
+1. **Node.js** in PATH (`--js-runtimes node`)
+2. **Cookies file** at `C:/Reprise/cookies.txt` (export from Chrome while logged into YouTube)
+3. **Deno** sidecar (see `src-tauri/` external binaries config)
 
-## Demucs Setup (Stem Separation)
-Demucs splits audio into vocal and instrumental tracks. It requires:
-1. **Python 3.11** (Demucs is not compatible with Python 3.14+)
-2. **FFmpeg** (audio decoder — install via `winget install Gyan.FFmpeg`)
-3. **Demucs + soundfile** (`pip install demucs soundfile`)
-   - Do NOT install `torchcodec` — it conflicts with torchaudio on Windows
-   - `torch` and `torchaudio` 2.5.1 are pinned (newer versions break saving)
+**Known issues:**
+- Tauri shell can't decode non-ASCII stderr → folder names sanitized to ASCII. `error` events treated as non-fatal.
+- `--cookies-from-browser chrome` fails while Chrome is running → use cookies.txt file.
 
-### Usage
+**Cookie refresh:** Re-export from Chrome if downloads fail with "Sign in to confirm you're not a bot".
+
+---
+
+## Demucs (Stem Separation)
+
+Requires Python 3.11 (not compatible with 3.14+), FFmpeg, `pip install demucs soundfile`.
+- Do NOT install `torchcodec` — conflicts with torchaudio on Windows.
+- Pin `torch` and `torchaudio` to 2.5.1.
+
+```bash
+python -m demucs -n htdemucs --two-stems vocals "C:/Reprise/<song>/audio.m4a"
+# Output: separated/htdemucs/<track>/vocals.wav + no_vocals.wav
 ```
-python -m demucs -n htdemucs --two-stems vocals "C:/Reprise/<song-folder>/audio.m4a"
+
+First run downloads ~80 MB model to `~/.cache/torch/hub/checkpoints/`.
+
+---
+
+## torchcrepe (Pitch Analysis)
+
+Requires Python 3.11, PyTorch (already with Demucs), `pip install torchcrepe`.
+Runs on **vocals stem only** (after Demucs).
+
+```bash
+python -m torchcrepe --audio_files vocals.wav --output_files pitch.csv \
+  --model full --hop_length 160 --decoder viterbi
+# Output: CSV with time_ms, freq_hz, confidence at 10ms resolution
 ```
-- `--two-stems vocals` outputs vocals + accompaniment (no-vocals) only
-- `-n htdemucs` uses the hybrid transformer model (best speed/quality tradeoff)
-- Output goes to `separated/htdemucs/<track>/vocals.wav` and `no_vocals.wav`
-- First run downloads the model (~80 MB) to `~/.cache/torch/hub/checkpoints/`
 
-### Tauri shell permissions
-`python` and `ffmpeg` commands are allowed in `src-tauri/capabilities/default.json` alongside `yt-dlp`.
+---
 
-## torchcrepe Setup (Pitch Analysis)
-torchcrepe analyzes vocal pitch for pitch curve visualization in the practice view. It requires:
-1. **Python 3.11** (same as Demucs)
-2. **PyTorch** (already installed with Demucs)
-3. **torchcrepe** (`pip install torchcrepe`)
+## Google Drive Sync
 
-### Usage
+- Desktop: Upload via PKCE OAuth (system browser + local HTTP callback server). Resumable uploads.
+- Mobile: Download using Drive file IDs stored on Song rows (`drive_*_file_id`).
+- Edge Functions in `supabase/functions/`: `google-drive-auth`, `google-drive-callback`, `google-drive-refresh`.
+- Folder structure: `Reprise/<Song-Title>/` with `audio.m4a`, `vocals.wav`, `instrumental.wav`, `pitch.csv`.
+
+---
+
+## Furigana
+
+Auto-generated via `kuroshiro` + `kuromoji` analyzer. Output is `<ruby>` HTML stored in `furigana_html` / `custom_furigana_html` on Line rows. Never manually edit furigana HTML — regenerate via `generateFurigana()` in `packages/shared/src/furigana.ts`.
+
+---
+
+## Theme System (Desktop)
+
+6 built-in themes: `blue`, `midnight`, `violet`, `emerald`, `red`, `amber`.
+CSS variable-based: `--theme`, `--theme-light`, `--theme-text`. Stored in `preferences-store`.
+
+---
+
+## Supabase Migrations (13 total)
+
 ```
-python -m torchcrepe --audio_files vocals.wav --output_files pitch.csv --model full --hop_length 160 --decoder viterbi
+00001 profiles (auto-create trigger on auth.users)
+00002 songs
+00003 lines
+00004 sections
+00005 recordings
+00006 language fields (song + line)
+00007 preferences (highlights JSONB, other_settings JSONB)
+00008 is_best_take, note on recordings
+00009 line status enum + play_count
+00010 furigana_html on lines
+00011 Google Drive file IDs on songs
+00012 furigana_html on annotations
+00013 custom_furigana_html for custom_text
 ```
-- Runs on the **vocals stem** (after Demucs separation)
-- `--hop_length 160` → 10ms resolution at 16kHz sample rate
-- `--decoder viterbi` → smoothest pitch tracking (temporal smoothing)
-- `--model full` → best accuracy (vs `tiny` for speed)
-- Output: CSV with pitch (Hz) per 10ms frame
-- First run downloads the CREPE model (~80 MB)
-- Uses the same `python` Tauri shell permission as Demucs
 
-## Current Roadmap
-- **MVP:** Manual lyrics, tap-to-mark timestamps, desktop playback/recording.
-- **v1.5:** Sidecar integration (Demucs/WhisperX), Mobile app sync.
+---
+
+## What's Actually Built (vs. Planned)
+
+**Working:** Auth (email + Google OAuth), song library, YouTube import, yt-dlp download, Demucs stems, torchcrepe pitch, manual lyrics + furigana, annotation editor (5 predefined + custom types), timestamp waveform marker, line-by-line practice playback (desktop + mobile), recording, Google Drive sync, line status auto-tracking, 6 themes, task queue, section markers.
+
+**Not yet built:** WhisperX auto-alignment, compile line recordings → full song, pitch accuracy comparison (user vs. reference vocal), waveform display on mobile, collaboration/sharing.

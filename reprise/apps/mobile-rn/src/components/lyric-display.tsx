@@ -35,7 +35,7 @@ import { STATUS_CONFIG, formatMs } from "../lib/line-status-config";
 const LARGE_FONT   = 36;
 const CENTER_FRAC  = 0.36;   // center slot's Y as fraction of container height
 const STEP_FRAC    = 0.20;   // step between slots
-const HOLD_MS      = 1000;   // hold before speed-drag activates
+const HOLD_MS      = 500;    // hold before speed-drag activates
 const DOUBLE_MS    = 300;    // max gap for double-tap
 const MIN_SWIPE    = 40;     // min dy to register a swipe
 const PX_PER_STEP  = 28;     // px of horizontal drag per speed step
@@ -458,7 +458,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   slotInner: {
-    alignItems: "center",
+    alignItems: "stretch",
     width: "100%",
     paddingVertical: 4,
     paddingHorizontal: 8,

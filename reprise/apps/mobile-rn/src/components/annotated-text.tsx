@@ -128,7 +128,7 @@ export function AnnotatedText({
   if (hasFurigana) {
     // View-based layout required for ruby text above characters
     return (
-      <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "flex-end", justifyContent: textAlign === "left" ? "flex-start" : textAlign === "right" ? "flex-end" : "center" }}>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "flex-end", alignSelf: "stretch", justifyContent: textAlign === "left" ? "flex-start" : textAlign === "right" ? "flex-end" : "center" }}>
         {segments.map((seg, i) => {
           const hl = seg.type ? hlMap.get(seg.type) : null;
           const textColor = hl ? hl.color : color;
@@ -167,7 +167,7 @@ export function AnnotatedText({
 
   // Simple case: no furigana, inline Text spans
   return (
-    <Text style={{ fontSize, color, lineHeight: fontSize * 1.4, textAlign, flexWrap: "wrap", fontFamily: "serif", fontWeight: weight }}>
+    <Text style={{ fontSize, color, lineHeight: fontSize * 1.4, textAlign, flexWrap: "wrap", fontFamily: "serif", fontWeight: weight, alignSelf: "stretch" }}>
       {segments.map((seg, i) => {
         const hl = seg.type ? hlMap.get(seg.type) : null;
         if (hl) {

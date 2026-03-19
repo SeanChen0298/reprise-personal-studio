@@ -38,7 +38,8 @@ export default function SongsScreen() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
 
-  const autoDownload   = useSongFilesStore((s) => s.autoDownload);
+  const autoDownload      = useSongFilesStore((s) => s.autoDownload);
+  const autoDownloadStems = useSongFilesStore((s) => s.autoDownloadStems);
   const driveToken     = useSongFilesStore((s) => s.driveToken);
   const localFiles     = useSongFilesStore((s) => s.localFiles);   // full map for reactivity
   const setLocalFiles  = useSongFilesStore((s) => s.setLocalFiles);
@@ -103,6 +104,9 @@ export default function SongsScreen() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Reset the one-shot flag when stems setting changes so it re-checks
+  useEffect(() => { autoDownloadRan.current = false; }, [autoDownloadStems]);
+
   // ── Auto-download: runs once per session after songs load ───────────────────
 
   useEffect(() => {
@@ -113,15 +117,24 @@ export default function SongsScreen() {
 
     (async () => {
       // Determine which songs need downloading
+      const stemsEnabled = useSongFilesStore.getState().autoDownloadStems;
       const toDownload: Song[] = [];
       for (const song of songs) {
         if (!song.drive_audio_file_id) continue;
         const local = useSongFilesStore.getState().localFiles[song.id];
         const destPath = local?.audioPath ?? localPathForFile(song.id, "audio.m4a");
-        const exists = local?.audioPath ? await localFileExists(destPath) : false;
-        // Queue if: no local file, OR local file is stale (Drive ID changed)
-        const stale = exists && local?.driveAudioFileId !== song.drive_audio_file_id;
-        if (!exists || stale) toDownload.push(song);
+        const audioExists = local?.audioPath ? await localFileExists(destPath) : false;
+        const audioStale  = audioExists && local?.driveAudioFileId !== song.drive_audio_file_id;
+        const needsAudio  = !audioExists || audioStale;
+
+        let needsStems = false;
+        if (stemsEnabled && audioExists && !audioStale) {
+          const vocalsStale = song.drive_vocals_file_id && (!local?.vocalsPath || local?.driveVocalsFileId !== song.drive_vocals_file_id);
+          const instrStale  = song.drive_instrumental_file_id && (!local?.instrPath  || local?.driveInstrFileId  !== song.drive_instrumental_file_id);
+          needsStems = !!(vocalsStale || instrStale);
+        }
+
+        if (needsAudio || needsStems) toDownload.push(song);
       }
 
       if (toDownload.length === 0 || cancelled) return;
@@ -137,9 +150,36 @@ export default function SongsScreen() {
 
         try {
           const token = await getValidDriveToken();
-          const destPath = localPathForFile(song.id, "audio.m4a");
-          await downloadDriveFile(song.drive_audio_file_id!, destPath, token);
-          await setLocalFiles(song.id, { audioPath: destPath, driveAudioFileId: song.drive_audio_file_id });
+          const local2 = useSongFilesStore.getState().localFiles[song.id];
+          const audioExists2 = local2?.audioPath ? await localFileExists(local2.audioPath) : false;
+          const audioStale2  = audioExists2 && local2?.driveAudioFileId !== song.drive_audio_file_id;
+          const fileUpdate: Parameters<typeof setLocalFiles>[1] = {};
+
+          // Download audio only if missing or stale
+          if (!audioExists2 || audioStale2) {
+            const destPath = localPathForFile(song.id, "audio.m4a");
+            await downloadDriveFile(song.drive_audio_file_id!, destPath, token);
+            fileUpdate.audioPath = destPath;
+            fileUpdate.driveAudioFileId = song.drive_audio_file_id ?? undefined;
+          }
+
+          // Download stems if enabled and missing/stale
+          if (stemsEnabled) {
+            if (song.drive_vocals_file_id && (!local2?.vocalsPath || local2?.driveVocalsFileId !== song.drive_vocals_file_id)) {
+              const vPath = localPathForFile(song.id, "vocals.wav");
+              await downloadDriveFile(song.drive_vocals_file_id, vPath, token);
+              fileUpdate.vocalsPath = vPath;
+              fileUpdate.driveVocalsFileId = song.drive_vocals_file_id;
+            }
+            if (song.drive_instrumental_file_id && (!local2?.instrPath || local2?.driveInstrFileId !== song.drive_instrumental_file_id)) {
+              const iPath = localPathForFile(song.id, "no_vocals.wav");
+              await downloadDriveFile(song.drive_instrumental_file_id, iPath, token);
+              fileUpdate.instrPath = iPath;
+              fileUpdate.driveInstrFileId = song.drive_instrumental_file_id;
+            }
+          }
+
+          if (Object.keys(fileUpdate).length > 0) await setLocalFiles(song.id, fileUpdate);
           setDownloadJobs((prev) =>
             prev.map((j) => j.songId === song.id ? { ...j, state: "done" } : j)
           );
@@ -164,7 +204,7 @@ export default function SongsScreen() {
       cancelled = true;
       if (dismissTimerRef.current) clearTimeout(dismissTimerRef.current);
     };
-  }, [autoDownload, driveToken, songs, setLocalFiles]);
+  }, [autoDownload, autoDownloadStems, driveToken, songs, setLocalFiles]);
 
   // ── Styles (depend on C) ────────────────────────────────────────────────────
 

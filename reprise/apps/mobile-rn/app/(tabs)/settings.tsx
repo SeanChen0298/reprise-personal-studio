@@ -36,8 +36,10 @@ export default function SettingsScreen() {
   const signOut = useAuthStore((s) => s.signOut);
   const driveToken      = useSongFilesStore((s) => s.driveToken);
   const setDriveToken   = useSongFilesStore((s) => s.setDriveToken);
-  const autoDownload    = useSongFilesStore((s) => s.autoDownload);
-  const setAutoDownload = useSongFilesStore((s) => s.setAutoDownload);
+  const autoDownload        = useSongFilesStore((s) => s.autoDownload);
+  const setAutoDownload     = useSongFilesStore((s) => s.setAutoDownload);
+  const autoDownloadStems   = useSongFilesStore((s) => s.autoDownloadStems);
+  const setAutoDownloadStems = useSongFilesStore((s) => s.setAutoDownloadStems);
   const localFiles      = useSongFilesStore((s) => s.localFiles);
   const themeMode    = usePreferencesStore((s) => s.themeMode);
   const setThemeMode = usePreferencesStore((s) => s.setThemeMode);
@@ -192,18 +194,34 @@ export default function SettingsScreen() {
           </Text>
 
           {driveToken && (
-            <View style={[st.card, st.toggleRow]}>
-              <View style={st.toggleInfo}>
-                <Text style={st.rowValue}>Auto-download</Text>
-                <Text style={st.rowLabel}>Download new songs automatically on open</Text>
+            <>
+              <View style={[st.card, st.toggleRow]}>
+                <View style={st.toggleInfo}>
+                  <Text style={st.rowValue}>Auto-download</Text>
+                  <Text style={st.rowLabel}>Download new songs automatically on open</Text>
+                </View>
+                <Switch
+                  value={autoDownload}
+                  onValueChange={setAutoDownload}
+                  trackColor={{ false: C.border, true: C.theme }}
+                  thumbColor="#fff"
+                />
               </View>
-              <Switch
-                value={autoDownload}
-                onValueChange={setAutoDownload}
-                trackColor={{ false: C.border, true: C.theme }}
-                thumbColor="#fff"
-              />
-            </View>
+              {autoDownload && (
+                <View style={[st.card, st.toggleRow, { marginTop: -4 }]}>
+                  <View style={st.toggleInfo}>
+                    <Text style={st.rowValue}>Include stems</Text>
+                    <Text style={st.rowLabel}>Also download vocal and instrumental tracks</Text>
+                  </View>
+                  <Switch
+                    value={autoDownloadStems}
+                    onValueChange={setAutoDownloadStems}
+                    trackColor={{ false: C.border, true: C.theme }}
+                    thumbColor="#fff"
+                  />
+                </View>
+              )}
+            </>
           )}
         </View>
 

@@ -37,6 +37,8 @@ interface SongFilesState {
   hydrated: boolean;
   /** Auto-download audio files for all songs on app open */
   autoDownload: boolean;
+  /** Also auto-download vocal and instrumental stems */
+  autoDownloadStems: boolean;
 
   hydrate: () => Promise<void>;
   setLocalFiles: (songId: string, files: Partial<SongLocalFiles>) => Promise<void>;
@@ -45,6 +47,7 @@ interface SongFilesState {
   setDriveToken: (token: DriveToken | null) => Promise<void>;
   getDriveToken: () => DriveToken | null;
   setAutoDownload: (enabled: boolean) => Promise<void>;
+  setAutoDownloadStems: (enabled: boolean) => Promise<void>;
 }
 
 // ─── Store ────────────────────────────────────────────────────────────────────
@@ -54,6 +57,7 @@ export const useSongFilesStore = create<SongFilesState>((set, get) => ({
   driveToken: null,
   hydrated: false,
   autoDownload: false,
+  autoDownloadStems: false,
 
   async hydrate() {
     const [filesRaw, tokenRaw, settingsRaw] = await Promise.all([
@@ -64,9 +68,9 @@ export const useSongFilesStore = create<SongFilesState>((set, get) => ({
 
     const localFiles   = filesRaw    ? (JSON.parse(filesRaw)    as Record<string, SongLocalFiles>) : {};
     const driveToken   = tokenRaw    ? (JSON.parse(tokenRaw)    as DriveToken)                     : null;
-    const settings     = settingsRaw ? (JSON.parse(settingsRaw) as { autoDownload?: boolean })      : {};
+    const settings     = settingsRaw ? (JSON.parse(settingsRaw) as { autoDownload?: boolean; autoDownloadStems?: boolean }) : {};
 
-    set({ localFiles, driveToken, hydrated: true, autoDownload: settings.autoDownload ?? false });
+    set({ localFiles, driveToken, hydrated: true, autoDownload: settings.autoDownload ?? false, autoDownloadStems: settings.autoDownloadStems ?? false });
   },
 
   async setLocalFiles(songId, files) {
@@ -102,8 +106,15 @@ export const useSongFilesStore = create<SongFilesState>((set, get) => ({
   },
 
   async setAutoDownload(enabled) {
+    const { autoDownloadStems } = get();
     set({ autoDownload: enabled });
-    await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify({ autoDownload: enabled }));
+    await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify({ autoDownload: enabled, autoDownloadStems }));
+  },
+
+  async setAutoDownloadStems(enabled) {
+    const { autoDownload } = get();
+    set({ autoDownloadStems: enabled });
+    await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify({ autoDownload, autoDownloadStems: enabled }));
   },
 }));
 
