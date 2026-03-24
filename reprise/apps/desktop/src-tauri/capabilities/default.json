@@ -21,7 +21,7 @@
           "name": "yt-dlp",
           "cmd": "yt-dlp",
           "args": true,
-          "sidecar": true
+          "sidecar": false
         },
         {
           "name": "binaries/yt-dlp",
@@ -50,7 +50,7 @@
           "name": "yt-dlp",
           "cmd": "yt-dlp",
           "args": true,
-          "sidecar": true
+          "sidecar": false
         },
         {
           "name": "binaries/yt-dlp",
@@ -79,6 +79,7 @@
     "fs:allow-read-file",
     "fs:allow-read-text-file",
     "fs:allow-write-file",
+    "fs:allow-write-text-file",
     "fs:allow-remove",
     "fs:allow-rename",
     {

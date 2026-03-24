@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import type { Line } from "../types/song";
+import { usePreferencesStore } from "../stores/preferences-store";
 
 export interface UseLinePlayerReturn {
   audioRef: React.RefObject<HTMLAudioElement | null>;
@@ -72,7 +73,9 @@ export function useLinePlayer(opts: Options): UseLinePlayerReturn {
   const [maxLoops, setMaxLoops] = useState(opts.maxLoops ?? 3);
   const [loopRange, setLoopRange] = useState<[number, number] | null>(null);
   const [speed, setSpeedState] = useState(opts.initialSpeed ?? 1.0);
-  const [volume, setVolumeState] = useState(1.0);
+  const storedVolume = usePreferencesStore((s) => s.playbackVolume);
+  const setStoredVolume = usePreferencesStore((s) => s.setPlaybackVolume);
+  const [volume, setVolumeState] = useState(storedVolume);
 
   const currentLine = lines[currentLineIndex] as Line | undefined;
   const lineStartSec = (currentLine?.start_ms ?? 0) / 1000;
@@ -398,8 +401,10 @@ export function useLinePlayer(opts: Options): UseLinePlayerReturn {
   }, []);
 
   const setVolume = useCallback((v: number) => {
-    setVolumeState(Math.round(Math.min(1, Math.max(0, v)) * 100) / 100);
-  }, []);
+    const clamped = Math.round(Math.min(1, Math.max(0, v)) * 100) / 100;
+    setVolumeState(clamped);
+    setStoredVolume(clamped);
+  }, [setStoredVolume]);
 
   const setSpeed = useCallback((s: number) => {
     setSpeedState(Math.round(Math.min(1.0, Math.max(0.5, s)) * 100) / 100);

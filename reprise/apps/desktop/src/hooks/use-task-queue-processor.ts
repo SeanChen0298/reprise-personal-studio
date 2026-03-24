@@ -17,6 +17,7 @@ export function useTaskQueueProcessor() {
   // Grab store functions — stable references, safe to omit from deps
   const separateSongStems = useSongStore((s) => s.separateSongStems);
   const analyzeSongPitch = useSongStore((s) => s.analyzeSongPitch);
+  const alignSongLyrics = useSongStore((s) => s.alignSongLyrics);
 
   useEffect(() => {
     const firstPending = tasks.find((t) => t.status === "pending");
@@ -28,9 +29,9 @@ export function useTaskQueueProcessor() {
     markRunning(firstPending.id);
 
     const work =
-      firstPending.type === "stems"
-        ? separateSongStems(firstPending.songId)
-        : analyzeSongPitch(firstPending.songId);
+      firstPending.type === "stems"  ? separateSongStems(firstPending.songId) :
+      firstPending.type === "pitch"  ? analyzeSongPitch(firstPending.songId)  :
+      /* align */                      alignSongLyrics(firstPending.songId, firstPending.options?.model);
 
     work
       .then(() => {

@@ -7,6 +7,7 @@ import {
   separateStems,
 } from "../lib/audio-download";
 import { analyzePitch } from "../lib/audio-analysis";
+import { alignLyrics } from "../lib/whisperx-align";
 import { supabase } from "../lib/supabase";
 import { readFile } from "@tauri-apps/plugin-fs";
 import MusicTempo from "music-tempo";
@@ -85,10 +86,11 @@ interface SongStore {
   removeSong: (id: string) => Promise<void>;
   togglePin: (id: string) => Promise<void>;
 
-  // Audio download, stem separation & pitch analysis
+  // Audio download, stem separation, pitch analysis & alignment
   downloadSongAudio: (id: string) => Promise<void>;
   separateSongStems: (id: string) => Promise<void>;
   analyzeSongPitch: (id: string) => Promise<void>;
+  alignSongLyrics: (id: string, model?: string) => Promise<void>;
   markStaleAnalysesAsFailed: () => Promise<void>;
 
   // Lines management
@@ -408,6 +410,56 @@ export const useSongStore = create<SongStore>()((set, get) => ({
     }
   },
 
+  alignSongLyrics: async (id, model) => {
+    const song = get().songs.find((s) => s.id === id);
+    if (!song) return;
+
+    // Prefer vocals stem (cleaner signal for ASR), fall back to full audio
+    const audioPath = song.vocals_path || song.audio_path;
+    if (!audioPath) throw new Error("No audio file available for alignment");
+    if (!song.audio_folder) throw new Error("Song folder path is missing");
+
+    // Primary language lines only (no translation rows)
+    const allLines = get().lines[id] ?? [];
+    const translationLang = song.translation_language;
+    const primaryLines = allLines
+      .filter((l) => !translationLang || l.language !== translationLang)
+      .sort((a, b) => a.order - b.order);
+
+    if (primaryLines.length === 0) throw new Error("No lyric lines found for alignment");
+
+    await get().updateSong(id, { align_status: "processing", align_error: undefined });
+
+    try {
+      const language = song.language ?? "en";
+      const output = await alignLyrics(audioPath, primaryLines, song.audio_folder, language, model);
+
+      // Merge aligned timestamps back into the existing line records
+      const alignMap = new Map(output.lines.map((r) => [r.order, r]));
+      const updatedLines = allLines.map((line) => {
+        const aligned = alignMap.get(line.order);
+        if (!aligned) return line;
+        return { ...line, start_ms: aligned.start_ms, end_ms: aligned.end_ms };
+      });
+
+      await get().setLines(id, updatedLines);
+
+      const unmatchedCount = output.unmatched_lines.length;
+      await get().updateSong(id, {
+        align_status: "done",
+        align_error: unmatchedCount > 0
+          ? `${unmatchedCount} line${unmatchedCount > 1 ? "s" : ""} could not be matched`
+          : undefined,
+      });
+    } catch (err) {
+      await get().updateSong(id, {
+        align_status: "error",
+        align_error: err instanceof Error ? err.message : "Alignment failed",
+      });
+      throw err;
+    }
+  },
+
   markStaleAnalysesAsFailed: async () => {
     const TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
     const now = Date.now();
@@ -423,6 +475,10 @@ export const useSongStore = create<SongStore>()((set, get) => ({
       if (song.pitch_status === "processing") {
         updates.pitch_status = "error";
         updates.pitch_error = "Processing timed out after 10 minutes. Please retry.";
+      }
+      if (song.align_status === "processing") {
+        updates.align_status = "error";
+        updates.align_error = "Processing timed out after 10 minutes. Please retry.";
       }
       if (Object.keys(updates).length > 0) {
         await get().updateSong(song.id, updates);
@@ -1003,6 +1059,8 @@ function dbRowToSong(row: Record<string, unknown>): Song {
     stem_error: row.stem_error as string | undefined,
     pitch_status: (row.pitch_status as Song["pitch_status"]) ?? "idle",
     pitch_error: row.pitch_error as string | undefined,
+    align_status: (row.align_status as Song["align_status"]) ?? "idle",
+    align_error: row.align_error as string | undefined,
     drive_audio_file_id: row.drive_audio_file_id as string | undefined,
     drive_vocals_file_id: row.drive_vocals_file_id as string | undefined,
     drive_instrumental_file_id: row.drive_instrumental_file_id as string | undefined,
@@ -1039,6 +1097,8 @@ function songToDbRow(song: Song): Record<string, unknown> {
     stem_error: song.stem_error ?? null,
     pitch_status: song.pitch_status ?? "idle",
     pitch_error: song.pitch_error ?? null,
+    align_status: song.align_status ?? "idle",
+    align_error: song.align_error ?? null,
     drive_audio_file_id: song.drive_audio_file_id ?? null,
     drive_vocals_file_id: song.drive_vocals_file_id ?? null,
     drive_instrumental_file_id: song.drive_instrumental_file_id ?? null,

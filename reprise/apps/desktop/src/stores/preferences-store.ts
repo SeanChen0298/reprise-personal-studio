@@ -23,6 +23,7 @@ interface PreferencesState {
   showWaveform: boolean;
   countInEnabled: boolean;
   recordingPlaybackGain: number;
+  playbackVolume: number;
   autoSyncDrive: boolean;
   autoDemucs: boolean;
   autoPitch: boolean;
@@ -30,6 +31,7 @@ interface PreferencesState {
   setShowWaveform: (v: boolean) => void;
   setCountInEnabled: (v: boolean) => void;
   setRecordingPlaybackGain: (v: number) => void;
+  setPlaybackVolume: (v: number) => void;
   setAutoSyncDrive: (v: boolean) => void;
   setAutoDemucs: (v: boolean) => void;
   setAutoPitch: (v: boolean) => void;
@@ -42,6 +44,7 @@ export const usePreferencesStore = create<PreferencesState>()(
       showWaveform: true,
       countInEnabled: true,
       recordingPlaybackGain: 8.0,
+      playbackVolume: 1.0,
       autoSyncDrive: false,
       autoDemucs: false,
       autoPitch: false,
@@ -52,6 +55,7 @@ export const usePreferencesStore = create<PreferencesState>()(
       setShowWaveform: (v) => set({ showWaveform: v }),
       setCountInEnabled: (v) => set({ countInEnabled: v }),
       setRecordingPlaybackGain: (v) => set({ recordingPlaybackGain: v }),
+      setPlaybackVolume: (v) => set({ playbackVolume: Math.round(Math.min(1, Math.max(0, v)) * 100) / 100 }),
       setAutoSyncDrive: (v) => set({ autoSyncDrive: v }),
       setAutoDemucs: (v) => set({ autoDemucs: v }),
       setAutoPitch: (v) => set({ autoPitch: v }),

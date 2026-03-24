@@ -22,10 +22,12 @@ function RecordingWaveform({
   filePath,
   isPlaying,
   onEnded,
+  volume = 1,
 }: {
   filePath: string;
   isPlaying: boolean;
   onEnded: () => void;
+  volume?: number;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WaveSurfer | null>(null);
@@ -88,6 +90,11 @@ function RecordingWaveform({
     if (gainNodeRef.current) gainNodeRef.current.gain.value = gain;
   }, [gain]);
 
+  // Sync volume
+  useEffect(() => {
+    wsRef.current?.setVolume(volume);
+  }, [volume]);
+
   // Sync play/pause from parent
   useEffect(() => {
     const ws = wsRef.current;
@@ -123,6 +130,7 @@ interface RecordingEntryProps {
   onCompare: (rec: Recording) => void;
   playingId: string | null;
   comparingId: string | null;
+  volume: number;
 }
 
 function RecordingEntry({
@@ -139,6 +147,7 @@ function RecordingEntry({
   onCompare,
   playingId,
   comparingId,
+  volume,
 }: RecordingEntryProps) {
   const isPlaying = playingId === rec.id;
   const isComparing = comparingId === rec.id;
@@ -188,6 +197,7 @@ function RecordingEntry({
         filePath={rec.file_path}
         isPlaying={isPlaying}
         onEnded={() => onPlayEnded(rec.id)}
+        volume={volume}
       />
 
       {/* Meta */}
@@ -299,6 +309,8 @@ export function RecordingsPage() {
   const removeRecording = useSongStore((s) => s.removeRecording);
   const updateRecording = useSongStore((s) => s.updateRecording);
   const highlights = useHighlightStore((s) => s.highlights);
+  const playbackVolume = usePreferencesStore((s) => s.playbackVolume);
+  const setPlaybackVolume = usePreferencesStore((s) => s.setPlaybackVolume);
 
   // Main lines: exclude translation lines from the lyric list
   const lines = useMemo(() => {
@@ -601,6 +613,12 @@ export function RecordingsPage() {
     }
   }, [currentSongPath]);
 
+  // Sync playback volume to song audio element
+  useEffect(() => {
+    const audio = songAudioRef.current;
+    if (audio) audio.volume = playbackVolume;
+  }, [playbackVolume]);
+
   // Track ended
   useEffect(() => {
     const audio = songAudioRef.current;
@@ -683,6 +701,42 @@ export function RecordingsPage() {
               </svg>
               Practice
             </button>
+          </div>
+
+          {/* Volume control */}
+          <div className="flex items-center gap-[6px]">
+            <button
+              onClick={() => setPlaybackVolume(playbackVolume > 0 ? 0 : 1)}
+              className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors cursor-pointer bg-transparent border-none p-0 flex items-center"
+              title={playbackVolume > 0 ? "Mute" : "Unmute"}
+            >
+              {playbackVolume === 0 ? (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                  <line x1="23" y1="9" x2="17" y2="15" /><line x1="17" y1="9" x2="23" y2="15" />
+                </svg>
+              ) : playbackVolume < 0.5 ? (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                  <path d="M15.54 8.46a5 5 0 010 7.07" />
+                </svg>
+              ) : (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                  <path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07" />
+                </svg>
+              )}
+            </button>
+            <input
+              type="range" min="0" max="1" step="0.01"
+              value={playbackVolume}
+              onChange={(e) => setPlaybackVolume(parseFloat(e.target.value))}
+              className="w-[70px] h-[3px] accent-[var(--theme)] cursor-pointer"
+              title={`Volume: ${Math.round(playbackVolume * 100)}%`}
+            />
+            <span className="text-[10px] text-[var(--text-muted)] tabular-nums min-w-[26px]">
+              {Math.round(playbackVolume * 100)}
+            </span>
           </div>
 
           <div className="flex items-center gap-2">
@@ -954,6 +1008,7 @@ export function RecordingsPage() {
                           onCompare={handleCompare}
                           playingId={playingId}
                           comparingId={comparingId}
+                          volume={playbackVolume}
                         />
                       ))}
                     </div>
@@ -981,6 +1036,7 @@ export function RecordingsPage() {
                           onCompare={handleCompare}
                           playingId={playingId}
                           comparingId={comparingId}
+                          volume={playbackVolume}
                         />
                       ))}
                     </div>
@@ -1016,6 +1072,7 @@ export function RecordingsPage() {
                           onCompare={handleCompare}
                           playingId={playingId}
                           comparingId={comparingId}
+                          volume={playbackVolume}
                         />
                       ))}
                     </div>

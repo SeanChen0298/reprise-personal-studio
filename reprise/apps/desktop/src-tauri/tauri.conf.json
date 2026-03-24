@@ -38,6 +38,7 @@
       "icons/128x128@2x.png",
       "icons/icon.ico"
     ],
+    "resources": ["sidecars/whisperx_align.py"],
     "externalBin": [
       "binaries/yt-dlp",
       "binaries/deno"

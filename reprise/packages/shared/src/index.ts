@@ -3,6 +3,7 @@ export type {
   DownloadStatus,
   StemStatus,
   PitchStatus,
+  AlignStatus,
   LineStatus,
   Song,
   Annotation,
