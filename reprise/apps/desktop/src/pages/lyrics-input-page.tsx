@@ -85,7 +85,12 @@ export function LyricsInputPage() {
   }
 
   // Language fetch state
-  const [lyricsLang, setLyricsLang] = useState<string>(song?.language ?? "en");
+  const [lyricsLang, setLyricsLang] = useState<string>(() => {
+    const raw = song?.language ?? "en";
+    // song.language may be a full name ("Japanese") — normalise to ISO code
+    const found = SUBTITLE_LANGUAGES.find((l) => l.label.toLowerCase() === raw.toLowerCase());
+    return found?.code ?? raw;
+  });
   const [fetching, setFetching] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
@@ -309,9 +314,19 @@ export function LyricsInputPage() {
         songFolder,
         lyricsLang
       );
-      setEditLines(
-        timedLines.map((tl) => ({ id: crypto.randomUUID(), text: tl.text, start_ms: tl.start_ms, end_ms: tl.end_ms }))
-      );
+      const mapped = timedLines.map((tl) => ({ id: crypto.randomUUID(), text: tl.text, start_ms: tl.start_ms, end_ms: tl.end_ms }));
+      // Patch end_ms: if the gap between a line's end and the next line's start is ≤ 1s,
+      // extend end_ms to meet the next start_ms (eliminates dead time between lines).
+      for (let i = 0; i < mapped.length - 1; i++) {
+        const curr = mapped[i];
+        const next = mapped[i + 1];
+        if (next.start_ms == null) continue;
+        const currEnd = curr.end_ms ?? curr.start_ms;
+        if (currEnd == null) continue;
+        const gap = next.start_ms - currEnd;
+        if (gap > 0 && gap <= 1000) curr.end_ms = next.start_ms;
+      }
+      setEditLines(mapped);
       setMode("lines");
     } catch (err) {
       setFetchError(

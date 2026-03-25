@@ -431,7 +431,7 @@ export const useSongStore = create<SongStore>()((set, get) => ({
     await get().updateSong(id, { align_status: "processing", align_error: undefined });
 
     try {
-      const language = song.language ?? "en";
+      const language = languageNameToCode(song.language) ?? "en";
       const output = await alignLyrics(audioPath, primaryLines, song.audio_folder, language, model);
 
       // Merge aligned timestamps back into the existing line records

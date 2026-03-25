@@ -10,7 +10,7 @@ import { checkTorchcrepeInstalled } from "../lib/audio-analysis";
 import { useHighlightStore } from "../lib/highlight-config";
 import { usePreferencesStore } from "../stores/preferences-store";
 import { useAudioDevices } from "../hooks/use-audio-devices";
-import { getStoredToken, getValidAccessToken, purgeDriveAll } from "../lib/google-drive";
+import { getStoredToken, getValidAccessToken, purgeDriveAll, clearToken, startDriveOAuth } from "../lib/google-drive";
 import { useSongStore } from "../stores/song-store";
 import { useDriveSyncStore } from "../stores/drive-sync-store";
 import { supabase } from "../lib/supabase";
@@ -60,6 +60,30 @@ export function SettingsPage() {
   const setAutoPitch = usePreferencesStore((s) => s.setAutoPitch);
   const [confirmDelete, setConfirmDelete] = useState(true);
   const [autoSync, setAutoSync] = useState(true);
+
+  // Google Drive connection
+  const [driveConnected, setDriveConnected] = useState(() => !!getStoredToken());
+  const [driveConnecting, setDriveConnecting] = useState(false);
+  const [driveConnectError, setDriveConnectError] = useState<string | null>(null);
+
+  const handleDriveConnect = useCallback(async () => {
+    setDriveConnecting(true);
+    setDriveConnectError(null);
+    try {
+      await startDriveOAuth();
+      setDriveConnected(true);
+    } catch (err) {
+      setDriveConnectError(err instanceof Error ? err.message : "Connection failed");
+    } finally {
+      setDriveConnecting(false);
+    }
+  }, []);
+
+  const handleDriveDisconnect = useCallback(() => {
+    clearToken();
+    setDriveConnected(false);
+    setDriveConnectError(null);
+  }, []);
 
   // Google Drive bulk reset
   const songs = useSongStore((s) => s.songs);
@@ -836,9 +860,57 @@ export function SettingsPage() {
                   )}
                 </div>
 
-                {/* Google Drive danger zone */}
+                {/* Google Drive connection */}
                 <div className="mb-7">
                   {sectionHeader("Google Drive")}
+                  <div className="p-4 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)] flex items-center gap-3">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${driveConnected ? "bg-[#DCFCE7]" : "bg-[var(--bg)]"}`}>
+                      <svg width="16" height="16" viewBox="0 0 87.3 78" fill={driveConnected ? "#15803D" : "var(--text-muted)"} xmlns="http://www.w3.org/2000/svg">
+                        <path d="M6.6 66.85l3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8H0a15.92 15.92 0 0 0 2.1 8zM43.65 25L29.9 1.2C28.55 2 27.4 3.1 26.6 4.5L.65 49.4A15.92 15.92 0 0 0 0 53h27.5zM73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25A15.92 15.92 0 0 0 88.3 53H60.8l5.85 11.5zM43.65 25L57.4 1.2C56.05.45 54.5 0 52.85 0H35.45c-1.65 0-3.2.45-4.55 1.2zM59.8 53H27.5l-13.75 23.8c1.35.8 2.9 1.2 4.55 1.2h50.7c1.65 0 3.2-.45 4.55-1.2zM60.8 53l-16.95-29.5-16.95 29.5zM73.55 76.8z" />
+                      </svg>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[13px] font-medium">
+                        {driveConnected ? "Google Drive connected" : "Google Drive not connected"}
+                      </div>
+                      <div className="text-[11.5px] text-[var(--text-muted)]">
+                        {driveConnected ? "Audio files sync between desktop and mobile." : "Connect to sync audio files to mobile."}
+                      </div>
+                      {driveConnectError && (
+                        <div className="text-[11.5px] text-[#DC2626] mt-0.5">{driveConnectError}</div>
+                      )}
+                    </div>
+                    {driveConnected ? (
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <button
+                          onClick={handleDriveConnect}
+                          disabled={driveConnecting}
+                          className="px-3 py-[5px] rounded-[6px] border-[1.5px] border-[var(--border)] bg-transparent text-[12px] font-medium text-[var(--text-secondary)] hover:border-[#888] hover:text-[var(--text-primary)] transition-all disabled:opacity-50"
+                        >
+                          {driveConnecting ? "Connecting…" : "Switch account"}
+                        </button>
+                        <button
+                          onClick={handleDriveDisconnect}
+                          className="px-3 py-[5px] rounded-[6px] border-[1.5px] border-[var(--border)] bg-transparent text-[12px] font-medium text-[var(--text-secondary)] hover:border-[#DC2626] hover:text-[#DC2626] transition-all"
+                        >
+                          Disconnect
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={handleDriveConnect}
+                        disabled={driveConnecting}
+                        className="flex-shrink-0 px-3 py-[6px] rounded-[6px] bg-[var(--theme)] text-[var(--theme-text)] text-[12px] font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+                      >
+                        {driveConnecting ? "Connecting…" : "Connect Drive"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Google Drive danger zone */}
+                <div className="mb-7">
+                  {sectionHeader("Google Drive — Danger Zone")}
                   <div className="p-4 bg-[#FEF2F2] border border-[#FECACA] rounded-[var(--radius)]">
                     <div className="text-[13px] font-medium text-[#991B1B] mb-1">Delete all Drive files & reset sync</div>
                     <p className="text-[12px] text-[#B91C1C] leading-relaxed mb-3">
