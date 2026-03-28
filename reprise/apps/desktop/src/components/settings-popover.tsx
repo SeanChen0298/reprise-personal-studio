@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { AudioDevice } from "../hooks/use-audio-devices";
+import { usePreferencesStore } from "../stores/preferences-store";
 
 interface Props {
   open: boolean;
@@ -26,6 +27,10 @@ export function SettingsPopover({
   onInputChange, onOutputChange,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
+  const showWaveform = usePreferencesStore((s) => s.showWaveform);
+  const setShowWaveform = usePreferencesStore((s) => s.setShowWaveform);
+  const showPitchCurve = usePreferencesStore((s) => s.showPitchCurve);
+  const setShowPitchCurve = usePreferencesStore((s) => s.setShowPitchCurve);
   const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
 
   // Calculate position from anchor element
@@ -67,6 +72,37 @@ export function SettingsPopover({
       className="fixed z-50 bg-[var(--surface)] border border-[var(--border)] rounded-[8px] shadow-lg w-[240px] py-2"
       style={{ top: pos.top, right: pos.right }}
     >
+      {/* Visualization */}
+      <div className="px-3 py-1">
+        <div className="text-[9px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-2">
+          Visualization
+        </div>
+        {[
+          { label: "Waveform", value: showWaveform, set: setShowWaveform },
+          { label: "Pitch graph", value: showPitchCurve, set: setShowPitchCurve },
+        ].map(({ label, value, set }) => (
+          <label key={label} className="flex items-center gap-2 py-[5px] cursor-pointer group">
+            <div
+              onClick={() => set(!value)}
+              className={`w-[30px] h-[16px] rounded-full flex items-center transition-colors cursor-pointer ${
+                value ? "bg-[var(--theme)]" : "bg-[var(--border)]"
+              }`}
+            >
+              <div
+                className={`w-[12px] h-[12px] rounded-full bg-white shadow-sm transition-transform ${
+                  value ? "translate-x-[16px]" : "translate-x-[2px]"
+                }`}
+              />
+            </div>
+            <span className="text-[11.5px] text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors">
+              {label}
+            </span>
+          </label>
+        ))}
+      </div>
+
+      <div className="mx-3 my-1 border-t border-[var(--border)]" />
+
       {/* Recording options */}
       <div className="px-3 py-1">
         <div className="text-[9px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-2">

@@ -301,6 +301,31 @@ export function RecordingsPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
+  // ── Resizable split panel ─────────────────────────────────────────────────
+  const [splitPct, setSplitPct] = useState(50);
+  const splitContainerRef = useRef<HTMLDivElement>(null);
+  const isDragging = useRef(false);
+
+  const onSplitterMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isDragging.current = true;
+    const container = splitContainerRef.current;
+    if (!container) return;
+    const onMove = (ev: MouseEvent) => {
+      if (!isDragging.current) return;
+      const rect = container.getBoundingClientRect();
+      const pct = ((ev.clientX - rect.left) / rect.width) * 100;
+      setSplitPct(Math.min(75, Math.max(25, pct)));
+    };
+    const onUp = () => {
+      isDragging.current = false;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, []);
+
   const song = useSongStore((s) => s.songs.find((s) => s.id === id));
   const rawLines = useSongStore((s) => (id ? s.lines[id] : undefined));
   const rawSections = useSongStore((s) => (id ? s.sections[id] : undefined));
@@ -782,9 +807,9 @@ export function RecordingsPage() {
         </header>
 
         {/* Body: split panels */}
-        <div className="flex flex-1 min-h-0">
+        <div ref={splitContainerRef} className="flex flex-1 min-h-0">
           {/* Left panel — lyrics with playback */}
-          <div className="w-1/2 flex-shrink-0 border-r border-[var(--border)] flex flex-col min-h-0">
+          <div className="flex-shrink-0 flex flex-col min-h-0" style={{ width: `${splitPct}%` }}>
             {/* Header + player */}
             <div className="px-5 pt-4 pb-3 border-b border-[var(--border-subtle)] flex-shrink-0 space-y-2">
               <div className="flex items-center justify-between">
@@ -837,7 +862,7 @@ export function RecordingsPage() {
             </div>
 
             {/* Lines */}
-            <div className="flex-1 overflow-y-auto px-4 py-3">
+            <div className="flex-1 overflow-y-auto px-4 py-3" style={{ scrollbarWidth: "none" }}>
               {lines.length === 0 ? (
                 <p className="text-[13px] text-[var(--text-muted)] text-center py-8">
                   No lyrics added yet.
@@ -892,6 +917,15 @@ export function RecordingsPage() {
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Drag handle */}
+          <div
+            onMouseDown={onSplitterMouseDown}
+            className="w-[5px] flex-shrink-0 relative cursor-col-resize group"
+            title="Drag to resize"
+          >
+            <div className="absolute inset-y-0 left-[2px] w-px bg-[var(--border)] group-hover:bg-[var(--theme)] transition-colors" />
           </div>
 
           {/* Right panel — recordings */}

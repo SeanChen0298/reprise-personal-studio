@@ -74,7 +74,10 @@ export function PracticePage() {
     onLinePlayed: useCallback(
       (index: number) => {
         const line = lines[index];
-        if (id && line) incrementPlayCount(id, line.id);
+        if (id && line) {
+          incrementPlayCount(id, line.id);
+          usePreferencesStore.getState().touchLastPracticed(id);
+        }
       },
       [lines, id, incrementPlayCount]
     ),

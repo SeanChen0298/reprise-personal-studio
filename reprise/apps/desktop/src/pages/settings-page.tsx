@@ -48,8 +48,6 @@ export function SettingsPage() {
   const countInEnabled = usePreferencesStore((s) => s.countInEnabled);
   const setCountInEnabled = usePreferencesStore((s) => s.setCountInEnabled);
   const countIn = countInEnabled ? "2" : "none";
-  const showWaveforms = usePreferencesStore((s) => s.showWaveform);
-  const setShowWaveforms = usePreferencesStore((s) => s.setShowWaveform);
   const recordingPlaybackGain = usePreferencesStore((s) => s.recordingPlaybackGain);
   const setRecordingPlaybackGain = usePreferencesStore((s) => s.setRecordingPlaybackGain);
   const autoSyncDrive = usePreferencesStore((s) => s.autoSyncDrive);
@@ -815,12 +813,6 @@ export function SettingsPage() {
                 {/* General */}
                 <div className="mb-7">
                   {sectionHeader("General")}
-
-                  {settingRow(
-                    "Show waveform in practice",
-                    "Display audio waveform visualization above the pitch curve",
-                    toggle(showWaveforms, setShowWaveforms),
-                  )}
 
                   {settingRow(
                     "Confirm before deleting songs",

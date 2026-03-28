@@ -19,19 +19,23 @@ export function useWaveformData(
   endMs: number | undefined,
   /** Number of bars to return (default 120) */
   samples = 120,
+  /** If true, ignore startMs/endMs and use the full audio buffer */
+  fullFile = false,
 ): WaveformResult {
   const [peaks, setPeaks] = useState<number[]>([]);
   const [loading, setLoading] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    if (!audioSrc || startMs == null || endMs == null || endMs <= startMs) {
+    if (!audioSrc) { setPeaks([]); return; }
+    if (!fullFile && (startMs == null || endMs == null || endMs <= startMs)) {
       setPeaks([]);
       return;
     }
 
-    // Abort any in-flight decode
+    // Abort any in-flight decode and clear stale peaks immediately
     abortRef.current?.abort();
+    setPeaks([]);
     const ctrl = new AbortController();
     abortRef.current = ctrl;
 
@@ -55,11 +59,10 @@ export function useWaveformData(
 
         // Extract segment
         const sampleRate = audioBuffer.sampleRate;
-        const startSample = Math.floor((startMs! / 1000) * sampleRate);
-        const endSample = Math.min(
-          Math.floor((endMs! / 1000) * sampleRate),
-          audioBuffer.length,
-        );
+        const startSample = fullFile ? 0 : Math.floor((startMs! / 1000) * sampleRate);
+        const endSample = fullFile
+          ? audioBuffer.length
+          : Math.min(Math.floor((endMs! / 1000) * sampleRate), audioBuffer.length);
         const segmentLength = endSample - startSample;
         if (segmentLength <= 0) {
           setPeaks([]);
@@ -81,9 +84,10 @@ export function useWaveformData(
           result.push(sum / count);
         }
 
-        // Normalize to 0–1
+        // Normalize with sqrt to compress dynamic range — quiet-but-audible
+        // parts remain visible even when one loud peak dominates the segment
         const max = Math.max(...result, 0.001);
-        const normalized = result.map((v) => v / max);
+        const normalized = result.map((v) => Math.sqrt(v / max));
 
         if (!cancelled) {
           setPeaks(normalized);
@@ -101,7 +105,7 @@ export function useWaveformData(
       cancelled = true;
       ctrl.abort();
     };
-  }, [audioSrc, startMs, endMs, samples]);
+  }, [audioSrc, startMs, endMs, samples, fullFile]);
 
   return { peaks, loading };
 }

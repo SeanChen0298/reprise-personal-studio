@@ -78,6 +78,7 @@ export function PracticeCenter({
   const hasTimestamps = currentLine?.start_ms != null && currentLine?.end_ms != null;
   const pitchData = usePitchData(pitchDataPath, currentLine?.start_ms, currentLine?.end_ms);
   const showWaveform = usePreferencesStore((s) => s.showWaveform);
+  const showPitchCurve = usePreferencesStore((s) => s.showPitchCurve);
   const waveform = useWaveformData(
     showWaveform ? (player.audioSrc || undefined) : undefined,
     currentLine?.start_ms,
@@ -1048,7 +1049,7 @@ const lineIdx = lines.findIndex((l) => l.id === line.id);
       )}
 
       {/* Waveform + Pitch curve */}
-      {hasTimestamps && (
+      {hasTimestamps && (showWaveform || showPitchCurve) && (
         <div className="w-full max-w-[560px] mt-6 flex flex-col gap-[6px]">
           {showWaveform && (
             <Waveform
@@ -1057,13 +1058,15 @@ const lineIdx = lines.findIndex((l) => l.id === line.id);
               onSeek={player.seekWithinLine}
             />
           )}
-          <PitchCurve
-            points={pitchData.points}
-            progress={player.lineProgress}
-            onSeek={player.seekWithinLine}
-            startMs={currentLine.start_ms!}
-            endMs={currentLine.end_ms!}
-          />
+          {showPitchCurve && (
+            <PitchCurve
+              points={pitchData.points}
+              progress={player.lineProgress}
+              onSeek={player.seekWithinLine}
+              startMs={currentLine.start_ms!}
+              endMs={currentLine.end_ms!}
+            />
+          )}
           <div className="flex justify-between text-[10px] text-[var(--text-muted)] tabular-nums mt-1">
             <span>{formatMs(currentLine.start_ms!)}</span>
             {pitchData.points.length === 0 && canAnalyzePitch && (

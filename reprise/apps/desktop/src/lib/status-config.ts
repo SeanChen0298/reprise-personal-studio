@@ -1,4 +1,4 @@
-import type { LineStatus } from "../types/song";
+import type { Line, LineStatus } from "../types/song";
 
 // Linear order from lowest to highest achievement
 export const STATUS_ORDER: LineStatus[] = [
@@ -21,6 +21,31 @@ export const STATUS_CONFIG: Record<
   recorded:     { dot: "#22C55E", label: "Recorded",     tagBg: "#DCFCE7", tagColor: "#15803D", barColor: "#22C55E" },
   best_take_set:{ dot: "#EAB308", label: "Best take",    tagBg: "#FEF9C3", tagColor: "#713F12", barColor: "#EAB308" },
 };
+
+/**
+ * Tiered weights for song progress calculation.
+ * Each tier reflects increasing effort: listened < annotated < practiced < recorded < best_take_set.
+ * Max weight per line = 20 (best_take_set).
+ */
+const PROGRESS_WEIGHTS: Record<LineStatus, number> = {
+  new:          0,
+  listened:     1,   //  5% of max — first interaction
+  annotated:    3,   // 15% of max — engaged with it
+  practiced:    7,   // 35% of max — worked it seriously (10+ plays)
+  recorded:     13,  // 65% of max — performed attempt
+  best_take_set: 20, // 100% of max — perfected
+};
+const MAX_LINE_WEIGHT = 20;
+
+/**
+ * Computes song progress 0–100 from line statuses using tiered weights.
+ * Includes all lines, not just best_take_set, so every stage of practice counts.
+ */
+export function computeSongProgress(lines: Line[]): number {
+  if (lines.length === 0) return 0;
+  const total = lines.reduce((sum, l) => sum + (PROGRESS_WEIGHTS[l.status] ?? 0), 0);
+  return Math.round((total / (lines.length * MAX_LINE_WEIGHT)) * 100);
+}
 
 /** Only move status forward — never downgrade */
 export function upgradeStatus(current: LineStatus, target: LineStatus): LineStatus {

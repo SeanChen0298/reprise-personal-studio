@@ -21,6 +21,13 @@ export function applyThemeCssVars(key: string) {
 interface PreferencesState {
   theme: string;
   showWaveform: boolean;
+  showPitchCurve: boolean;
+  libraryView: "grid" | "list";
+  librarySort: "custom" | "title" | "artist" | "mastery" | "date_added";
+  libraryGroup: "none" | "artist" | "last_practiced";
+  songOrder: Record<string, number>;
+  lastPracticed: Record<string, string>;
+  collapsedGroups: Record<string, boolean>;
   countInEnabled: boolean;
   recordingPlaybackGain: number;
   playbackVolume: number;
@@ -29,6 +36,13 @@ interface PreferencesState {
   autoPitch: boolean;
   setTheme: (v: string) => void;
   setShowWaveform: (v: boolean) => void;
+  setShowPitchCurve: (v: boolean) => void;
+  setLibraryView: (v: "grid" | "list") => void;
+  setLibrarySort: (v: PreferencesState["librarySort"]) => void;
+  setLibraryGroup: (v: PreferencesState["libraryGroup"]) => void;
+  setSongOrder: (v: Record<string, number>) => void;
+  touchLastPracticed: (songId: string) => void;
+  setGroupCollapsed: (key: string, collapsed: boolean) => void;
   setCountInEnabled: (v: boolean) => void;
   setRecordingPlaybackGain: (v: number) => void;
   setPlaybackVolume: (v: number) => void;
@@ -42,17 +56,33 @@ export const usePreferencesStore = create<PreferencesState>()(
     (set) => ({
       theme: "blue",
       showWaveform: true,
+      showPitchCurve: true,
       countInEnabled: true,
       recordingPlaybackGain: 8.0,
       playbackVolume: 1.0,
       autoSyncDrive: false,
       autoDemucs: false,
       autoPitch: false,
+      libraryView: "grid" as const,
+      librarySort: "custom" as const,
+      libraryGroup: "none" as const,
+      songOrder: {} as Record<string, number>,
+      lastPracticed: {} as Record<string, string>,
+      collapsedGroups: {} as Record<string, boolean>,
       setTheme: (v) => {
         applyThemeCssVars(v);
         set({ theme: v });
       },
       setShowWaveform: (v) => set({ showWaveform: v }),
+      setShowPitchCurve: (v) => set({ showPitchCurve: v }),
+      setLibraryView: (v) => set({ libraryView: v }),
+      setLibrarySort: (v) => set({ librarySort: v }),
+      setLibraryGroup: (v) => set({ libraryGroup: v }),
+      setSongOrder: (v) => set({ songOrder: v }),
+      touchLastPracticed: (songId) =>
+        set((s) => ({ lastPracticed: { ...s.lastPracticed, [songId]: new Date().toISOString() } })),
+      setGroupCollapsed: (key, collapsed) =>
+        set((s) => ({ collapsedGroups: { ...s.collapsedGroups, [key]: collapsed } })),
       setCountInEnabled: (v) => set({ countInEnabled: v }),
       setRecordingPlaybackGain: (v) => set({ recordingPlaybackGain: v }),
       setPlaybackVolume: (v) => set({ playbackVolume: Math.round(Math.min(1, Math.max(0, v)) * 100) / 100 }),
