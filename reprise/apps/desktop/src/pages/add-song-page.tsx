@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Sidebar } from "../components/sidebar";
 import { useSongStore } from "../stores/song-store";
+import { useTaskQueueStore } from "../stores/task-queue-store";
 
 /** Returns true if text contains any Hiragana, Katakana, or Kanji characters. */
 function containsJapanese(text: string): boolean {
@@ -84,8 +85,6 @@ export function AddSongPage() {
     }
   }
 
-  const downloadSongAudio = useSongStore((s) => s.downloadSongAudio);
-
   async function handleSave() {
     if (!draft || !title.trim()) return;
     setSaving(true);
@@ -105,8 +104,9 @@ export function AddSongPage() {
     // Clear the draft
     setImportDraft(null);
 
-    // Trigger audio download in the background
-    downloadSongAudio(song.id);
+    // Enqueue audio download — processed by useTaskQueueProcessor at App root,
+    // so it continues running even when the user navigates to practice mode.
+    useTaskQueueStore.getState().enqueue(song.id, song.title, "download");
 
     setSaving(false);
     setSaved(true);

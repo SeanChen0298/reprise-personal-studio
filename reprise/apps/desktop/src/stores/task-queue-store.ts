@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type TaskType = "stems" | "pitch" | "align";
+export type TaskType = "download" | "stems" | "pitch" | "align";
 
 export interface QueueTask {
   id: string;
