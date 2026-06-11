@@ -434,12 +434,17 @@ export function TimestampPage() {
         }
         return { ...line, start_ms: ts?.start_ms, end_ms, updated_at: now };
       });
-      await setLinesStore(id, final);
+      // setLines replaces ALL lines for the song, but the editable set above is
+      // primary-language only — re-append the translation lines so they survive.
+      const translationLines = (rawLines ?? []).filter(
+        (l) => song?.translation_language && l.language === song.translation_language,
+      );
+      await setLinesStore(id, [...final, ...translationLines]);
       navigate(`/song/${id}`);
     } catch (err) {
       console.error("Failed to save timestamps:", err);
     }
-  }, [id, localLines, timestamps, durationMs, setLinesStore, navigate]);
+  }, [id, localLines, timestamps, durationMs, setLinesStore, navigate, rawLines, song?.translation_language]);
 
   // Start editing a line's timestamps
   const startEdit = useCallback((lineId: string, startMs: number | undefined, endMs: number | undefined) => {
