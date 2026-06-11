@@ -116,7 +116,8 @@ pnpm --filter desktop build          # build the frontend (tsc -b && vite build)
 Works **immediately, no setup**:
 - Library, lyrics & annotation, manual timestamp marking, practice playback, recording
 - **YouTube download** (needs `C:\Reprise\cookies.txt` — see below)
-- **Translation** (Helsinki-NLP Opus-MT) and **furigana** — pure JS; their model/dictionary auto-download from the web on first use
+- **Translation** (Helsinki-NLP Opus-MT) — pure JS; the model auto-downloads from the web on first use, then runs offline
+- **Furigana** — pure JS; the kuromoji dictionary is bundled, so it works offline immediately
 
 Needs the **audio toolchain** (Demucs stems · torchcrepe pitch · WhisperX align):
 
@@ -190,13 +191,12 @@ reprise/
 │   └── desktop/           Tauri app (Rust + React)
 │       ├── src/           React frontend
 │       └── src-tauri/     Rust backend + Python sidecar scripts
-├── packages/
-│   ├── shared/            Shared TypeScript types + furigana
-│   └── ui/                (empty placeholder)
-└── supabase/              Historical schema — source for the one-time data migration only
+└── packages/
+    ├── shared/            Shared TypeScript types + furigana
+    └── ui/                (empty placeholder)
 ```
 
-> Reprise was previously cloud-synced (Supabase) with a companion mobile app and Google Drive sync. It is now a single, fully-local desktop app. The `supabase/` folder and a one-time migration utility (`window.__repriseMigrate`, dev only) are retained to import legacy cloud data.
+> Reprise was previously cloud-synced (Supabase) with a companion mobile app and Google Drive sync. All of that has been removed — it is now a single, fully-local desktop app.
 
 ---
 

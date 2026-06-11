@@ -3,7 +3,7 @@
 ## Project
 Reprise — personal vocal practice studio. **Desktop-only** (Tauri v2 + React), **fully offline / local-first**: no auth, no cloud database, no external integrations. All data lives in a local NoSQL database (Dexie/IndexedDB) on the machine; audio files live on local disk under `C:/Reprise/`.
 
-> History: the app previously synced to Supabase (Postgres + Auth) and Google Drive, and shipped a React Native mobile app. Those were removed. A one-time Supabase→local migration utility and the original cloud project are retained only as a fallback/backup (see **Migration & backup**).
+> History: the app previously synced to Supabase (Postgres + Auth) and Google Drive, and shipped a React Native mobile app. All of that has been removed — the desktop app is now standalone and local. (An old Supabase cloud project may still exist remotely, but the app no longer references it.)
 
 ---
 
@@ -14,11 +14,8 @@ reprise/
 ├── apps/desktop/          Tauri v2 + React 19 + Vite 6   ← the app
 │   ├── src/               React frontend (pages, components, hooks, stores, lib)
 │   └── src-tauri/         Rust binary, capabilities, sidecars (Python scripts)
-├── packages/shared/       Shared TS types (Song/Line/Recording/Section), furigana,
-│                          and a retained Supabase client factory (migration only)
-├── packages/ui/           Empty placeholder (unused)
-└── supabase/              Historical migrations/RLS/Edge Functions — schema reference
-                           and source for the one-time data migration. Not used at runtime.
+├── packages/shared/       Shared TS types (Song/Line/Recording/Section) + furigana
+└── packages/ui/           Empty placeholder (unused)
 ```
 
 ---
@@ -112,7 +109,7 @@ src/components/    sidebar, audio-player, full-waveform, waveform, pitch-curve, 
 src/hooks/         use-line-player (core playback), use-recorder, use-waveform-data, use-pitch-data
 src/stores/        song-store (master), preferences-store, task-queue-store, queue-store
 src/lib/           local-db.ts (Dexie data layer), audio-download.ts (yt-dlp), audio-analysis.ts (torchcrepe),
-                   whisperx-align.ts, backup.ts (JSON export/import), migrate-from-supabase.ts (one-time, dev only)
+                   whisperx-align.ts, backup.ts (JSON export/import)
 ```
 
 **`song-store.ts`** — the master store. All persistence goes through `localDb` (in `local-db.ts`), which returns `{ data, error }` results mirroring the old Supabase shape so the optimistic-update-with-rollback flow is preserved. Cascade deletes (song → lines/recordings/sections) are explicit, inside a Dexie transaction.
@@ -125,10 +122,9 @@ src/lib/           local-db.ts (Dexie data layer), audio-download.ts (yt-dlp), a
 
 ---
 
-## Migration & backup
+## Backup
 
-- **One-time migration** (`lib/migrate-from-supabase.ts`): exposed in dev as `window.__repriseMigrate(email, password)`. Signs into the retained cloud Supabase project (RLS-scoped), reads all rows, and bulk-puts them into Dexie. Read-only on the cloud. Wired in `main.tsx` behind `import.meta.env.DEV`.
-- **Backup export/import** (`lib/backup.ts`): Settings → Preferences → "Backup & restore". Exports the whole local DB to a timestamped JSON file; imports/upserts by id. Audio files are NOT included (they live on disk).
+- **Backup export/import** (`lib/backup.ts`): Settings → Preferences → "Backup & restore". Exports the whole local DB to a timestamped JSON file; imports/upserts by id. Audio files are NOT included (they live on disk under `C:/Reprise/`). This is also how you move a library between machines.
 
 ---
 
@@ -190,7 +186,7 @@ python -m torchcrepe --audio_files vocals.wav --output_files pitch.csv \
 
 ## Furigana
 
-Auto-generated via `kuroshiro` + `kuromoji` analyzer. Output is `<ruby>` HTML stored in `furigana_html` / `custom_furigana_html` on Line rows. Never manually edit furigana HTML — regenerate via `generateFurigana()` in `packages/shared/src/lib/furigana.ts`.
+Auto-generated via `kuroshiro` + `kuromoji` analyzer. Output is `<ruby>` HTML stored in `furigana_html` / `custom_furigana_html` on Line rows. Never manually edit furigana HTML — regenerate via `generateFurigana()` in `packages/shared/src/lib/furigana.ts`. The kuromoji dictionary (~17 MB) is bundled at `apps/desktop/public/kuromoji/dict` and served from the app origin, so it works fully offline.
 
 ---
 

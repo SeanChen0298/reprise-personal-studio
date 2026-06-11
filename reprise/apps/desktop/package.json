@@ -13,7 +13,6 @@
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
     "@reprise/shared": "workspace:*",
-    "@supabase/supabase-js": "^2.49.1",
     "@tauri-apps/api": "^2.2.0",
     "@tauri-apps/plugin-fs": "^2.4.5",
     "@tauri-apps/plugin-os": "^2.3.2",

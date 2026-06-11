@@ -15,6 +15,4 @@ export type {
 } from "./types/song";
 export type { HighlightType } from "./types/highlight";
 export { DEFAULT_HIGHLIGHTS } from "./types/highlight";
-export type { Json, Database } from "./lib/database.types";
-export { createSupabaseClient } from "./lib/supabase";
 export { generateFurigana } from "./lib/furigana";

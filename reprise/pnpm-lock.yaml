@@ -16,9 +16,6 @@ importers:
       '@reprise/shared':
         specifier: workspace:*
         version: link:../../packages/shared
-      '@supabase/supabase-js':
-        specifier: ^2.49.1
-        version: 2.97.0
       '@tauri-apps/api':
         specifier: ^2.2.0
         version: 2.10.1
@@ -229,9 +226,6 @@ importers:
 
   packages/shared:
     dependencies:
-      '@supabase/supabase-js':
-        specifier: ^2.49.1
-        version: 2.97.0
       kuroshiro:
         specifier: ^1.2.0
         version: 1.2.0
