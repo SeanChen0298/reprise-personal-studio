@@ -60,8 +60,9 @@ export function PracticeCenter({
   const prevLine = lines[activeLineIndex - 1];
   const nextLineData = lines[activeLineIndex + 1];
 
-  // Translation support
-  const [showTranslation, setShowTranslation] = useState(true);
+  // Translation support — toggle persists in preferences (also in cog settings)
+  const showTranslation = usePreferencesStore((s) => s.showTranslation);
+  const setShowTranslation = usePreferencesStore((s) => s.setShowTranslation);
   const translationByOrder = useMemo(() => {
     if (!translationLines || translationLines.length === 0) return new Map<number, string>();
     return new Map(translationLines.map((l) => [l.order, l.text]));
@@ -818,7 +819,7 @@ const lineIdx = lines.findIndex((l) => l.id === line.id);
             )}
             {hasTranslation && (
               <button
-                onClick={() => setShowTranslation((v) => !v)}
+                onClick={() => setShowTranslation(!showTranslation)}
                 title={showTranslation ? "Hide translation" : "Show translation"}
                 className={`w-6 h-6 rounded-[5px] border bg-transparent cursor-pointer flex items-center justify-center transition-all ${
                   showTranslation
@@ -1001,7 +1002,7 @@ const lineIdx = lines.findIndex((l) => l.id === line.id);
               )}
               {hasTranslation && (
                 <button
-                  onClick={() => setShowTranslation((v) => !v)}
+                  onClick={() => setShowTranslation(!showTranslation)}
                   title={showTranslation ? "Hide translation" : "Show translation"}
                   className={`w-6 h-6 rounded-[5px] border bg-transparent cursor-pointer flex items-center justify-center transition-all ${
                     showTranslation
@@ -1065,6 +1066,8 @@ const lineIdx = lines.findIndex((l) => l.id === line.id);
               onSeek={player.seekWithinLine}
               startMs={currentLine.start_ms!}
               endMs={currentLine.end_ms!}
+              yMinSemitone={pitchData.songRange?.minSemitone}
+              yMaxSemitone={pitchData.songRange?.maxSemitone}
             />
           )}
           <div className="flex justify-between text-[10px] text-[var(--text-muted)] tabular-nums mt-1">

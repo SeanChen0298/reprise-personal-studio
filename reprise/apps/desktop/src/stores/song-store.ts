@@ -198,7 +198,25 @@ export const useSongStore = create<SongStore>()((set, get) => ({
       }
 
       const totalLines = Object.values(lines).reduce((sum, arr) => sum + arr.length, 0);
-      console.log("[loadAllData] DONE", { songs: songsRes.data.length, rawLines: allLineRows.length, totalLines, linesBySong: Object.fromEntries(Object.entries(lines).map(([k, v]) => [k, v.length])) });
+      const titleById = new Map<string, string>();
+      for (const s of (songsRes.data ?? []) as Array<Record<string, unknown>>) {
+        const sid = String(s.id);
+        const title = String(s.title ?? "(untitled)");
+        const artist = s.artist ? String(s.artist) : "";
+        titleById.set(sid, artist ? `${title} — ${artist}` : title);
+      }
+      const linesBySongTitled = Object.entries(lines)
+        .map(([sid, arr]) => {
+          const langs: Record<string, number> = {};
+          for (const l of arr) {
+            const k = l.language ?? "(none)";
+            langs[k] = (langs[k] ?? 0) + 1;
+          }
+          return { song: titleById.get(sid) ?? sid, songId: sid, total: arr.length, byLang: langs };
+        })
+        .sort((a, b) => b.total - a.total);
+      console.log("[loadAllData] DONE", { songs: songsRes.data.length, rawLines: allLineRows.length, totalLines });
+      console.table(linesBySongTitled);
       set({
         songs: songsRes.data.map(dbRowToSong),
         lines,

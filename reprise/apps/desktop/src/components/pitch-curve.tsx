@@ -58,9 +58,20 @@ interface Props {
   onSeek: (fraction: number) => void;
   startMs: number;
   endMs: number;
+  /** Optional static y-axis range (semitones). When provided, axis stays fixed across lines. */
+  yMinSemitone?: number;
+  yMaxSemitone?: number;
 }
 
-export function PitchCurve({ points, progress, onSeek, startMs, endMs }: Props) {
+export function PitchCurve({
+  points,
+  progress,
+  onSeek,
+  startMs,
+  endMs,
+  yMinSemitone,
+  yMaxSemitone,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -96,8 +107,10 @@ export function PitchCurve({ points, progress, onSeek, startMs, endMs }: Props) 
     const borderSubtle = style.getPropertyValue("--border-subtle").trim() || "#e5e7eb";
     const textMuted = style.getPropertyValue("--text-muted").trim() || "#9ca3af";
 
-    // No pitch data — simple progress bar fallback
-    if (points.length === 0) {
+    const hasStaticRange = yMinSemitone != null && yMaxSemitone != null;
+
+    // No pitch data and no static range — simple progress bar fallback
+    if (points.length === 0 && !hasStaticRange) {
       ctx.fillStyle = themeColor;
       ctx.globalAlpha = 0.15;
       ctx.fillRect(0, 0, progress * w, h);
@@ -111,15 +124,23 @@ export function PitchCurve({ points, progress, onSeek, startMs, endMs }: Props) 
     if (duration <= 0) return;
 
     // --- Y-axis range ---
-    const semitones = points.map((p) => p.semitone);
-    const dataMin = Math.min(...semitones);
-    const dataMax = Math.max(...semitones);
-    const dataMid = (dataMin + dataMax) / 2;
-    const dataSpan = dataMax - dataMin;
-    const minSpan = 8;
-    const span = Math.max(dataSpan + 4, minSpan);
-    const yMin = Math.floor(dataMid - span / 2);
-    const yMax = Math.ceil(dataMid + span / 2);
+    let yMin: number;
+    let yMax: number;
+    if (hasStaticRange) {
+      // Static range: pad by 1 semitone on each side so highest/lowest notes aren't clipped.
+      yMin = Math.floor(yMinSemitone! - 1);
+      yMax = Math.ceil(yMaxSemitone! + 1);
+    } else {
+      const semitones = points.map((p) => p.semitone);
+      const dataMin = Math.min(...semitones);
+      const dataMax = Math.max(...semitones);
+      const dataMid = (dataMin + dataMax) / 2;
+      const dataSpan = dataMax - dataMin;
+      const minSpan = 8;
+      const span = Math.max(dataSpan + 4, minSpan);
+      yMin = Math.floor(dataMid - span / 2);
+      yMax = Math.ceil(dataMid + span / 2);
+    }
     const yRange = yMax - yMin || 1;
 
     const labelMargin = 32;
@@ -224,7 +245,7 @@ export function PitchCurve({ points, progress, onSeek, startMs, endMs }: Props) 
     ctx.stroke();
     ctx.setLineDash([]);
     ctx.globalAlpha = 1;
-  }, [points, progress, startMs, endMs]);
+  }, [points, progress, startMs, endMs, yMinSemitone, yMaxSemitone]);
 
   return (
     <div

@@ -31,6 +31,8 @@ export function SettingsPopover({
   const setShowWaveform = usePreferencesStore((s) => s.setShowWaveform);
   const showPitchCurve = usePreferencesStore((s) => s.showPitchCurve);
   const setShowPitchCurve = usePreferencesStore((s) => s.setShowPitchCurve);
+  const showTranslation = usePreferencesStore((s) => s.showTranslation);
+  const setShowTranslation = usePreferencesStore((s) => s.setShowTranslation);
   const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
 
   // Calculate position from anchor element
@@ -80,6 +82,7 @@ export function SettingsPopover({
         {[
           { label: "Waveform", value: showWaveform, set: setShowWaveform },
           { label: "Pitch graph", value: showPitchCurve, set: setShowPitchCurve },
+          { label: "Translation", value: showTranslation, set: setShowTranslation },
         ].map(({ label, value, set }) => (
           <label key={label} className="flex items-center gap-2 py-[5px] cursor-pointer group">
             <div

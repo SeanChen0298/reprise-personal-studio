@@ -16,6 +16,7 @@ export function QueuePlayerBar() {
   const { queue, currentIndex, isPlaying, setIsPlaying, next, prev, clearQueue, setCurrentIndex, removeFromQueue, reorderQueue } =
     useQueueStore();
   const playbackVolume = usePreferencesStore((s) => s.playbackVolume);
+  const setPlaybackVolume = usePreferencesStore((s) => s.setPlaybackVolume);
   const location = useLocation();
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -262,6 +263,43 @@ export function QueuePlayerBar() {
           <span className="text-[10px] tabular-nums text-[var(--text-muted)] flex-shrink-0">
             {formatSecs(duration)}
           </span>
+        </div>
+
+        {/* Volume */}
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          <button
+            onClick={() => setPlaybackVolume(playbackVolume === 0 ? 1 : 0)}
+            className="w-[22px] h-[22px] flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors cursor-pointer bg-transparent border-none flex-shrink-0"
+            title={playbackVolume === 0 ? "Unmute" : "Mute"}
+          >
+            {playbackVolume === 0 ? (
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                <line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>
+              </svg>
+            ) : playbackVolume < 0.5 ? (
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                <path d="M15.54 8.46a5 5 0 010 7.07"/>
+              </svg>
+            ) : (
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                <path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/>
+              </svg>
+            )}
+          </button>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.02}
+            value={playbackVolume}
+            onChange={(e) => setPlaybackVolume(parseFloat(e.target.value))}
+            className="w-[60px] cursor-pointer"
+            style={{ accentColor: "var(--theme)", height: 3 }}
+            title={`Volume: ${Math.round(playbackVolume * 100)}%`}
+          />
         </div>
 
         {/* Queue toggle + count + clear */}

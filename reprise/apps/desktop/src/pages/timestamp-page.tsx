@@ -397,6 +397,28 @@ export function TimestampPage() {
     if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [currentIdx, playingLineIndex]);
 
+  // Clear all timestamps locally — resets the working copy so the user can re-tap
+  // from scratch. Original timestamps remain in the DB until Save is clicked.
+  const handleClearAll = useCallback(() => {
+    if (timestamps.length === 0) return;
+    const ok = window.confirm(
+      "Clear all timestamps?\n\nEvery line's start and end time will be wiped in the editor so you can tap them again from the top. The change is only saved when you click \"Save timestamps\" — close this page without saving to keep the existing values.",
+    );
+    if (!ok) return;
+    setTimestamps((prev) => prev.map((t) => ({ ...t, start_ms: undefined, end_ms: undefined })));
+    setCurrentIdx(0);
+    setUndoStack([]);
+    setEditingLine(null);
+    setDirty(true);
+    const audio = audioRef.current;
+    if (audio) {
+      audio.pause();
+      audio.currentTime = 0;
+      setIsPlaying(false);
+      setCurrentTime(0);
+    }
+  }, [timestamps.length]);
+
   // Save all timestamps to store (uses setLines to handle locally-inserted lines)
   const handleSave = useCallback(async () => {
     if (!id) return;
@@ -526,6 +548,18 @@ export function TimestampPage() {
           </div>
           <div className="flex items-center gap-2">
             <button
+              onClick={handleClearAll}
+              disabled={timestamps.length === 0 || timestamps.every((t) => t.start_ms == null && t.end_ms == null)}
+              title="Wipe every line's start/end time so you can re-tap from line 1. Only saved if you click Save timestamps."
+              className="flex items-center gap-[5px] px-3 py-[7px] rounded-[7px] border border-[var(--border)] bg-transparent text-[12.5px] text-[var(--text-secondary)] hover:border-red-400 hover:text-red-600 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+                <polyline points="3 3 3 8 8 8" />
+              </svg>
+              Clear all
+            </button>
+            <button
               onClick={handleSave}
               disabled={!dirty}
               className="flex items-center gap-[5px] px-[18px] py-[7px] rounded-[7px] border-none bg-[var(--accent)] text-white text-[13px] font-medium cursor-pointer hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
@@ -627,7 +661,7 @@ export function TimestampPage() {
               <span className="inline-flex items-center px-[6px] py-[1px] rounded bg-[#FEF3C7] border border-[#FDE68A] text-[11px] font-semibold text-[#92400E]">
                 →
               </span>
-              {" "}to skip ±5s. Click a mapped line to remap from it.
+              {" "}to skip ±5s. Click any mapped line to remap it — audio rewinds 2 s, then tap when the line starts.
             </div>
           </div>
 
@@ -655,7 +689,9 @@ export function TimestampPage() {
                         // Clicking the active line again exits remap mode
                         exitRemap();
                       } else {
-                        seekToLine(ts.start_ms);
+                        // Seek 2 s before so the user can play and re-tap at the right moment.
+                        // Seeking TO the old timestamp means the first tap records the same value.
+                        seekToLine(Math.max(0, ts.start_ms - 2000));
                         setCurrentIdx(i);
                       }
                     }

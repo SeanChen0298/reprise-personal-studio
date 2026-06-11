@@ -7,10 +7,20 @@ export interface PitchDisplayPoint {
   confidence: number;
 }
 
+export interface PitchSongRange {
+  minSemitone: number;
+  maxSemitone: number;
+}
+
 interface UsePitchDataReturn {
   points: PitchDisplayPoint[];
+  songRange: PitchSongRange | null;
   isLoading: boolean;
 }
+
+const MIN_CONFIDENCE = 0.5;
+const MIN_FREQ = 65;   // C2
+const MAX_FREQ = 1047; // C6
 
 /**
  * Load and slice pitch data for the current line.
@@ -22,6 +32,7 @@ export function usePitchData(
   endMs: number | undefined,
 ): UsePitchDataReturn {
   const [isLoading, setIsLoading] = useState(false);
+  const [songRange, setSongRange] = useState<PitchSongRange | null>(null);
   const allPointsRef = useRef<PitchPoint[]>([]);
   const loadedPathRef = useRef<string | null>(null);
 
@@ -31,17 +42,40 @@ export function usePitchData(
 
     let cancelled = false;
     setIsLoading(true);
+    setSongRange(null);
 
     (async () => {
       try {
         const { readTextFile } = await import("@tauri-apps/plugin-fs");
         const content = await readTextFile(pitchDataPath);
         if (cancelled) return;
-        allPointsRef.current = parsePitchData(content);
+        const parsed = parsePitchData(content);
+        allPointsRef.current = parsed;
         loadedPathRef.current = pitchDataPath;
+
+        // Compute song-wide pitch range using same filters as per-line slicing
+        let minSemi = Infinity;
+        let maxSemi = -Infinity;
+        for (const p of parsed) {
+          if (
+            p.confidence >= MIN_CONFIDENCE &&
+            p.freq_hz >= MIN_FREQ &&
+            p.freq_hz <= MAX_FREQ
+          ) {
+            const s = freqToSemitone(p.freq_hz);
+            if (s < minSemi) minSemi = s;
+            if (s > maxSemi) maxSemi = s;
+          }
+        }
+        setSongRange(
+          isFinite(minSemi) && isFinite(maxSemi)
+            ? { minSemitone: minSemi, maxSemitone: maxSemi }
+            : null,
+        );
       } catch (err) {
         console.error("[usePitchData] Failed to load pitch data:", err);
         allPointsRef.current = [];
+        setSongRange(null);
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -58,10 +92,6 @@ export function usePitchData(
 
     // Filter: confidence >= 0.5 keeps only well-tracked frames, removing silence/breaths/harmonics.
     // Frequency range 65–1047 Hz (C2–C6) covers human vocal range.
-    const MIN_CONFIDENCE = 0.5;
-    const MIN_FREQ = 65;   // C2
-    const MAX_FREQ = 1047; // C6
-
     return allPointsRef.current
       .filter((p) =>
         p.time_ms >= startMs &&
@@ -77,5 +107,5 @@ export function usePitchData(
       }));
   }, [startMs, endMs, isLoading]);
 
-  return { points, isLoading };
+  return { points, songRange, isLoading };
 }

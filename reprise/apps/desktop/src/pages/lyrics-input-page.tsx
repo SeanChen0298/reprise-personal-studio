@@ -10,6 +10,7 @@ import {
   SUBTITLE_LANGUAGES,
   buildSongFolder,
 } from "../lib/audio-download";
+import { isTranslationSupported, translateLinesToEnglish, type TranslateProgress } from "../lib/translate";
 import type { Line, Section } from "../types/song";
 
 type Mode = "lines" | "bulk";
@@ -19,19 +20,70 @@ interface TranslationPair {
   text: string;
 }
 
-function parseBulkText(raw: string): { mainLines: string[]; translationPairs: TranslationPair[] } {
+interface PendingSection {
+  name: string;
+  startLineIndex: number; // index into mainLines array
+  endLineIndex: number;   // inclusive
+}
+
+// Genius injects an ad block ("You might also like ...") between sections.
+// Match "You might also like" case-insensitively and skip until next [Section].
+const GENIUS_JUNK_RE = /^you might also like$/i;
+
+function parseBulkText(raw: string): {
+  mainLines: string[];
+  translationPairs: TranslationPair[];
+  pendingSections: PendingSection[];
+} {
   const mainLines: string[] = [];
   const translationPairs: TranslationPair[] = [];
+  const pendingSections: PendingSection[] = [];
+
+  let currentSection: { name: string; startIdx: number } | null = null;
+  let skipUntilSection = false;
+
+  const finalizeSection = (endIdx: number) => {
+    if (currentSection !== null && endIdx >= currentSection.startIdx) {
+      pendingSections.push({
+        name: currentSection.name,
+        startLineIndex: currentSection.startIdx,
+        endLineIndex: endIdx,
+      });
+      currentSection = null;
+    }
+  };
+
   for (const rawLine of raw.split("\n")) {
     const trimmed = rawLine.trim();
     if (!trimmed) continue;
+
+    // Section header: [Verse 1], [Chorus], etc.
+    if (/^\[.+\]$/.test(trimmed)) {
+      skipUntilSection = false;
+      finalizeSection(mainLines.length - 1);
+      currentSection = { name: trimmed.slice(1, -1), startIdx: mainLines.length };
+      continue;
+    }
+
+    // Genius ad block — skip until next section header
+    if (GENIUS_JUNK_RE.test(trimmed)) {
+      skipUntilSection = true;
+      continue;
+    }
+    if (skipUntilSection) continue;
+
+    // Translation line
     if (trimmed.startsWith("- ") && mainLines.length > 0) {
       translationPairs.push({ mainOrder: mainLines.length - 1, text: trimmed.slice(2).trim() });
     } else {
       mainLines.push(trimmed);
     }
   }
-  return { mainLines, translationPairs };
+
+  // Finalize last section
+  finalizeSection(mainLines.length - 1);
+
+  return { mainLines, translationPairs, pendingSections };
 }
 
 /** Resolve a BCP-47 language code to a display name using the browser's Intl API */
@@ -54,17 +106,20 @@ export function LyricsInputPage() {
   const storedLines = rawLinesForSong ?? [];
   const setLinesForLanguage = useSongStore((s) => s.setLinesForLanguage);
   const updateSong = useSongStore((s) => s.updateSong);
+  const updateLine = useSongStore((s) => s.updateLine);
   const generateFuriganaForSong = useSongStore((s) => s.generateFuriganaForSong);
   const sections = useSongStore((s) => (id ? s.sections[id] : undefined)) ?? [];
   const addSection = useSongStore((s) => s.addSection);
   const updateSection = useSongStore((s) => s.updateSection);
   const removeSection = useSongStore((s) => s.removeSection);
   const removeLine = useSongStore((s) => s.removeLine);
+  const setLines = useSongStore((s) => s.setLines);
 
   const [mode, setMode] = useState<Mode>("lines");
   const [editLines, setEditLines] = useState<{ id: string; text: string; start_ms?: number; end_ms?: number }[]>([]);
   const [bulkText, setBulkText] = useState("");
   const [pendingTranslationPairs, setPendingTranslationPairs] = useState<TranslationPair[]>([]);
+  const [pendingSections, setPendingSections] = useState<PendingSection[]>([]);
   const [syncStatus, setSyncStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [syncError, setSyncError] = useState<string | null>(null);
 
@@ -82,6 +137,109 @@ export function LyricsInputPage() {
     if (!id) return;
     setGeneratingFurigana(true);
     try { await generateFuriganaForSong(id); } finally { setGeneratingFurigana(false); }
+  }
+
+  // Local translation (Helsinki-NLP Opus-MT via @huggingface/transformers).
+  const [translating, setTranslating] = useState(false);
+  const [translateMsg, setTranslateMsg] = useState<string | null>(null);
+  async function handleTranslateToEnglish() {
+    if (!id) return;
+    const sourceLines = editLines.filter((l) => l.text.trim());
+    if (sourceLines.length === 0) {
+      setTranslateMsg("No lines to translate.");
+      return;
+    }
+    if (!isTranslationSupported(lyricsLang)) {
+      setTranslateMsg(`No local translation model for "${lyricsLang}".`);
+      return;
+    }
+    const ok = window.confirm(
+      `Translate ${sourceLines.length} line${sourceLines.length === 1 ? "" : "s"} to English locally?\n\n` +
+      `On first run the model (~300 MB, fp32) will download from Hugging Face. Subsequent runs are offline.`
+    );
+    if (!ok) return;
+
+    setTranslating(true);
+    setTranslateMsg("Loading translation model…");
+    try {
+      const onProgress = (p: TranslateProgress) => {
+        if (p.status === "progress" && p.progress != null) {
+          setTranslateMsg(`Downloading ${p.file ?? "model"} ${Math.round(p.progress)}%`);
+        } else if (p.status === "ready") {
+          setTranslateMsg("Translating…");
+        } else if (p.status) {
+          setTranslateMsg(p.status);
+        }
+      };
+      const inputs = sourceLines.map((l) => l.text.trim());
+      const translated = await translateLinesToEnglish(inputs, lyricsLang, onProgress);
+
+      const now = new Date().toISOString();
+      const newLines: Line[] = sourceLines.map((src, i) => ({
+        id: crypto.randomUUID(),
+        song_id: id,
+        text: translated[i] ?? "",
+        language: "en",
+        order: i,
+        start_ms: src.start_ms,
+        end_ms: src.end_ms,
+        status: "new" as const,
+        created_at: now,
+        updated_at: now,
+      }));
+      // CRITICAL: set translation_language BEFORE writing the translation lines.
+      // setLinesForLanguage uses song.translation_language to decide whether the
+      // call is a translation save (language-scoped delete) or a primary save
+      // (deletes everything else). If translation_language is unset at call time,
+      // a "translation save" gets misclassified as a primary save and wipes the
+      // user's main lyrics.
+      await updateSong(id, { translation_language: "en" });
+      await setLinesForLanguage(id, "en", newLines);
+      setTranslationLang("en");
+      setTranslateMsg(`Saved ${newLines.length} English translation${newLines.length === 1 ? "" : "s"}.`);
+    } catch (err) {
+      setTranslateMsg(`Error: ${err instanceof Error ? err.message : "Translation failed"}`);
+    } finally {
+      setTranslating(false);
+    }
+  }
+
+  const [resetting, setResetting] = useState(false);
+  async function handleResetLyrics() {
+    if (!id) return;
+    const ok = window.confirm(
+      "Reset lyrics?\n\nThis permanently deletes all lyric lines, translations, sections, annotations, custom edits, and furigana for this song. Recordings are kept.\n\nThis cannot be undone."
+    );
+    if (!ok) return;
+    setResetting(true);
+    try {
+      // Clear sections first (they reference line orders that are about to disappear)
+      const currentSections = [...sections];
+      for (const sec of currentSections) {
+        await removeSection(id, sec.id);
+      }
+      // Wipe every line for this song (primary + translation)
+      await setLines(id, []);
+      // Clear translation language so the editor stops expecting one
+      if (song?.translation_language) {
+        await updateSong(id, { translation_language: undefined });
+      }
+      // Reset local editor state
+      setEditLines([{ id: crypto.randomUUID(), text: "" }]);
+      setPendingTranslationPairs([]);
+      setPendingSections([]);
+      setBulkText("");
+      setSelectedRange(null);
+      setNewSectionName("");
+      setEditingSectionId(null);
+      setTranslationLang("");
+      setTranslationSaveMsg(null);
+    } catch (err) {
+      setSyncError(err instanceof Error ? err.message : "Failed to reset lyrics");
+      setSyncStatus("error");
+    } finally {
+      setResetting(false);
+    }
   }
 
   // Language fetch state
@@ -154,14 +312,47 @@ export function LyricsInputPage() {
       .sort((a, b) => a.order - b.order);
   }, [storedLines, song?.translation_language]);
 
-  // Map from edit-line index → translation text (matched by position)
-  const translationByEditIndex = useMemo(() => {
-    const map = new Map<number, string>();
+  // Map from edit-line index → translation Line (matched by position)
+  const translationLineByEditIndex = useMemo(() => {
+    const map = new Map<number, Line>();
     for (let i = 0; i < translationStoredLines.length; i++) {
-      map.set(i, translationStoredLines[i].text);
+      map.set(i, translationStoredLines[i]);
     }
     return map;
   }, [translationStoredLines]);
+
+  // Local drafts for inline-edited translation text, keyed by translation Line.id.
+  // Persists on blur via updateLine.
+  const [translationDrafts, setTranslationDrafts] = useState<Record<string, string>>({});
+
+  function translationTextAt(i: number): string {
+    const line = translationLineByEditIndex.get(i);
+    if (!line) return "";
+    return translationDrafts[line.id] ?? line.text;
+  }
+
+  function setTranslationDraftAt(i: number, value: string) {
+    const line = translationLineByEditIndex.get(i);
+    if (!line) return;
+    setTranslationDrafts((prev) => ({ ...prev, [line.id]: value }));
+  }
+
+  async function flushTranslationDraft(i: number) {
+    const line = translationLineByEditIndex.get(i);
+    if (!line || !id) return;
+    const draft = translationDrafts[line.id];
+    if (draft == null || draft === line.text) return;
+    try {
+      await updateLine(id, line.id, { text: draft });
+      setTranslationDrafts((prev) => {
+        const next = { ...prev };
+        delete next[line.id];
+        return next;
+      });
+    } catch (err) {
+      console.error("[lyrics-input] Failed to update translation:", err);
+    }
+  }
 
   // Initialize editLines from mainStoredLines the first time real data arrives.
   // Uses a ref so in-progress edits aren't overwritten by later store updates.
@@ -187,8 +378,9 @@ export function LyricsInputPage() {
     );
   }
 
-  const { mainLines: bulkMainLines, translationPairs: bulkTranslationPairs } = parseBulkText(bulkText);
+  const { mainLines: bulkMainLines, translationPairs: bulkTranslationPairs, pendingSections: bulkPendingSections } = parseBulkText(bulkText);
   const bulkLineCount = bulkMainLines.length;
+  const bulkSectionCount = bulkPendingSections.length;
 
   function handleAddLine() {
     setEditLines((prev) => [
@@ -295,10 +487,11 @@ export function LyricsInputPage() {
   }
 
   function handleApplyBulk() {
-    const { mainLines, translationPairs } = parseBulkText(bulkText);
+    const { mainLines, translationPairs, pendingSections: ps } = parseBulkText(bulkText);
     if (mainLines.length === 0) return;
     setEditLines(mainLines.map((text) => ({ id: crypto.randomUUID(), text })));
     setPendingTranslationPairs(translationPairs);
+    setPendingSections(ps);
     setMode("lines");
   }
 
@@ -434,6 +627,25 @@ export function LyricsInputPage() {
         setPendingTranslationPairs([]);
       }
 
+      // Create sections parsed from bulk import
+      if (pendingSections.length > 0) {
+        for (const ps of pendingSections) {
+          const startLine = newLines[ps.startLineIndex];
+          const endLine = newLines[ps.endLineIndex];
+          if (!startLine || !endLine) continue;
+          addSection(id!, {
+            id: crypto.randomUUID(),
+            song_id: id!,
+            name: ps.name,
+            start_line_order: startLine.order,
+            end_line_order: endLine.order,
+            created_at: now,
+            updated_at: now,
+          });
+        }
+        setPendingSections([]);
+      }
+
       // Remap section boundaries to new line orders.
       // Must use mainStoredLines (not storedLines) — translation lines share the same
       // order values as main lines, so storedLines.find(order) could return a translation
@@ -521,6 +733,26 @@ export function LyricsInputPage() {
                 Save failed
               </span>
             )}
+            <button
+              onClick={handleResetLyrics}
+              disabled={resetting || syncStatus === "saving"}
+              title="Delete all lyric lines, translations, sections, and annotations for this song"
+              className="flex items-center gap-[5px] px-3 py-[7px] rounded-[7px] border border-[var(--border)] bg-transparent text-[12.5px] text-[var(--text-secondary)] hover:border-red-400 hover:text-red-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {resetting ? (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin">
+                  <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+                </svg>
+              ) : (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="3 6 5 6 21 6" />
+                  <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+                  <path d="M10 11v6M14 11v6" />
+                  <path d="M9 6V4a2 2 0 012-2h2a2 2 0 012 2v2" />
+                </svg>
+              )}
+              {resetting ? "Resetting…" : "Reset lyrics"}
+            </button>
             <button
               onClick={handleSave}
               disabled={syncStatus === "saving"}
@@ -704,6 +936,24 @@ export function LyricsInputPage() {
                   )}
                   {generatingFurigana ? "Generating…" : "Generate furigana"}
                 </button>
+              )}
+              {isTranslationSupported(lyricsLang) && lyricsLang !== "en" && (
+                <button
+                  onClick={handleTranslateToEnglish}
+                  disabled={translating}
+                  title="Translate every line into English locally (first run downloads ~80 MB model)"
+                  className="flex items-center gap-[5px] px-2.5 py-[4px] rounded-[6px] border border-[var(--border)] bg-transparent text-[12px] text-[var(--text-secondary)] hover:border-[#888] hover:text-[var(--text-primary)] transition-all disabled:opacity-50"
+                >
+                  {translating ? (
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+                  ) : (
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m5 8 6 6" /><path d="m4 14 6-6 2-3" /><path d="M2 5h12" /><path d="M7 2h1" /><path d="m22 22-5-10-5 10" /><path d="M14 18h6" /></svg>
+                  )}
+                  {translating ? "Translating…" : "Translate to English"}
+                </button>
+              )}
+              {translateMsg && (
+                <span className="text-[11px] text-[var(--text-muted)] truncate max-w-[260px]" title={translateMsg}>{translateMsg}</span>
               )}
             </div>
 
@@ -921,15 +1171,26 @@ export function LyricsInputPage() {
                           </div>
                         </div>
 
-                        {/* Read-only translation line */}
-                        {translationByEditIndex.has(i) && (
+                        {/* Editable translation line */}
+                        {translationLineByEditIndex.has(i) && (
                           <div className="flex items-center gap-2 px-3 py-[5px] ml-[34px] rounded-b-[7px] bg-[var(--bg)] border border-t-0 border-[var(--border-subtle)]">
                             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-[var(--text-muted)] flex-shrink-0 opacity-50">
                               <path d="M5 8l10 0M5 12l6 0" /><rect x="3" y="4" width="18" height="16" rx="2" />
                             </svg>
-                            <span className="text-[12px] text-[var(--text-muted)] italic leading-snug">
-                              {translationByEditIndex.get(i)}
-                            </span>
+                            <input
+                              type="text"
+                              value={translationTextAt(i)}
+                              onChange={(e) => setTranslationDraftAt(i, e.target.value)}
+                              onBlur={() => flushTranslationDraft(i)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  (e.target as HTMLInputElement).blur();
+                                }
+                              }}
+                              title="Edit translation (saves on blur)"
+                              className="flex-1 bg-transparent border-none outline-none text-[12px] text-[var(--text-muted)] italic leading-snug font-sans focus:text-[var(--text-secondary)]"
+                            />
                           </div>
                         )}
                       </div>
@@ -956,7 +1217,7 @@ export function LyricsInputPage() {
                 <textarea
                   value={bulkText}
                   onChange={(e) => setBulkText(e.target.value)}
-                  placeholder={"Paste full lyrics here...\n\nEach line becomes a separate lyric line.\nPrefix a line with \"- \" to mark it as a translation of the line above.\n\nExample:\n今日も晴れている\n- The sky is clear today\nEmpty lines are ignored."}
+                  placeholder={"Paste full lyrics here...\n\nEach line becomes a lyric line.\n[Section headers] like [Verse 1] or [Chorus] become sections automatically.\nPrefix a line with \"- \" to mark it as a translation of the line above.\nGenius ad blocks (\"You might also like\") are stripped automatically.\n\nExample:\n[Verse 1]\n今日も晴れている\n- The sky is clear today\n[Chorus]\nいつも通り\nEmpty lines are ignored."}
                   rows={14}
                   className="w-full min-h-[320px] p-4 rounded-[var(--radius)] border-[1.5px] border-[var(--border)] bg-[var(--surface)] text-[var(--text-primary)] font-sans text-[14px] leading-[1.8] outline-none resize-y focus:border-[var(--theme)] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.09)] transition-all placeholder:text-[var(--text-muted)]"
                 />
@@ -1006,6 +1267,9 @@ export function LyricsInputPage() {
                       </svg>
                       {bulkLineCount} lines
                     </div>
+                    {bulkSectionCount > 0 && (
+                      <span className="text-[var(--text-muted)]">· {bulkSectionCount} section{bulkSectionCount !== 1 ? "s" : ""}</span>
+                    )}
                     {bulkTranslationPairs.length > 0 && (
                       <span className="text-[var(--text-muted)]">+ {bulkTranslationPairs.length} translations</span>
                     )}

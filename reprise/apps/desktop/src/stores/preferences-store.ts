@@ -22,9 +22,11 @@ interface PreferencesState {
   theme: string;
   showWaveform: boolean;
   showPitchCurve: boolean;
+  showTranslation: boolean;
   libraryView: "grid" | "list";
   librarySort: "custom" | "title" | "artist" | "mastery" | "date_added";
   libraryGroup: "none" | "artist" | "last_practiced";
+  librarySearch: string;
   songOrder: Record<string, number>;
   lastPracticed: Record<string, string>;
   collapsedGroups: Record<string, boolean>;
@@ -37,9 +39,11 @@ interface PreferencesState {
   setTheme: (v: string) => void;
   setShowWaveform: (v: boolean) => void;
   setShowPitchCurve: (v: boolean) => void;
+  setShowTranslation: (v: boolean) => void;
   setLibraryView: (v: "grid" | "list") => void;
   setLibrarySort: (v: PreferencesState["librarySort"]) => void;
   setLibraryGroup: (v: PreferencesState["libraryGroup"]) => void;
+  setLibrarySearch: (v: string) => void;
   setSongOrder: (v: Record<string, number>) => void;
   touchLastPracticed: (songId: string) => void;
   setGroupCollapsed: (key: string, collapsed: boolean) => void;
@@ -57,6 +61,7 @@ export const usePreferencesStore = create<PreferencesState>()(
       theme: "blue",
       showWaveform: true,
       showPitchCurve: true,
+      showTranslation: true,
       countInEnabled: true,
       recordingPlaybackGain: 8.0,
       playbackVolume: 1.0,
@@ -66,6 +71,7 @@ export const usePreferencesStore = create<PreferencesState>()(
       libraryView: "grid" as const,
       librarySort: "custom" as const,
       libraryGroup: "none" as const,
+      librarySearch: "",
       songOrder: {} as Record<string, number>,
       lastPracticed: {} as Record<string, string>,
       collapsedGroups: {} as Record<string, boolean>,
@@ -75,9 +81,11 @@ export const usePreferencesStore = create<PreferencesState>()(
       },
       setShowWaveform: (v) => set({ showWaveform: v }),
       setShowPitchCurve: (v) => set({ showPitchCurve: v }),
+      setShowTranslation: (v) => set({ showTranslation: v }),
       setLibraryView: (v) => set({ libraryView: v }),
       setLibrarySort: (v) => set({ librarySort: v }),
       setLibraryGroup: (v) => set({ libraryGroup: v }),
+      setLibrarySearch: (v) => set({ librarySearch: v }),
       setSongOrder: (v) => set({ songOrder: v }),
       touchLastPracticed: (songId) =>
         set((s) => ({ lastPracticed: { ...s.lastPracticed, [songId]: new Date().toISOString() } })),

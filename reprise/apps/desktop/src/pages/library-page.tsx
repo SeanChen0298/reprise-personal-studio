@@ -5,17 +5,24 @@ import { Sidebar } from "../components/sidebar";
 import { useSongStore } from "../stores/song-store";
 import { usePreferencesStore } from "../stores/preferences-store";
 import { useQueueStore } from "../stores/queue-store";
-import { useWaveformData } from "../hooks/use-waveform-data";
 import { useSortedGroupedSongs } from "../hooks/use-sorted-grouped-songs";
 import { QueuePlayerBar } from "../components/queue-player-bar";
 import { computeSongProgress } from "../lib/status-config";
 import type { Song } from "../types/song";
 import type { SongGroup } from "../hooks/use-sorted-grouped-songs";
 
+function masteryColor(value: number): string {
+  if (value === 0) return "#9CA3AF";       // gray — untouched
+  if (value <= 30) return "#3B82F6";       // blue — early practice
+  if (value <= 70) return "#F59E0B";       // amber — halfway
+  return "#22C55E";                        // green — mastered
+}
+
 function MasteryRing({ value }: { value: number }) {
   const r = 12;
   const circ = 2 * Math.PI * r;
   const dash = (value / 100) * circ;
+  const color = masteryColor(value);
   return (
     <svg width="34" height="34" viewBox="0 0 34 34" className="flex-shrink-0">
       <circle cx="17" cy="17" r={r} fill="none" stroke="var(--border)" strokeWidth="2.5" />
@@ -24,7 +31,7 @@ function MasteryRing({ value }: { value: number }) {
         cy="17"
         r={r}
         fill="none"
-        stroke="var(--theme)"
+        stroke={color}
         strokeWidth="2.5"
         strokeDasharray={`${dash} ${circ}`}
         strokeDashoffset={circ / 4}
@@ -36,8 +43,8 @@ function MasteryRing({ value }: { value: number }) {
         textAnchor="middle"
         dominantBaseline="central"
         fontSize="6.5"
-        fontWeight="600"
-        fill="var(--text-primary)"
+        fontWeight="700"
+        fill={value === 0 ? "var(--text-muted)" : color}
       >
         {value}%
       </text>
@@ -86,7 +93,7 @@ function SongCard({
   song: Song;
   mastery: number;
   onPin: (id: string) => void;
-  onClick: () => void;
+  onClick: (e: React.MouseEvent) => void;
   onContextMenu?: (e: React.MouseEvent, song: Song) => void;
   onEnqueue?: (song: Song) => void;
   draggable?: boolean;
@@ -98,7 +105,7 @@ function SongCard({
 }) {
   return (
     <div
-      onClick={onClick}
+      onClick={(e) => onClick(e)}
       onContextMenu={onContextMenu ? (e) => onContextMenu(e, song) : undefined}
       draggable={draggable}
       onDragStart={onDragStart}
@@ -172,231 +179,121 @@ function SongCard({
   );
 }
 
-// ---------------------------------------------------------------------------
-// List-view row with inline waveform
-// ---------------------------------------------------------------------------
-
-function ListWaveform({ audioSrc, progress }: { audioSrc: string; progress: number }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [hovered, setHovered] = useState(false);
-  const { peaks } = useWaveformData(audioSrc || undefined, undefined, undefined, 180, true);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const container = containerRef.current;
-    if (!canvas || !container || peaks.length === 0) return;
-
-    const dpr = window.devicePixelRatio || 1;
-    const w = container.clientWidth;
-    const h = container.clientHeight;
-    canvas.width = w * dpr;
-    canvas.height = h * dpr;
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, w, h);
-
-    const style = getComputedStyle(container);
-    const themeColor = style.getPropertyValue("--theme").trim() || "#2563EB";
-
-    const floorY = Math.round(h * 0.62);
-    const upperZone = floorY;
-    const lowerZone = h - floorY;
-
-    const barCount = peaks.length;
-    const slotW = w / barCount;
-    const gap = Math.min(1.5, slotW * 0.25);
-    const barWidth = slotW - gap;
-    const progressX = progress * w;
-    const hBoost = hovered ? 1.2 : 1.0;
-
-    for (let i = 0; i < barCount; i++) {
-      const x = i * slotW;
-      const amplitude = peaks[i];
-      const isPast = x + barWidth / 2 <= progressX;
-
-      // Upper bar
-      const upperH = Math.max(2, amplitude * upperZone * 0.96);
-      ctx.fillStyle = themeColor;
-      ctx.globalAlpha = Math.min(1, (isPast ? 0.92 : 0.42) * hBoost);
-      ctx.beginPath();
-      ctx.roundRect(x, floorY - upperH, barWidth, upperH, [1, 1, 0, 0]);
-      ctx.fill();
-
-      // Reflection
-      const lowerH = Math.max(1, amplitude * lowerZone * 0.72);
-      ctx.globalAlpha = Math.min(1, (isPast ? 0.44 : 0.16) * hBoost);
-      ctx.beginPath();
-      ctx.roundRect(x, floorY, barWidth, lowerH, [0, 0, 1, 1]);
-      ctx.fill();
-    }
-
-    // Floor line
-    ctx.globalAlpha = 0.18;
-    ctx.fillStyle = themeColor;
-    ctx.fillRect(0, floorY, w, 1);
-
-    // Progress cursor
-    if (progress > 0 && progress < 1) {
-      ctx.globalAlpha = 0.9;
-      ctx.fillStyle = themeColor;
-      ctx.fillRect(progressX - 0.75, 0, 1.5, h);
-    }
-
-    // Saturation gradient: white overlay stronger at top → transparent at floor
-    // Makes bar tips lighter/desaturated, base stays full color
-    const satGrad = ctx.createLinearGradient(0, 0, 0, floorY);
-    satGrad.addColorStop(0.0, `rgba(255,255,255,${hovered ? 0.2 : 0.42})`);
-    satGrad.addColorStop(0.55, "rgba(255,255,255,0)");
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = satGrad;
-    ctx.fillRect(0, 0, w, floorY);
-
-  }, [peaks, progress, hovered]);
-
-  if (peaks.length === 0) {
-    return (
-      <div className="h-[46px] flex items-center">
-        <div className="w-full h-[1px] bg-[var(--border-subtle)] opacity-30" />
-      </div>
-    );
-  }
-
-  return (
-    <div
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-    >
-      <div ref={containerRef} className="h-[46px] relative overflow-hidden">
-        <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
-      </div>
-    </div>
-  );
-}
 
 function SongListRow({
-  song, mastery, isPlaying, progress, onPlay, onSeek, onClick, onPin, onEnqueue, onContextMenu,
+  song, mastery, isPlaying, onPlay, onClick, onPin, onEnqueue, onContextMenu,
 }: {
   song: Song;
   mastery: number;
   isPlaying: boolean;
-  progress: number;
   onPlay: (song: Song) => void;
-  onSeek: (song: Song, fraction: number) => void;
-  onClick: () => void;
+  onClick: (e: React.MouseEvent) => void;
   onPin: (id: string) => void;
   onEnqueue?: (song: Song) => void;
   onContextMenu?: (e: React.MouseEvent, song: Song) => void;
 }) {
   const audioSrc = song.audio_path ? convertFileSrc(song.audio_path) : "";
 
-  const handleWaveformClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    if (!audioSrc) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const fraction = (e.clientX - rect.left) / rect.width;
-    onSeek(song, Math.max(0, Math.min(1, fraction)));
-  }, [audioSrc, song, onSeek]);
-
   return (
     <div
-      className="group flex items-center gap-4 px-1 py-2 rounded-[8px] hover:bg-[var(--surface)] transition-colors"
+      className="group flex items-center gap-4 px-3 h-[68px] border-b border-[var(--border-subtle)] last:border-b-0 hover:bg-[var(--surface)] transition-colors"
       onContextMenu={onContextMenu ? (e) => onContextMenu(e, song) : undefined}
     >
-      {/* Thumbnail — landscape 16:9 */}
-      <div
-        onClick={onClick}
-        className="relative w-[136px] flex-shrink-0 rounded-[6px] overflow-hidden bg-gradient-to-br from-[#1a1a2e] via-[#16213e] to-[#0f3460] cursor-pointer"
-        style={{ aspectRatio: "16/9" }}
-      >
-        {song.thumbnail_url ? (
-          <img src={song.thumbnail_url} alt={song.title} className="w-full h-full object-cover" />
-        ) : (
-          <div className="flex items-center justify-center w-full h-full">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth="1">
-              <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
-            </svg>
+      {/* Album art — 48×48, play overlay on hover */}
+      <div className="relative w-[48px] h-[48px] flex-shrink-0 rounded-[6px] overflow-hidden cursor-pointer" onClick={(e) => onClick(e)}>
+        <div className="w-full h-full bg-gradient-to-br from-[#1a1a2e] via-[#16213e] to-[#0f3460]">
+          {song.thumbnail_url && (
+            <img src={song.thumbnail_url} alt="" className="w-full h-full object-cover" />
+          )}
+          {!song.thumbnail_url && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="1.5">
+                <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
+              </svg>
+            </div>
+          )}
+        </div>
+        {/* Play/pause overlay */}
+        {audioSrc && (
+          <div
+            onClick={(e) => { e.stopPropagation(); onPlay(song); }}
+            className={`absolute inset-0 flex items-center justify-center transition-opacity ${
+              isPlaying
+                ? "bg-black/40 opacity-100"
+                : "bg-black/50 opacity-0 group-hover:opacity-100"
+            }`}
+          >
+            {isPlaying ? (
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="white">
+                <rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" />
+              </svg>
+            ) : (
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="white" style={{ marginLeft: 2 }}>
+                <polygon points="5,3 19,12 5,21" />
+              </svg>
+            )}
           </div>
         )}
       </div>
 
-      {/* Content area */}
-      <div className="flex-1 min-w-0 flex flex-col gap-1">
+      {/* Song info */}
+      <div className="flex-1 min-w-0 cursor-pointer" onClick={(e) => onClick(e)}>
+        <div className="text-[14px] font-medium text-[var(--text-primary)] truncate leading-snug hover:text-[var(--theme)] transition-colors">
+          {song.title}
+        </div>
+        <div className="text-[12px] text-[var(--text-muted)] truncate mt-[2px]">
+          {song.artist}
+        </div>
+      </div>
 
-        {/* Row 1: play btn + title + mastery ring */}
-        <div className="flex items-center gap-2.5">
+      {/* Tag (first one, hidden on narrow) */}
+      {song.tags[0] && (
+        <span className="hidden lg:block text-[10.5px] px-2 py-0.5 rounded-full border border-[var(--border-subtle)] text-[var(--text-muted)] flex-shrink-0">
+          {song.tags[0]}
+        </span>
+      )}
+
+      {/* Mastery ring */}
+      <MasteryRing value={mastery} />
+
+      {/* Hover actions */}
+      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+        {onEnqueue && (
           <button
-            onClick={(e) => { e.stopPropagation(); onPlay(song); }}
-            disabled={!audioSrc}
-            className="w-[32px] h-[32px] flex-shrink-0 rounded-full bg-[var(--text-primary)] text-[var(--bg)] flex items-center justify-center border-none cursor-pointer hover:opacity-75 transition-opacity disabled:opacity-25 disabled:cursor-not-allowed"
-            title={isPlaying ? "Pause" : "Play"}
+            onClick={(e) => { e.stopPropagation(); onEnqueue(song); }}
+            className="w-[28px] h-[28px] rounded-[5px] border border-[var(--border)] flex items-center justify-center text-[var(--text-muted)] bg-transparent cursor-pointer hover:text-[var(--theme)] hover:border-[var(--theme)] transition-colors"
+            title="Add to queue"
           >
-            {isPlaying ? (
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
-                <rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" />
-              </svg>
-            ) : (
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" style={{ marginLeft: 2 }}>
-                <polygon points="5,3 19,12 5,21" />
-              </svg>
-            )}
-          </button>
-          <span
-            onClick={onClick}
-            className="flex-1 text-[15px] font-semibold text-[var(--text-primary)] truncate cursor-pointer hover:text-[var(--theme)] transition-colors"
-          >
-            {song.title}
-          </span>
-          <MasteryRing value={mastery} />
-        </div>
-
-        {/* Row 2: artist, indented to align with title */}
-        <div className="pl-[44px]">
-          <span className="text-[12px] text-[var(--text-muted)] truncate">
-            {song.artist}
-          </span>
-        </div>
-
-        {/* Row 3: waveform */}
-        <div onClick={handleWaveformClick} className={`mt-0.5 ${audioSrc ? "cursor-pointer" : ""}`}>
-          <ListWaveform audioSrc={audioSrc} progress={isPlaying ? progress : 0} />
-        </div>
-
-        {/* Row 4: tags + action buttons */}
-        <div className="flex items-center gap-2 mt-0.5">
-          {song.tags.slice(0, 2).map((tag) => (
-            <span key={tag} className="text-[11px] px-2 py-0.5 rounded-[4px] bg-[var(--bg)] text-[var(--text-muted)]">
-              {tag}
-            </span>
-          ))}
-          <div className="flex-1" />
-          {onEnqueue && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onEnqueue(song); }}
-              className="w-[28px] h-[28px] rounded-[5px] border border-[var(--border)] flex items-center justify-center text-[var(--text-muted)] opacity-0 group-hover:opacity-100 transition-all bg-transparent cursor-pointer hover:text-[var(--theme)] hover:border-[var(--theme)]"
-              title="Add to queue"
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" />
-                <line x1="8" y1="18" x2="21" y2="18" />
-              </svg>
-            </button>
-          )}
-          <button
-            onClick={(e) => { e.stopPropagation(); onPin(song.id); }}
-            className={`w-[28px] h-[28px] rounded-[5px] border flex items-center justify-center transition-all cursor-pointer bg-transparent ${
-              song.pinned
-                ? "border-[var(--theme)] text-[var(--theme)] opacity-100"
-                : "border-[var(--border)] text-[var(--text-muted)] opacity-0 group-hover:opacity-100"
-            }`}
-            title={song.pinned ? "Unpin" : "Pin"}
-          >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M16 3L8 3L8 13L5 16L12 16L12 21L12 16L19 16L16 13L16 3Z" />
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" />
+              <line x1="8" y1="18" x2="21" y2="18" />
             </svg>
           </button>
-        </div>
+        )}
+        <button
+          onClick={(e) => { e.stopPropagation(); onPin(song.id); }}
+          className={`w-[28px] h-[28px] rounded-[5px] border flex items-center justify-center transition-colors cursor-pointer bg-transparent ${
+            song.pinned
+              ? "border-[var(--theme)] text-[var(--theme)]"
+              : "border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--theme)] hover:border-[var(--theme)]"
+          }`}
+          title={song.pinned ? "Unpin" : "Pin"}
+        >
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M16 3L8 3L8 13L5 16L12 16L12 21L12 16L19 16L16 13L16 3Z" />
+          </svg>
+        </button>
+        {onContextMenu && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onContextMenu(e, song); }}
+            className="w-[28px] h-[28px] rounded-[5px] border border-[var(--border)] flex items-center justify-center text-[var(--text-muted)] bg-transparent cursor-pointer hover:text-[var(--text-primary)] transition-colors"
+            title="More"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+              <circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>
+            </svg>
+          </button>
+        )}
       </div>
     </div>
   );
@@ -555,11 +452,11 @@ function SortBar() {
       key={label}
       onClick={onClick}
       disabled={disabled}
-      className={`px-[9px] py-[3px] rounded-full text-[11px] font-medium transition-colors cursor-pointer border-none ${
+      className={`px-[10px] py-[4px] rounded-full text-[11px] font-medium transition-all cursor-pointer border-none ${
         active
-          ? "bg-[var(--theme-light)] text-[var(--theme-text)]"
-          : "bg-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-      } ${disabled ? "opacity-35 cursor-not-allowed" : ""}`}
+          ? "bg-[var(--text-primary)] text-[var(--bg)] shadow-sm"
+          : "bg-transparent text-[var(--text-muted)] hover:bg-[var(--surface)] hover:text-[var(--text-primary)]"
+      } ${disabled ? "opacity-30 cursor-not-allowed" : ""}`}
     >
       {label}
     </button>
@@ -629,9 +526,37 @@ export function LibraryPage() {
   const enqueue = useQueueStore((s) => s.enqueue);
   const queueIsPlaying = useQueueStore((s) => s.isPlaying);
   const allLines = useSongStore((s) => s.lines);
+  const librarySearch = usePreferencesStore((s) => s.librarySearch);
+  const setLibrarySearch = usePreferencesStore((s) => s.setLibrarySearch);
+
+  const searchRef = useRef<HTMLInputElement>(null);
 
   const sortedGrouped = useSortedGroupedSongs();
   const flatSongs = sortedGrouped.type === "flat" ? sortedGrouped.songs : sortedGrouped.groups.flatMap((g) => g.songs);
+
+  // Ctrl+F focuses the search input
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "f") {
+        e.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+      }
+      if (e.key === "Escape") searchRef.current?.blur();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  const filterSongs = useCallback((songs: Song[]) => {
+    const q = librarySearch.trim().toLowerCase();
+    if (!q) return songs;
+    return songs.filter((s) =>
+      s.title.toLowerCase().includes(q) ||
+      s.artist?.toLowerCase().includes(q) ||
+      s.tags?.some((t) => t.toLowerCase().includes(q))
+    );
+  }, [librarySearch]);
 
   useEffect(() => {
     markStaleAnalysesAsFailed();
@@ -639,7 +564,6 @@ export function LibraryPage() {
 
   // ── List-view playback (preview only — no play_count side effects) ────────
   const [playingId, setPlayingId] = useState<string | null>(null);
-  const [progress, setProgress] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const handlePlay = useCallback((song: Song) => {
@@ -656,35 +580,17 @@ export function LibraryPage() {
     }
     audio.src = convertFileSrc(song.audio_path);
     audio.currentTime = 0;
-    setProgress(0);
     setPlayingId(song.id);
     audio.play().catch(() => {});
   }, [playingId]);
 
-  const handleSeek = useCallback((song: Song, fraction: number) => {
-    const audio = audioRef.current;
-    if (!audio || !song.audio_path) return;
-    if (playingId !== song.id) {
-      handlePlay(song);
-      // seek after load
-      audio.addEventListener("canplay", () => { audio.currentTime = audio.duration * fraction; }, { once: true });
-    } else {
-      audio.currentTime = audio.duration * fraction;
-    }
-  }, [playingId, handlePlay]);
-
   useEffect(() => {
     const audio = new Audio();
     audioRef.current = audio;
-    const onTimeUpdate = () => {
-      if (audio.duration > 0) setProgress(audio.currentTime / audio.duration);
-    };
-    const onEnded = () => { setPlayingId(null); setProgress(0); };
-    audio.addEventListener("timeupdate", onTimeUpdate);
+    const onEnded = () => setPlayingId(null);
     audio.addEventListener("ended", onEnded);
     return () => {
       audio.pause();
-      audio.removeEventListener("timeupdate", onTimeUpdate);
       audio.removeEventListener("ended", onEnded);
     };
   }, []);
@@ -694,8 +600,7 @@ export function LibraryPage() {
     if (queueIsPlaying) {
       audioRef.current?.pause();
       setPlayingId(null);
-      setProgress(0);
-    }
+      }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queueIsPlaying]);
 
@@ -759,7 +664,7 @@ export function LibraryPage() {
           song={song}
           mastery={computeSongProgress(allLines[song.id] ?? [])}
           onPin={togglePin}
-          onClick={() => navigate(`/song/${song.id}`)}
+          onClick={(e) => { if (e.ctrlKey || e.shiftKey) { e.preventDefault(); enqueue(song); } else { navigate(`/song/${song.id}`); } }}
           onContextMenu={handleContextMenu}
           onEnqueue={enqueue}
           draggable={canDrag}
@@ -774,17 +679,15 @@ export function LibraryPage() {
   );
 
   const renderList = (songs: Song[]) => (
-    <div className="flex flex-col gap-1 max-w-[880px]">
+    <div className="max-w-[880px]">
       {songs.map((song) => (
         <SongListRow
           key={song.id}
           song={song}
           mastery={computeSongProgress(allLines[song.id] ?? [])}
           isPlaying={playingId === song.id}
-          progress={playingId === song.id ? progress : 0}
           onPlay={handlePlay}
-          onSeek={handleSeek}
-          onClick={() => navigate(`/song/${song.id}`)}
+          onClick={(e) => { if (e.ctrlKey || e.shiftKey) { e.preventDefault(); enqueue(song); } else { navigate(`/song/${song.id}`); } }}
           onPin={togglePin}
           onEnqueue={enqueue}
           onContextMenu={handleContextMenu}
@@ -797,22 +700,47 @@ export function LibraryPage() {
     if (flatSongs.length === 0) return <EmptyState onAdd={() => navigate("/import")} />;
 
     if (sortedGrouped.type === "flat") {
-      return libraryView === "list" ? renderList(sortedGrouped.songs) : renderGrid(sortedGrouped.songs);
+      const filtered = filterSongs(sortedGrouped.songs);
+      if (filtered.length === 0) {
+        return (
+          <div className="flex flex-col items-center justify-center py-20 gap-2">
+            <p className="text-[14px] text-[var(--text-primary)]">No songs match "{librarySearch}"</p>
+            <button onClick={() => setLibrarySearch("")} className="text-[12px] text-[var(--theme)] hover:underline bg-transparent border-none cursor-pointer">
+              Clear search
+            </button>
+          </div>
+        );
+      }
+      return libraryView === "list" ? renderList(filtered) : renderGrid(filtered);
     }
 
     // Grouped
-    return (
-      <div className="flex flex-col gap-6">
-        {sortedGrouped.groups.map((group) => (
-          <div key={group.key}>
-            <GroupHeader group={group} onToggle={() => setGroupCollapsed(group.key, !group.collapsed)} />
-            {!group.collapsed && (
-              libraryView === "list" ? renderList(group.songs) : renderGrid(group.songs)
-            )}
-          </div>
-        ))}
-      </div>
-    );
+    const groupNodes = sortedGrouped.groups.map((group) => {
+      const filtered = filterSongs(group.songs);
+      if (filtered.length === 0) return null;
+      return (
+        <div key={group.key}>
+          <GroupHeader group={group} onToggle={() => setGroupCollapsed(group.key, !group.collapsed)} />
+          {!group.collapsed && (
+            libraryView === "list" ? renderList(filtered) : renderGrid(filtered)
+          )}
+        </div>
+      );
+    });
+
+    const anyVisible = groupNodes.some(Boolean);
+    if (!anyVisible) {
+      return (
+        <div className="flex flex-col items-center justify-center py-20 gap-2">
+          <p className="text-[14px] text-[var(--text-primary)]">No songs match "{librarySearch}"</p>
+          <button onClick={() => setLibrarySearch("")} className="text-[12px] text-[var(--theme)] hover:underline bg-transparent border-none cursor-pointer">
+            Clear search
+          </button>
+        </div>
+      );
+    }
+
+    return <div className="flex flex-col gap-6">{groupNodes}</div>;
   };
 
   return (
@@ -821,9 +749,34 @@ export function LibraryPage() {
 
       <div className="flex flex-col flex-1 min-w-0">
         {/* Topbar */}
-        <header className="h-[54px] px-7 flex items-center justify-between flex-shrink-0">
-          <span className="text-[14px] font-medium">Library</span>
-          <div className="flex items-center gap-3">
+        <header className="h-[54px] px-7 flex items-center gap-4 flex-shrink-0">
+          <span className="text-[14px] font-medium flex-shrink-0">Library</span>
+
+          {/* Search input */}
+          <div className="relative flex-1 max-w-[280px]">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="absolute left-[10px] top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none">
+              <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <input
+              ref={searchRef}
+              type="text"
+              value={librarySearch}
+              onChange={(e) => setLibrarySearch(e.target.value)}
+              placeholder="Search songs, artists, tags…"
+              className="w-full pl-[30px] pr-[28px] py-[6px] rounded-[7px] border border-[var(--border)] bg-[var(--surface)] text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-[var(--theme)] transition-colors"
+            />
+            {librarySearch && (
+              <button
+                onClick={() => setLibrarySearch("")}
+                className="absolute right-[8px] top-1/2 -translate-y-1/2 w-[16px] h-[16px] flex items-center justify-center rounded-full bg-[var(--text-muted)] text-[var(--bg)] text-[10px] font-bold leading-none cursor-pointer border-none hover:opacity-70 transition-opacity"
+                title="Clear search"
+              >
+                ×
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-3 ml-auto">
             {/* View toggle */}
             <div className="flex items-center gap-[2px] bg-[var(--bg)] border border-[var(--border)] rounded-[7px] p-[3px]">
               <button

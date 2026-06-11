@@ -24,7 +24,8 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#ffffff"
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#1c1c1e"
       },
       "package": "com.reprise.mobile",
       "permissions": [
