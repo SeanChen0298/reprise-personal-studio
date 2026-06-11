@@ -177,5 +177,3 @@ Thumbs.db
 
 # Personal notes (local only)
 NOTES.md
-
-!gen/android/app/src/main/java/com/reprise/mobile/MainActivity.kt

@@ -1,25 +1,11 @@
 import { Link, useLocation } from "react-router-dom";
-import { useAuthStore } from "../stores/auth-store";
-import { useNavigate } from "react-router-dom";
-import { useDriveSyncStore } from "../stores/drive-sync-store";
 import { useTaskQueueStore } from "../stores/task-queue-store";
 
 export function Sidebar() {
   const location = useLocation();
-  const navigate = useNavigate();
-  const user = useAuthStore((s) => s.user);
-  const signOut = useAuthStore((s) => s.signOut);
-  const syncingCount = useDriveSyncStore((s) => s.syncingIds.length);
   const queueTasks = useTaskQueueStore((s) => s.tasks);
   const runningTask = queueTasks.find((t) => t.status === "running");
   const pendingCount = queueTasks.filter((t) => t.status === "pending").length;
-
-  const initials = user?.email ? user.email.slice(0, 2).toUpperCase() : "??";
-
-  async function handleSignOut() {
-    await signOut();
-    navigate("/login", { replace: true });
-  }
 
   const navItem = (to: string, label: string, icon: React.ReactNode) => {
     const active = location.pathname === to;
@@ -107,28 +93,6 @@ export function Sidebar() {
 
       {/* Footer */}
       <div className="px-[10px] py-3 border-t border-[var(--border-subtle)]">
-        {syncingCount > 0 && (
-          <div className="flex items-center gap-[7px] px-[10px] py-[7px] mb-1.5 rounded-[7px] bg-[var(--theme-light)]">
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="var(--theme-text)"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="flex-shrink-0 animate-spin"
-              style={{ animationDuration: "1.4s" }}
-            >
-              <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-            </svg>
-            <span className="text-[12px] font-medium text-[var(--theme-text)] truncate">
-              Syncing {syncingCount} song{syncingCount !== 1 ? "s" : ""} to Drive…
-            </span>
-          </div>
-        )}
-
         <Link
           to="/settings"
           className="flex items-center gap-[9px] px-[10px] py-2 rounded-[7px] text-[13.5px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg)] hover:text-[var(--text-primary)] transition-colors no-underline mb-1.5"
@@ -148,23 +112,6 @@ export function Sidebar() {
           </svg>
           Settings
         </Link>
-
-        <button
-          onClick={handleSignOut}
-          className="w-full flex items-center gap-[9px] px-[10px] py-2 rounded-[7px] cursor-pointer hover:bg-[var(--bg)] transition-colors bg-transparent border-none text-left"
-        >
-          <div className="w-[26px] h-[26px] rounded-full bg-[var(--accent)] text-white text-[10.5px] font-semibold flex items-center justify-center flex-shrink-0">
-            {initials}
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-[12.5px] font-medium text-[var(--text-primary)] truncate">
-              {user?.email?.split("@")[0] ?? "User"}
-            </div>
-            <div className="text-[11px] text-[var(--text-muted)] truncate">
-              {user?.email ?? ""}
-            </div>
-          </div>
-        </button>
       </div>
     </aside>
   );

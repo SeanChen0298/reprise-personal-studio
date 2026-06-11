@@ -8,7 +8,7 @@ import {
 } from "../lib/audio-download";
 import { analyzePitch } from "../lib/audio-analysis";
 import { alignLyrics } from "../lib/whisperx-align";
-import { supabase } from "../lib/supabase";
+import { localDb } from "../lib/local-db";
 import { readFile } from "@tauri-apps/plugin-fs";
 import MusicTempo from "music-tempo";
 
@@ -16,11 +16,9 @@ import MusicTempo from "music-tempo";
 // Helpers
 // ---------------------------------------------------------------------------
 
-// Cast to any to bypass Supabase's generated type inference (which resolves
-// to `never` when Database generics don't perfectly match call-site types).
-// Safety is enforced by RLS policies and the DB schema instead.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const db = supabase as any;
+// Offline single-user app: every row carries this constant in place of a real
+// authenticated user id (kept only so the existing row converters stay intact).
+const LOCAL_USER_ID = "local";
 
 /** Maps a user-facing language name (or code) to a yt-dlp language code. */
 function languageNameToCode(language?: string): string | undefined {
@@ -52,12 +50,6 @@ async function detectBpmFromFile(filePath: string): Promise<number | null> {
   } catch {
     return null;
   }
-}
-
-async function getUserId(): Promise<string> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error("Not authenticated");
-  return user.id;
 }
 
 // ---------------------------------------------------------------------------
@@ -144,40 +136,10 @@ export const useSongStore = create<SongStore>()((set, get) => ({
   loadAllData: async () => {
     set({ isLoading: true, loadError: null });
     try {
-      const userId = await getUserId();
-
-      const PAGE = 1000;
-      async function fetchAllRows<T>(
-        table: string,
-        extraFilter: (q: ReturnType<typeof db.from>) => ReturnType<typeof db.from>
-      ): Promise<T[]> {
-        const rows: T[] = [];
-        let from = 0;
-        while (true) {
-          const q = extraFilter(db.from(table).select("*")).range(from, from + PAGE - 1) as ReturnType<typeof db.from>;
-          const res = await q;
-          if (res.error) throw res.error;
-          rows.push(...(res.data as T[]));
-          if ((res.data as T[]).length < PAGE) break;
-          from += PAGE;
-        }
-        return rows;
-      }
-
-      const [songsRes, recordingsRes, sectionsRes] = await Promise.all([
-        db.from("songs").select("*").eq("user_id", userId).order("created_at").limit(5000),
-        db.from("recordings").select("*").eq("user_id", userId).limit(50000),
-        db.from("sections").select("*").eq("user_id", userId).limit(5000),
-      ]);
-
-      if (songsRes.error) throw songsRes.error;
-      if (recordingsRes.error) throw recordingsRes.error;
-      if (sectionsRes.error) throw sectionsRes.error;
-
-      const allLineRows = await fetchAllRows<Record<string, unknown>>(
-        "lines",
-        (q) => q.eq("user_id", userId)
-      );
+      const songRows = await localDb.getAllSongs();
+      const recordingRows = await localDb.getAllRecordings();
+      const sectionRows = await localDb.getAllSections();
+      const allLineRows = await localDb.getAllLines();
       console.log("[loadAllData] raw lines from DB:", allLineRows.length);
 
       // Group lines/recordings/sections by song_id
@@ -188,18 +150,20 @@ export const useSongStore = create<SongStore>()((set, get) => ({
       }
 
       const recordings: Record<string, Recording[]> = {};
-      for (const row of recordingsRes.data) {
-        (recordings[row.song_id] ??= []).push(dbRowToRecording(row));
+      for (const row of recordingRows) {
+        const rec = dbRowToRecording(row);
+        (recordings[rec.song_id] ??= []).push(rec);
       }
 
       const sections: Record<string, Section[]> = {};
-      for (const row of sectionsRes.data) {
-        (sections[row.song_id] ??= []).push(dbRowToSection(row));
+      for (const row of sectionRows) {
+        const sec = dbRowToSection(row);
+        (sections[sec.song_id] ??= []).push(sec);
       }
 
       const totalLines = Object.values(lines).reduce((sum, arr) => sum + arr.length, 0);
       const titleById = new Map<string, string>();
-      for (const s of (songsRes.data ?? []) as Array<Record<string, unknown>>) {
+      for (const s of songRows) {
         const sid = String(s.id);
         const title = String(s.title ?? "(untitled)");
         const artist = s.artist ? String(s.artist) : "";
@@ -215,10 +179,10 @@ export const useSongStore = create<SongStore>()((set, get) => ({
           return { song: titleById.get(sid) ?? sid, songId: sid, total: arr.length, byLang: langs };
         })
         .sort((a, b) => b.total - a.total);
-      console.log("[loadAllData] DONE", { songs: songsRes.data.length, rawLines: allLineRows.length, totalLines });
+      console.log("[loadAllData] DONE", { songs: songRows.length, rawLines: allLineRows.length, totalLines });
       console.table(linesBySongTitled);
       set({
-        songs: songsRes.data.map(dbRowToSong),
+        songs: songRows.map(dbRowToSong),
         lines,
         recordings,
         sections,
@@ -245,14 +209,13 @@ export const useSongStore = create<SongStore>()((set, get) => ({
   // -------------------------------------------------------------------------
 
   addSong: async (data) => {
-    const userId = await getUserId();
     const now = new Date().toISOString();
     const id = crypto.randomUUID();
 
     const song: Song = {
       ...data,
       id,
-      user_id: userId,
+      user_id: LOCAL_USER_ID,
       mastery: 0,
       pinned: false,
       tags: data.tags ?? [],
@@ -264,7 +227,7 @@ export const useSongStore = create<SongStore>()((set, get) => ({
     // Optimistic update
     set((s) => ({ songs: [...s.songs, song] }));
 
-    const { error } = await db.from("songs").insert(songToDbRow(song));
+    const { error } = await localDb.insertSong(songToDbRow(song));
     if (error) {
       // Rollback
       set((s) => ({ songs: s.songs.filter((x) => x.id !== id) }));
@@ -285,10 +248,7 @@ export const useSongStore = create<SongStore>()((set, get) => ({
       ),
     }));
 
-    const { error } = await supabase
-      .from("songs")
-      .update(updated)
-      .eq("id", id);
+    const { error } = await localDb.updateSong(id, updated);
 
     if (error) {
       // Reload to recover correct state
@@ -311,8 +271,8 @@ export const useSongStore = create<SongStore>()((set, get) => ({
       };
     });
 
-    // Cascade deletes are handled by the DB foreign keys
-    const { error } = await db.from("songs").delete().eq("id", id);
+    // Cascade delete of lines/recordings/sections is handled in localDb.
+    const { error } = await localDb.deleteSongCascade(id);
     if (error) {
       await get().loadAllData();
       throw error;
@@ -509,16 +469,11 @@ export const useSongStore = create<SongStore>()((set, get) => ({
   // -------------------------------------------------------------------------
 
   setLines: async (songId, lines) => {
-    const userId = await getUserId();
-
     // Optimistic update
     set((s) => ({ lines: { ...s.lines, [songId]: lines } }));
 
     // Delete existing lines for this song, then insert new batch
-    const { error: delError } = await supabase
-      .from("lines")
-      .delete()
-      .eq("song_id", songId);
+    const { error: delError } = await localDb.deleteLinesForSong(songId);
 
     if (delError) {
       await get().loadAllData();
@@ -526,9 +481,9 @@ export const useSongStore = create<SongStore>()((set, get) => ({
     }
 
     if (lines.length > 0) {
-      const { error: insError } = await supabase
-        .from("lines")
-        .insert(lines.map((l) => lineToDbRow(l, userId)));
+      const { error: insError } = await localDb.insertLines(
+        lines.map((l) => lineToDbRow(l, LOCAL_USER_ID))
+      );
 
       if (insError) {
         await get().loadAllData();
@@ -538,14 +493,13 @@ export const useSongStore = create<SongStore>()((set, get) => ({
   },
 
   setLinesForLanguage: async (songId, language, lines) => {
-    const userId = await getUserId();
     const song = get().songs.find((s) => s.id === songId);
     const translationLang = song?.translation_language ?? null;
     // A "translation save" is when we're explicitly saving the song's translation language.
     // Everything else (primary language, language change, etc.) is a "primary save".
     const isTranslationSave = translationLang != null && language === translationLang;
 
-    console.log("[setLinesForLanguage] START", { songId, language, lineCount: lines.length, translationLang, isTranslationSave, userId });
+    console.log("[setLinesForLanguage] START", { songId, language, lineCount: lines.length, translationLang, isTranslationSave });
 
     // Optimistic: for primary saves keep only translation lines; for translation saves keep
     // everything EXCEPT lines of this translation language (null-language primary lines are preserved).
@@ -567,24 +521,18 @@ export const useSongStore = create<SongStore>()((set, get) => ({
 
     // DB delete
     let delError: unknown;
-    if (isTranslationSave) {
+    if (isTranslationSave && language) {
       // Translation save: delete ONLY lines with this translation language.
       // Never delete null-language lines — those are primary lyrics that were saved before
       // language tagging was introduced.
-      ({ error: delError } = await db
-        .from("lines")
-        .delete()
-        .eq("song_id", songId)
-        .eq("language", language));
+      ({ error: delError } = await localDb.deleteLinesForSongLanguage(songId, language));
+    } else if (translationLang) {
+      // Primary save: delete all lines except the translation-language lines.
+      // Null/legacy-language lines are included in the delete (matches the old
+      // `language.is.null,language.neq.X` filter) to avoid accumulating duplicates.
+      ({ error: delError } = await localDb.deleteLinesForSongExceptLanguage(songId, translationLang));
     } else {
-      // Primary save: delete all lines except translation lines.
-      // IMPORTANT: PostgreSQL != does not match NULL, so we explicitly include
-      // null-language (legacy) lines in the delete to avoid accumulating duplicates.
-      const deleteQuery = translationLang
-        ? db.from("lines").delete().eq("song_id", songId)
-            .or(`language.is.null,language.neq.${translationLang}`)
-        : db.from("lines").delete().eq("song_id", songId);
-      ({ error: delError } = await deleteQuery);
+      ({ error: delError } = await localDb.deleteLinesForSong(songId));
     }
 
     console.log("[setLinesForLanguage] DELETE done", { delError });
@@ -595,12 +543,9 @@ export const useSongStore = create<SongStore>()((set, get) => ({
     }
 
     if (lines.length > 0) {
-      const rowsToInsert = lines.map((l) => lineToDbRow(l, userId));
+      const rowsToInsert = lines.map((l) => lineToDbRow(l, LOCAL_USER_ID));
       console.log("[setLinesForLanguage] INSERT", { count: rowsToInsert.length, sample: rowsToInsert[0] });
-      const { error: insError, data: insData } = await db
-        .from("lines")
-        .insert(rowsToInsert)
-        .select("id");
+      const { error: insError, data: insData } = await localDb.insertLines(rowsToInsert);
       console.log("[setLinesForLanguage] INSERT done", { insError, insertedCount: insData?.length ?? 0 });
       if (insError) {
         await get().loadAllData();
@@ -614,7 +559,6 @@ export const useSongStore = create<SongStore>()((set, get) => ({
   },
 
   addLine: async (songId, text, order) => {
-    const userId = await getUserId();
     const now = new Date().toISOString();
     const line: Line = {
       id: crypto.randomUUID(),
@@ -632,7 +576,7 @@ export const useSongStore = create<SongStore>()((set, get) => ({
       lines: { ...s.lines, [songId]: [...(s.lines[songId] ?? []), line] },
     }));
 
-    const { error } = await db.from("lines").insert(lineToDbRow(line, userId));
+    const { error } = await localDb.insertLine(lineToDbRow(line, LOCAL_USER_ID));
     if (error) {
       await get().loadAllData();
       throw error;
@@ -655,7 +599,7 @@ export const useSongStore = create<SongStore>()((set, get) => ({
 
     const dbData: Record<string, unknown> = { ...updated };
 
-    const { error } = await db.from("lines").update(dbData).eq("id", lineId);
+    const { error } = await localDb.updateLine(lineId, dbData);
     if (error) {
       await get().loadAllData();
       throw error;
@@ -671,7 +615,7 @@ export const useSongStore = create<SongStore>()((set, get) => ({
       },
     }));
 
-    const { error } = await db.from("lines").delete().eq("id", lineId);
+    const { error } = await localDb.deleteLine(lineId);
     if (error) {
       await get().loadAllData();
       throw error;
@@ -709,7 +653,7 @@ export const useSongStore = create<SongStore>()((set, get) => ({
       try {
         const html = await generateFurigana(line.text);
         // Write directly to DB (no updated_at bump) and update in-memory state
-        await supabase.from("lines").update({ furigana_html: html }).eq("id", line.id);
+        await localDb.updateLine(line.id, { furigana_html: html });
         set((s) => ({
           lines: {
             ...s.lines,
@@ -731,7 +675,7 @@ export const useSongStore = create<SongStore>()((set, get) => ({
     for (const line of customTargets) {
       try {
         const html = await generateFurigana(line.custom_text!);
-        await supabase.from("lines").update({ custom_furigana_html: html }).eq("id", line.id);
+        await localDb.updateLine(line.id, { custom_furigana_html: html });
         set((s) => ({
           lines: {
             ...s.lines,
@@ -757,7 +701,7 @@ export const useSongStore = create<SongStore>()((set, get) => ({
         try {
           const { generateFurigana } = await import("@reprise/shared");
           const html = await generateFurigana(customText);
-          await supabase.from("lines").update({ custom_furigana_html: html }).eq("id", lineId);
+          await localDb.updateLine(lineId, { custom_furigana_html: html });
           set((s) => ({
             lines: {
               ...s.lines,
@@ -793,7 +737,7 @@ export const useSongStore = create<SongStore>()((set, get) => ({
         if (KANJI_RE.test(line.text)) {
           try {
             const lineHtml = await generateFurigana(line.text);
-            await supabase.from("lines").update({ furigana_html: lineHtml }).eq("id", lineId);
+            await localDb.updateLine(lineId, { furigana_html: lineHtml });
             set((s) => ({
               lines: {
                 ...s.lines,
@@ -838,8 +782,6 @@ export const useSongStore = create<SongStore>()((set, get) => ({
   // -------------------------------------------------------------------------
 
   addRecording: async (songId, recording) => {
-    const userId = await getUserId();
-
     // Optimistic update
     set((s) => ({
       recordings: {
@@ -848,9 +790,9 @@ export const useSongStore = create<SongStore>()((set, get) => ({
       },
     }));
 
-    const { error } = await supabase
-      .from("recordings")
-      .insert(recordingToDbRow(recording, userId));
+    const { error } = await localDb.insertRecording(
+      recordingToDbRow(recording, LOCAL_USER_ID)
+    );
 
     if (error) {
       await get().loadAllData();
@@ -878,7 +820,7 @@ export const useSongStore = create<SongStore>()((set, get) => ({
       },
     }));
 
-    const { error } = await db.from("recordings").delete().eq("id", recordingId);
+    const { error } = await localDb.deleteRecording(recordingId);
     if (error) {
       await get().loadAllData();
       throw error;
@@ -896,7 +838,7 @@ export const useSongStore = create<SongStore>()((set, get) => ({
         ),
       },
     }));
-    const { error } = await db.from("recordings").update({ ...data, updated_at: now }).eq("id", recordingId);
+    const { error } = await localDb.updateRecording(recordingId, { ...data, updated_at: now });
     if (error) {
       await get().loadAllData();
       throw error;
@@ -946,10 +888,7 @@ export const useSongStore = create<SongStore>()((set, get) => ({
     }));
 
     const updates = lineRecs.map((r) =>
-      supabase
-        .from("recordings")
-        .update({ is_master_take: r.is_master_take, updated_at: now })
-        .eq("id", r.id)
+      localDb.updateRecording(r.id, { is_master_take: r.is_master_take, updated_at: now })
     );
 
     const results = await Promise.all(updates);
@@ -981,8 +920,6 @@ export const useSongStore = create<SongStore>()((set, get) => ({
   // -------------------------------------------------------------------------
 
   addSection: async (songId, section) => {
-    const userId = await getUserId();
-
     // Optimistic update
     set((s) => ({
       sections: {
@@ -991,9 +928,9 @@ export const useSongStore = create<SongStore>()((set, get) => ({
       },
     }));
 
-    const { error } = await supabase
-      .from("sections")
-      .insert(sectionToDbRow(section, userId));
+    const { error } = await localDb.insertSection(
+      sectionToDbRow(section, LOCAL_USER_ID)
+    );
 
     if (error) {
       await get().loadAllData();
@@ -1015,7 +952,7 @@ export const useSongStore = create<SongStore>()((set, get) => ({
       },
     }));
 
-    const { error } = await db.from("sections").update(updated).eq("id", sectionId);
+    const { error } = await localDb.updateSection(sectionId, updated);
     if (error) {
       await get().loadAllData();
       throw error;
@@ -1031,7 +968,7 @@ export const useSongStore = create<SongStore>()((set, get) => ({
       },
     }));
 
-    const { error } = await db.from("sections").delete().eq("id", sectionId);
+    const { error } = await localDb.deleteSection(sectionId);
     if (error) {
       await get().loadAllData();
       throw error;
@@ -1079,9 +1016,6 @@ function dbRowToSong(row: Record<string, unknown>): Song {
     pitch_error: row.pitch_error as string | undefined,
     align_status: (row.align_status as Song["align_status"]) ?? "idle",
     align_error: row.align_error as string | undefined,
-    drive_audio_file_id: row.drive_audio_file_id as string | undefined,
-    drive_vocals_file_id: row.drive_vocals_file_id as string | undefined,
-    drive_instrumental_file_id: row.drive_instrumental_file_id as string | undefined,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -1117,9 +1051,6 @@ function songToDbRow(song: Song): Record<string, unknown> {
     pitch_error: song.pitch_error ?? null,
     align_status: song.align_status ?? "idle",
     align_error: song.align_error ?? null,
-    drive_audio_file_id: song.drive_audio_file_id ?? null,
-    drive_vocals_file_id: song.drive_vocals_file_id ?? null,
-    drive_instrumental_file_id: song.drive_instrumental_file_id ?? null,
     created_at: song.created_at,
     updated_at: song.updated_at,
   };

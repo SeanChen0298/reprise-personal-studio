@@ -1,14 +1,9 @@
 import { useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { useAuthStore } from "./stores/auth-store";
-import { useAutoDriveSync } from "./hooks/use-auto-drive-sync";
+import { useSongStore } from "./stores/song-store";
 import { useTaskQueueProcessor } from "./hooks/use-task-queue-processor";
 import { useAutoProcess } from "./hooks/use-auto-process";
 import { ProtectedRoute } from "./components/protected-route";
-import { LandingPage } from "./pages/landing-page";
-import { LoginPage } from "./pages/login-page";
-import { SignupPage } from "./pages/signup-page";
-import { ForgotPasswordPage } from "./pages/forgot-password-page";
 import { LibraryPage } from "./pages/library-page";
 import { ImportUrlPage } from "./pages/import-url-page";
 import { AddSongPage } from "./pages/add-song-page";
@@ -21,23 +16,21 @@ import { TimestampPage } from "./pages/timestamp-page";
 import { RecordingsPage } from "./pages/recordings-page";
 
 export function App() {
-  const initialize = useAuthStore((s) => s.initialize);
+  const loadAllData = useSongStore((s) => s.loadAllData);
 
+  // Load all songs/lines/recordings/sections from the local DB on startup.
+  // (Previously triggered by auth-store.initialize(), which is now removed.)
   useEffect(() => {
-    initialize();
-  }, [initialize]);
+    loadAllData();
+  }, [loadAllData]);
 
-  useAutoDriveSync();
   useTaskQueueProcessor();
   useAutoProcess();
 
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<LandingPage />} />
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/signup" element={<SignupPage />} />
-        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/" element={<Navigate to="/library" replace />} />
 
         {/* Legacy /home → redirect to /library */}
         <Route

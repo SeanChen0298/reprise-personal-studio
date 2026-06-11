@@ -3,19 +3,16 @@ import { useNavigate } from "react-router-dom";
 import { exists } from "@tauri-apps/plugin-fs";
 import { open } from "@tauri-apps/plugin-shell";
 import { Sidebar } from "../components/sidebar";
-import { useAuthStore } from "../stores/auth-store";
 import { checkYtDlpInstalled, checkPythonInstalled, checkFfmpegInstalled, checkDemucsInstalled, COOKIES_PATH } from "../lib/audio-download";
 import { isDesktopPlatform } from "../lib/platform";
 import { checkTorchcrepeInstalled } from "../lib/audio-analysis";
 import { useHighlightStore } from "../lib/highlight-config";
 import { usePreferencesStore } from "../stores/preferences-store";
 import { useAudioDevices } from "../hooks/use-audio-devices";
-import { getStoredToken, getValidAccessToken, purgeDriveAll, clearToken, startDriveOAuth } from "../lib/google-drive";
 import { useSongStore } from "../stores/song-store";
-import { useDriveSyncStore } from "../stores/drive-sync-store";
-import { supabase } from "../lib/supabase";
+import { exportBackup, importBackupViaPicker } from "../lib/backup";
 
-type Tab = "highlights" | "account" | "preferences" | "downloads" | "audio";
+type Tab = "highlights" | "preferences" | "downloads" | "audio";
 
 const THEME_OPTIONS = [
   { key: "blue", color: "#2563EB", label: "Blue", light: "#EFF6FF", text: "#1D4ED8" },
@@ -28,8 +25,6 @@ const THEME_OPTIONS = [
 
 export function SettingsPage() {
   const navigate = useNavigate();
-  const user = useAuthStore((s) => s.user);
-  const initials = user?.email ? user.email.slice(0, 2).toUpperCase() : "??";
 
   const [activeTab, setActiveTab] = useState<Tab>("highlights");
   const [isDesktop, setIsDesktop] = useState(true);
@@ -50,100 +45,40 @@ export function SettingsPage() {
   const countIn = countInEnabled ? "2" : "none";
   const recordingPlaybackGain = usePreferencesStore((s) => s.recordingPlaybackGain);
   const setRecordingPlaybackGain = usePreferencesStore((s) => s.setRecordingPlaybackGain);
-  const autoSyncDrive = usePreferencesStore((s) => s.autoSyncDrive);
-  const setAutoSyncDrive = usePreferencesStore((s) => s.setAutoSyncDrive);
   const autoDemucs = usePreferencesStore((s) => s.autoDemucs);
   const setAutoDemucs = usePreferencesStore((s) => s.setAutoDemucs);
   const autoPitch = usePreferencesStore((s) => s.autoPitch);
   const setAutoPitch = usePreferencesStore((s) => s.setAutoPitch);
   const [confirmDelete, setConfirmDelete] = useState(true);
-  const [autoSync, setAutoSync] = useState(true);
 
-  // Google Drive connection
-  const [driveConnected, setDriveConnected] = useState(() => !!getStoredToken());
-  const [driveConnecting, setDriveConnecting] = useState(false);
-  const [driveConnectError, setDriveConnectError] = useState<string | null>(null);
+  // Backup & restore
+  const [backupMsg, setBackupMsg] = useState<string | null>(null);
+  const [backupBusy, setBackupBusy] = useState(false);
 
-  const handleDriveConnect = useCallback(async () => {
-    setDriveConnecting(true);
-    setDriveConnectError(null);
+  const handleExportBackup = useCallback(async () => {
+    setBackupMsg(null);
     try {
-      await startDriveOAuth();
-      setDriveConnected(true);
-    } catch (err) {
-      setDriveConnectError(err instanceof Error ? err.message : "Connection failed");
-    } finally {
-      setDriveConnecting(false);
+      const c = await exportBackup();
+      setBackupMsg(`Exported ${c.songs} songs, ${c.lines} lines, ${c.recordings} recordings, ${c.sections} sections.`);
+    } catch (e) {
+      setBackupMsg(e instanceof Error ? e.message : "Export failed.");
     }
   }, []);
 
-  const handleDriveDisconnect = useCallback(() => {
-    clearToken();
-    setDriveConnected(false);
-    setDriveConnectError(null);
-  }, []);
-
-  // Google Drive bulk reset
-  const songs = useSongStore((s) => s.songs);
-  const setResetInProgress = useDriveSyncStore((s) => s.setResetInProgress);
-  const [driveResetStatus, setDriveResetStatus] = useState<"idle" | "running" | "done" | "error">("idle");
-  const [driveResetMsg, setDriveResetMsg] = useState<string | null>(null);
-
-  const handleFullDriveReset = useCallback(async () => {
-    const confirmed = window.confirm(
-      "⚠️ Delete ALL Reprise files from Google Drive and reset sync?\n\n" +
-      "This will:\n" +
-      "  • Permanently delete every audio file uploaded by Reprise from your Drive\n" +
-      "  • Clear all Drive file IDs from every song in your library\n" +
-      "  • The mobile app will lose access to all audio until you re-sync\n\n" +
-      "Files on your local machine are NOT affected.\n\n" +
-      "This cannot be undone. Continue?"
-    );
-    if (!confirmed) return;
-
-    setDriveResetStatus("running");
-    setDriveResetMsg("Connecting to Drive…");
-    // Block auto-sync for the entire duration of the reset
-    setResetInProgress(true);
+  const handleImportBackup = useCallback(async () => {
+    setBackupMsg(null);
+    setBackupBusy(true);
     try {
-      // 1. Delete everything from Drive
-      if (!getStoredToken()) throw new Error("Google Drive is not connected. Connect Drive first.");
-      console.log("[drive-reset] Getting access token…");
-      const accessToken = await getValidAccessToken();
-
-      console.log("[drive-reset] Purging Drive folder…");
-      setDriveResetMsg("Deleting files from Drive…");
-      const deleted = await purgeDriveAll(accessToken);
-      console.log("[drive-reset] Purge done, deleted:", deleted);
-
-      // 2. Clear drive IDs from all songs in DB (single bulk update)
-      setDriveResetMsg("Clearing sync records…");
-      const songIds = songs.map((s) => s.id);
-      console.log("[drive-reset] Clearing DB for", songIds.length, "songs…");
-      if (songIds.length > 0) {
-        const { error } = await supabase
-          .from("songs")
-          .update({ drive_audio_file_id: null, drive_vocals_file_id: null, drive_instrumental_file_id: null })
-          .in("id", songIds);
-        if (error) throw error;
-      }
-
-      // 3. Reload store so UI reflects cleared IDs immediately
-      console.log("[drive-reset] Reloading store…");
+      const c = await importBackupViaPicker();
+      if (!c) return; // cancelled
       await useSongStore.getState().loadAllData();
-
-      setDriveResetStatus("done");
-      setDriveResetMsg(`Done. ${deleted} item${deleted !== 1 ? "s" : ""} deleted from Drive. Auto-sync will re-upload your files.`);
-      console.log("[drive-reset] Complete.");
-    } catch (err) {
-      console.error("[drive-reset] Error:", err);
-      setDriveResetStatus("error");
-      setDriveResetMsg(err instanceof Error ? err.message : "Failed");
+      setBackupMsg(`Imported ${c.songs} songs, ${c.lines} lines, ${c.recordings} recordings, ${c.sections} sections.`);
+    } catch (e) {
+      setBackupMsg(e instanceof Error ? e.message : "Import failed.");
     } finally {
-      // Re-enable auto-sync now that Drive is clean and IDs are reset
-      setResetInProgress(false);
+      setBackupBusy(false);
     }
-  }, [songs, setResetInProgress]);
+  }, []);
 
   // Audio I/O tab
   const audioDevices = useAudioDevices();
@@ -400,7 +335,7 @@ export function SettingsPage() {
           <div className="max-w-[640px] mx-auto animate-fade-up">
             <h1 className="font-serif text-[24px] tracking-[-0.5px] mb-1">Settings</h1>
             <p className="text-[13.5px] text-[var(--text-muted)] font-light mb-6">
-              Manage your highlights, account, and app preferences.
+              Manage your highlights and app preferences.
             </p>
 
             {/* Tabs */}
@@ -410,14 +345,6 @@ export function SettingsPage() {
                 "Highlights",
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
-                </svg>,
-              )}
-              {tabDef(
-                "account",
-                "Account",
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
-                  <circle cx="12" cy="7" r="4" />
                 </svg>,
               )}
               {tabDef(
@@ -592,124 +519,6 @@ export function SettingsPage() {
               </div>
             )}
 
-            {/* ═══ ACCOUNT TAB ═══ */}
-            {activeTab === "account" && (
-              <div>
-                {/* Profile */}
-                <div className="mb-7">
-                  {sectionHeader("Profile")}
-
-                  <div className="flex items-center gap-4 mb-6">
-                    <div className="relative w-14 h-14 rounded-full bg-[var(--accent)] text-white text-[18px] font-semibold flex items-center justify-center flex-shrink-0 cursor-pointer group">
-                      {initials}
-                      <div className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-[var(--surface)] border-[1.5px] border-[var(--border)] flex items-center justify-center text-[var(--text-muted)] group-hover:border-[var(--theme)] group-hover:text-[var(--theme)] transition-colors">
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                          <path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
-                        </svg>
-                      </div>
-                    </div>
-                    <div className="flex-1">
-                      <div className="text-[15px] font-medium mb-0.5">
-                        {user?.email?.split("@")[0] ?? "User"}
-                      </div>
-                      <div className="text-[12.5px] text-[var(--text-muted)]">
-                        {user?.email ?? ""}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3 mb-4">
-                    <div>
-                      <label className="block text-[12.5px] font-medium text-[var(--text-secondary)] mb-[5px]">
-                        Display name
-                      </label>
-                      <input
-                        type="text"
-                        defaultValue={user?.email?.split("@")[0] ?? ""}
-                        className="w-full px-[13px] py-[9px] rounded-[7px] border-[1.5px] border-[var(--border)] bg-[var(--surface)] text-[var(--text-primary)] text-[13.5px] outline-none focus:border-[var(--theme)] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.09)] transition-all placeholder:text-[var(--text-muted)]"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[12.5px] font-medium text-[var(--text-secondary)] mb-[5px]">
-                        Email
-                      </label>
-                      <input
-                        type="email"
-                        defaultValue={user?.email ?? ""}
-                        className="w-full px-[13px] py-[9px] rounded-[7px] border-[1.5px] border-[var(--border)] bg-[var(--surface)] text-[var(--text-primary)] text-[13.5px] outline-none focus:border-[var(--theme)] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.09)] transition-all placeholder:text-[var(--text-muted)]"
-                      />
-                    </div>
-                  </div>
-
-                  <button className="flex items-center gap-[5px] px-[18px] py-2 rounded-[7px] bg-[var(--accent)] text-white text-[13px] font-medium border-none cursor-pointer hover:opacity-80 hover:-translate-y-px transition-all">
-                    Save changes
-                  </button>
-                </div>
-
-                {/* Password */}
-                <div className="mb-7">
-                  {sectionHeader("Password")}
-
-                  <div className="mb-4">
-                    <label className="block text-[12.5px] font-medium text-[var(--text-secondary)] mb-[5px]">
-                      Current password
-                    </label>
-                    <input
-                      type="password"
-                      placeholder="Enter current password"
-                      className="w-full px-[13px] py-[9px] rounded-[7px] border-[1.5px] border-[var(--border)] bg-[var(--surface)] text-[var(--text-primary)] text-[13.5px] outline-none focus:border-[var(--theme)] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.09)] transition-all placeholder:text-[var(--text-muted)]"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3 mb-4">
-                    <div>
-                      <label className="block text-[12.5px] font-medium text-[var(--text-secondary)] mb-[5px]">
-                        New password
-                      </label>
-                      <input
-                        type="password"
-                        placeholder="New password"
-                        className="w-full px-[13px] py-[9px] rounded-[7px] border-[1.5px] border-[var(--border)] bg-[var(--surface)] text-[var(--text-primary)] text-[13.5px] outline-none focus:border-[var(--theme)] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.09)] transition-all placeholder:text-[var(--text-muted)]"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[12.5px] font-medium text-[var(--text-secondary)] mb-[5px]">
-                        Confirm new password
-                      </label>
-                      <input
-                        type="password"
-                        placeholder="Confirm password"
-                        className="w-full px-[13px] py-[9px] rounded-[7px] border-[1.5px] border-[var(--border)] bg-[var(--surface)] text-[var(--text-primary)] text-[13.5px] outline-none focus:border-[var(--theme)] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.09)] transition-all placeholder:text-[var(--text-muted)]"
-                      />
-                    </div>
-                  </div>
-
-                  <button className="flex items-center gap-[5px] px-4 py-2 rounded-[7px] border-[1.5px] border-[var(--border)] bg-transparent text-[var(--text-secondary)] text-[13px] font-medium cursor-pointer hover:border-[#888] hover:text-[var(--text-primary)] transition-all">
-                    Update password
-                  </button>
-                </div>
-
-                {/* Danger zone */}
-                <div className="mb-7">
-                  {sectionHeader("Danger zone")}
-
-                  <div className="p-[18px_20px] border border-[#FECACA] rounded-[var(--radius)] bg-[#FEF2F2]">
-                    <div className="text-[13px] font-medium text-[#991B1B] mb-1">Delete account</div>
-                    <div className="text-[12px] text-[#B91C1C] leading-[1.6] mb-3.5">
-                      Permanently delete your account and all data. This action cannot be undone. All your songs, recordings, and progress will be lost.
-                    </div>
-                    <button className="flex items-center gap-[5px] px-4 py-2 rounded-[7px] border-[1.5px] border-[#FECACA] bg-transparent text-[#DC2626] text-[13px] font-medium cursor-pointer hover:bg-[#FEF2F2] hover:border-[#DC2626] transition-all">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <polyline points="3 6 5 6 21 6" />
-                        <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6M10 11v6M14 11v6" />
-                      </svg>
-                      Delete my account
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
             {/* ═══ PREFERENCES TAB ═══ */}
             {activeTab === "preferences" && (
               <div>
@@ -820,18 +629,6 @@ export function SettingsPage() {
                     toggle(confirmDelete, setConfirmDelete),
                   )}
 
-                  {settingRow(
-                    "Auto-sync audio to Google Drive",
-                    "Automatically upload audio files to Drive when a song finishes downloading or processing. Requires Google Drive to be connected in the song setup page.",
-                    toggle(autoSyncDrive, setAutoSyncDrive),
-                  )}
-
-                  {settingRow(
-                    "Auto-sync to cloud",
-                    "Automatically sync progress and recordings to Supabase",
-                    toggle(autoSync, setAutoSync),
-                    true,
-                  )}
                 </div>
 
                 {/* Audio processing */}
@@ -852,85 +649,36 @@ export function SettingsPage() {
                   )}
                 </div>
 
-                {/* Google Drive connection */}
+                {/* Backup & restore */}
                 <div className="mb-7">
-                  {sectionHeader("Google Drive")}
-                  <div className="p-4 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)] flex items-center gap-3">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${driveConnected ? "bg-[#DCFCE7]" : "bg-[var(--bg)]"}`}>
-                      <svg width="16" height="16" viewBox="0 0 87.3 78" fill={driveConnected ? "#15803D" : "var(--text-muted)"} xmlns="http://www.w3.org/2000/svg">
-                        <path d="M6.6 66.85l3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8H0a15.92 15.92 0 0 0 2.1 8zM43.65 25L29.9 1.2C28.55 2 27.4 3.1 26.6 4.5L.65 49.4A15.92 15.92 0 0 0 0 53h27.5zM73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25A15.92 15.92 0 0 0 88.3 53H60.8l5.85 11.5zM43.65 25L57.4 1.2C56.05.45 54.5 0 52.85 0H35.45c-1.65 0-3.2.45-4.55 1.2zM59.8 53H27.5l-13.75 23.8c1.35.8 2.9 1.2 4.55 1.2h50.7c1.65 0 3.2-.45 4.55-1.2zM60.8 53l-16.95-29.5-16.95 29.5zM73.55 76.8z" />
-                      </svg>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[13px] font-medium">
-                        {driveConnected ? "Google Drive connected" : "Google Drive not connected"}
-                      </div>
-                      <div className="text-[11.5px] text-[var(--text-muted)]">
-                        {driveConnected ? "Audio files sync between desktop and mobile." : "Connect to sync audio files to mobile."}
-                      </div>
-                      {driveConnectError && (
-                        <div className="text-[11.5px] text-[#DC2626] mt-0.5">{driveConnectError}</div>
-                      )}
-                    </div>
-                    {driveConnected ? (
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        <button
-                          onClick={handleDriveConnect}
-                          disabled={driveConnecting}
-                          className="px-3 py-[5px] rounded-[6px] border-[1.5px] border-[var(--border)] bg-transparent text-[12px] font-medium text-[var(--text-secondary)] hover:border-[#888] hover:text-[var(--text-primary)] transition-all disabled:opacity-50"
-                        >
-                          {driveConnecting ? "Connecting…" : "Switch account"}
-                        </button>
-                        <button
-                          onClick={handleDriveDisconnect}
-                          className="px-3 py-[5px] rounded-[6px] border-[1.5px] border-[var(--border)] bg-transparent text-[12px] font-medium text-[var(--text-secondary)] hover:border-[#DC2626] hover:text-[#DC2626] transition-all"
-                        >
-                          Disconnect
-                        </button>
-                      </div>
-                    ) : (
+                  {sectionHeader("Backup & restore")}
+                  <div className="p-4 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)]">
+                    <div className="text-[13px] font-medium mb-1">Local database backup</div>
+                    <p className="text-[12px] text-[var(--text-muted)] leading-relaxed mb-3">
+                      Export your entire library — songs, lyrics, recordings, and sections — to a JSON file, or restore from one. Audio files are stored separately on disk and are not included.
+                    </p>
+                    <div className="flex items-center gap-2">
                       <button
-                        onClick={handleDriveConnect}
-                        disabled={driveConnecting}
-                        className="flex-shrink-0 px-3 py-[6px] rounded-[6px] bg-[var(--theme)] text-[var(--theme-text)] text-[12px] font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+                        onClick={handleExportBackup}
+                        disabled={backupBusy}
+                        className="px-3 py-[6px] rounded-[6px] bg-[var(--accent)] text-white text-[12px] font-medium hover:opacity-85 transition-opacity disabled:opacity-50"
                       >
-                        {driveConnecting ? "Connecting…" : "Connect Drive"}
+                        Export backup
                       </button>
+                      <button
+                        onClick={handleImportBackup}
+                        disabled={backupBusy}
+                        className="px-3 py-[6px] rounded-[6px] border-[1.5px] border-[var(--border)] bg-transparent text-[12px] font-medium text-[var(--text-secondary)] hover:border-[#888] hover:text-[var(--text-primary)] transition-all disabled:opacity-50"
+                      >
+                        {backupBusy ? "Importing…" : "Import backup"}
+                      </button>
+                    </div>
+                    {backupMsg && (
+                      <p className="mt-2 text-[11.5px] text-[var(--text-muted)] leading-relaxed">{backupMsg}</p>
                     )}
                   </div>
                 </div>
 
-                {/* Google Drive danger zone */}
-                <div className="mb-7">
-                  {sectionHeader("Google Drive — Danger Zone")}
-                  <div className="p-4 bg-[#FEF2F2] border border-[#FECACA] rounded-[var(--radius)]">
-                    <div className="text-[13px] font-medium text-[#991B1B] mb-1">Delete all Drive files & reset sync</div>
-                    <p className="text-[12px] text-[#B91C1C] leading-relaxed mb-3">
-                      Permanently deletes every audio file Reprise has uploaded to your Google Drive and clears all sync records.
-                      The mobile app will lose access to all audio until you re-sync each song.
-                      Your local files are not affected.
-                    </p>
-                    <button
-                      onClick={handleFullDriveReset}
-                      disabled={driveResetStatus === "running"}
-                      className="px-3 py-[6px] rounded-[6px] bg-[#DC2626] text-white text-[12px] font-medium hover:bg-[#B91C1C] transition-colors disabled:opacity-50 flex items-center gap-1.5"
-                    >
-                      {driveResetStatus === "running" ? (
-                        <>
-                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="animate-spin">
-                            <circle cx="12" cy="12" r="10" /><path d="M12 6v6" />
-                          </svg>
-                          Deleting…
-                        </>
-                      ) : "Delete all & reset"}
-                    </button>
-                    {driveResetMsg && (
-                      <p className={`mt-2 text-[11.5px] leading-relaxed ${driveResetStatus === "error" ? "text-[#DC2626]" : "text-[#15803D]"}`}>
-                        {driveResetMsg}
-                      </p>
-                    )}
-                  </div>
-                </div>
               </div>
             )}
 

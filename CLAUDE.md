@@ -1,7 +1,9 @@
 # CLAUDE.md — Reprise Agent Reference
 
 ## Project
-Reprise — personal vocal practice studio. Cross-platform: **desktop** (Tauri/React) for production/editing, **mobile** (React Native/Expo) for practice/recording.
+Reprise — personal vocal practice studio. **Desktop-only** (Tauri v2 + React), **fully offline / local-first**: no auth, no cloud database, no external integrations. All data lives in a local NoSQL database (Dexie/IndexedDB) on the machine; audio files live on local disk under `C:/Reprise/`.
+
+> History: the app previously synced to Supabase (Postgres + Auth) and Google Drive, and shipped a React Native mobile app. Those were removed. A one-time Supabase→local migration utility and the original cloud project are retained only as a fallback/backup (see **Migration & backup**).
 
 ---
 
@@ -9,63 +11,59 @@ Reprise — personal vocal practice studio. Cross-platform: **desktop** (Tauri/R
 
 ```
 reprise/
-├── apps/desktop/          Tauri v2 + React 19 + Vite 6
+├── apps/desktop/          Tauri v2 + React 19 + Vite 6   ← the app
 │   ├── src/               React frontend (pages, components, hooks, stores, lib)
 │   └── src-tauri/         Rust binary, capabilities, sidecars (Python scripts)
-├── apps/mobile-rn/        React Native 0.79 + Expo 53 + Expo Router 5
-│   ├── app/               File-based routes ((tabs)/, song/[id], practice/[id])
-│   └── src/               Components, hooks, stores, lib
-├── packages/shared/       Shared TS types, Zod schemas, Supabase client
-├── packages/ui/           Shared React components (minimal use currently)
-└── supabase/              Migrations (13), RLS policies, Edge Functions (Google Drive OAuth)
+├── packages/shared/       Shared TS types (Song/Line/Recording/Section), furigana,
+│                          and a retained Supabase client factory (migration only)
+├── packages/ui/           Empty placeholder (unused)
+└── supabase/              Historical migrations/RLS/Edge Functions — schema reference
+                           and source for the one-time data migration. Not used at runtime.
 ```
-
-> `apps/mobile/` is a deprecated Vite-based app — ignore it.
 
 ---
 
 ## Common Commands
 
-```bash
+```powershell
 pnpm install                                  # install all workspaces
 pnpm --filter desktop tauri dev               # run desktop (Vite on 127.0.0.1:5173)
-pnpm --filter mobile-rn expo start            # run mobile (Expo Go / dev client)
-supabase start | supabase db reset            # local Supabase
-find . -name "node_modules" -type d -prune -exec rm -rf '{}' +   # full clean
+pnpm --filter desktop build                   # tsc -b && vite build (frontend)
+pnpm --filter desktop exec tsc -b --noEmit    # typecheck only
 ```
 
 **Vite port is 5173** (`host: 127.0.0.1` required on Windows to avoid EACCES). Tauri devUrl matches.
 
 ---
 
-## Tech Stack
+## Tech Stack (Desktop)
 
-| Concern | Desktop | Mobile |
-|---|---|---|
-| Framework | Tauri v2 + React 19 | React Native 0.79 + Expo 53 |
-| Routing | React Router 7 | Expo Router 5 (file-based) |
-| State | Zustand 5 | Zustand 5 |
-| DB | Supabase Postgres (cloud sync) | Supabase Postgres (cloud sync) |
-| Local storage | — | AsyncStorage (preferences, file paths) |
-| Audio | wavesurfer.js 7 (waveform) | expo-av 15 (playback + recording) |
-| Animation | — | Reanimated 3 + Gesture Handler 2 |
-| Styling | Tailwind CSS v4 (`@import "tailwindcss"`, `@theme` block) | React Native StyleSheet |
-| Japanese | kuroshiro + kuromoji (furigana) | Same |
-| BPM | music-tempo | — |
+| Concern | Choice |
+|---|---|
+| Framework | Tauri v2 + React 19 |
+| Routing | React Router 7 |
+| State | Zustand 5 |
+| Database | **Dexie 4 (IndexedDB)** — local, offline |
+| Local prefs | Zustand `persist` → localStorage |
+| Audio | wavesurfer.js 7 (waveform) + Web Audio |
+| Styling | Tailwind CSS v4 (`@import "tailwindcss"`, `@theme` block) |
+| Japanese | kuroshiro + kuromoji (furigana) |
+| BPM | music-tempo |
 
 ---
 
-## Data Models (actual schema in Supabase)
+## Data Models
+
+Stored as collections in the local Dexie DB (`apps/desktop/src/lib/local-db.ts`). Row shapes are produced/consumed by the `*ToDbRow` / `dbRowTo*` converters in `song-store.ts`. There is **no authentication**: every row carries `user_id = "local"` (constant `LOCAL_USER_ID`) purely so the converters stay intact — it is never used for filtering.
 
 ### Song
 ```ts
 id, user_id, title, artist, youtube_url, language, translation_language
 tags: string[], notes, pinned: boolean, mastery: 0–100
 thumbnail_url, thumbnail_b64              // base64 JPEG from yt-dlp
-audio_path, audio_folder                 // desktop local paths
+audio_path, audio_folder                 // local paths under C:/Reprise/
 vocals_path, instrumental_path, pitch_data_path
-download_status, stem_status, pitch_status  // 'idle'|'downloading'|'processing'|'done'|'error'
-drive_audio_file_id, drive_vocals_file_id, drive_instrumental_file_id  // Google Drive
+download_status, stem_status, pitch_status, align_status  // 'idle'|'downloading'|'processing'|'done'|'error'
 created_at, updated_at
 ```
 
@@ -74,7 +72,7 @@ created_at, updated_at
 id, song_id, user_id
 text: string                  // original lyrics
 custom_text?: string          // user-edited version
-annotations: Annotation[]     // JSONB — [{start, end, type, furigana_html?}]
+annotations: Annotation[]     // [{start, end, type, furigana_html?}]
 order: number
 start_ms?, end_ms?
 status: 'new'|'listened'|'annotated'|'practiced'|'recorded'|'best_take_set'
@@ -95,12 +93,7 @@ note?: string
 created_at, updated_at
 ```
 
-### Other tables: `sections` (start/end line_order), `profiles`, `preferences` (highlights JSONB)
-
-### Annotation structure
-```ts
-{ start: number, end: number, type: string }  // start/end = char indices in custom_text
-```
+### Other collections: `sections` (start/end line_order), `meta` (migration flag, misc)
 
 ### Line status progression (behavior-based, not user-set)
 ```
@@ -113,49 +106,42 @@ practiced (play_count ≥ 10) → recorded (recording saved) → best_take_set
 ## Desktop Key Files
 
 ```
-src/pages/         library-page, practice-page, timestamp-page, song-setup-page, recordings-page
-src/components/    audio-player, full-waveform, waveform, pitch-curve, annotated-text
+src/app.tsx        Routes; calls song-store loadAllData() on mount (boots to /library)
+src/pages/         library-page, practice, timestamp-page, song-setup-page, recordings-page, settings-page
+src/components/    sidebar, audio-player, full-waveform, waveform, pitch-curve, annotated-text, protected-route (pass-through)
 src/hooks/         use-line-player (core playback), use-recorder, use-waveform-data, use-pitch-data
-src/stores/        song-store (master), preferences-store, auth-store, task-queue-store, drive-sync-store
-src/lib/           audio-download.ts (yt-dlp), audio-analysis.ts (torchcrepe), google-drive.ts
+src/stores/        song-store (master), preferences-store, task-queue-store, queue-store
+src/lib/           local-db.ts (Dexie data layer), audio-download.ts (yt-dlp), audio-analysis.ts (torchcrepe),
+                   whisperx-align.ts, backup.ts (JSON export/import), migrate-from-supabase.ts (one-time, dev only)
 ```
+
+**`song-store.ts`** — the master store. All persistence goes through `localDb` (in `local-db.ts`), which returns `{ data, error }` results mirroring the old Supabase shape so the optimistic-update-with-rollback flow is preserved. Cascade deletes (song → lines/recordings/sections) are explicit, inside a Dexie transaction.
+
+**`local-db.ts`** — Dexie schema + typed per-collection CRUD (`getAllSongs`, `insertLine`, `deleteSongCascade`, `deleteLinesForSongExceptLanguage`, etc.).
 
 **`use-line-player.ts`** — single-line and range looping, speed 0.5x–1.0x (0.05x steps), auto-advance, `onLinePlayed` callback increments `play_count`.
 
-**`task-queue-store.ts`** — persisted queue for Demucs, torchcrepe, Drive uploads. Processed by `use-task-queue-processor.ts`.
+**`task-queue-store.ts`** — persisted queue for Demucs / torchcrepe / WhisperX. Processed by `use-task-queue-processor.ts`.
 
 ---
 
-## Mobile Key Files
+## Migration & backup
 
-```
-app/(tabs)/index.tsx     Songs list (fetch from Supabase, Drive auto-download)
-app/(tabs)/settings.tsx  Theme, Drive auth, highlight config
-app/song/[id].tsx        Song detail, line status pills, tap-to-practice
-app/practice/[id].tsx    Carousel + transport controls
-src/components/lyric-display.tsx    Reanimated 3 carousel (5-slot circular buffer)
-src/components/transport-controls.tsx
-src/stores/song-files-store.ts      songId → {audioPath, vocalsPath, instrPath, driveFileIds}
-src/hooks/use-line-player.ts        expo-av based, same logic as desktop
-```
-
-**Gesture map in `lyric-display.tsx`:**
-- Tap (<350ms, <15px) → seek to line
-- Vertical swipe (dy > 40px) → prev/next line
-- Hold + horizontal drag → speed scrub
+- **One-time migration** (`lib/migrate-from-supabase.ts`): exposed in dev as `window.__repriseMigrate(email, password)`. Signs into the retained cloud Supabase project (RLS-scoped), reads all rows, and bulk-puts them into Dexie. Read-only on the cloud. Wired in `main.tsx` behind `import.meta.env.DEV`.
+- **Backup export/import** (`lib/backup.ts`): Settings → Preferences → "Backup & restore". Exports the whole local DB to a timestamped JSON file; imports/upserts by id. Audio files are NOT included (they live on disk).
 
 ---
 
 ## Coding Rules
 
-- **TypeScript strict.** Types shared by both apps → `packages/shared`.
+- **TypeScript strict.** Cross-cutting types live in `packages/shared`.
 - **All timing in milliseconds.** Never use seconds in audio logic.
 - **Playback speed:** 0.5x–1.0x only (0.05x increments).
 - **Functional components only.** No class components.
 - **Naming:** `PascalCase` components, `camelCase` functions/vars, `kebab-case` files.
-- **DB rows:** Always include `updated_at` and `user_id`.
-- **Audio processing** (Demucs, torchcrepe) → Python sidecars on desktop only.
-- **Do not use `apps/mobile/`** — use `apps/mobile-rn/`.
+- **DB rows:** always include `updated_at` (and `user_id = LOCAL_USER_ID`).
+- **Persistence goes through `localDb`** (`lib/local-db.ts`) — don't talk to IndexedDB directly.
+- **Audio processing** (Demucs, torchcrepe, WhisperX) → Python sidecars, desktop only.
 
 ---
 
@@ -202,50 +188,21 @@ python -m torchcrepe --audio_files vocals.wav --output_files pitch.csv \
 
 ---
 
-## Google Drive Sync
-
-- Desktop: Upload via PKCE OAuth (system browser + local HTTP callback server). Resumable uploads.
-- Mobile: Download using Drive file IDs stored on Song rows (`drive_*_file_id`).
-- Edge Functions in `supabase/functions/`: `google-drive-auth`, `google-drive-callback`, `google-drive-refresh`.
-- Folder structure: `Reprise/<Song-Title>/` with `audio.m4a`, `vocals.wav`, `instrumental.wav`, `pitch.csv`.
-
----
-
 ## Furigana
 
-Auto-generated via `kuroshiro` + `kuromoji` analyzer. Output is `<ruby>` HTML stored in `furigana_html` / `custom_furigana_html` on Line rows. Never manually edit furigana HTML — regenerate via `generateFurigana()` in `packages/shared/src/furigana.ts`.
+Auto-generated via `kuroshiro` + `kuromoji` analyzer. Output is `<ruby>` HTML stored in `furigana_html` / `custom_furigana_html` on Line rows. Never manually edit furigana HTML — regenerate via `generateFurigana()` in `packages/shared/src/lib/furigana.ts`.
 
 ---
 
-## Theme System (Desktop)
+## Theme System
 
 6 built-in themes: `blue`, `midnight`, `violet`, `emerald`, `red`, `amber`.
-CSS variable-based: `--theme`, `--theme-light`, `--theme-text`. Stored in `preferences-store`.
+CSS variable-based: `--theme`, `--theme-light`, `--theme-text`. Stored in `preferences-store` (localStorage).
 
 ---
 
-## Supabase Migrations (13 total)
+## What's Built
 
-```
-00001 profiles (auto-create trigger on auth.users)
-00002 songs
-00003 lines
-00004 sections
-00005 recordings
-00006 language fields (song + line)
-00007 preferences (highlights JSONB, other_settings JSONB)
-00008 is_best_take, note on recordings
-00009 line status enum + play_count
-00010 furigana_html on lines
-00011 Google Drive file IDs on songs
-00012 furigana_html on annotations
-00013 custom_furigana_html for custom_text
-```
+**Working:** local song library, YouTube import, yt-dlp download, Demucs stems, torchcrepe pitch, WhisperX timestamp alignment, manual lyrics + furigana, annotation editor (5 predefined + custom types), timestamp waveform marker, line-by-line practice playback, recording, line status auto-tracking, 6 themes, task queue, section markers, local DB backup/restore.
 
----
-
-## What's Actually Built (vs. Planned)
-
-**Working:** Auth (email + Google OAuth), song library, YouTube import, yt-dlp download, Demucs stems, torchcrepe pitch, manual lyrics + furigana, annotation editor (5 predefined + custom types), timestamp waveform marker, line-by-line practice playback (desktop + mobile), recording, Google Drive sync, line status auto-tracking, 6 themes, task queue, section markers.
-
-**Not yet built:** WhisperX auto-alignment, compile line recordings → full song, pitch accuracy comparison (user vs. reference vocal), waveform display on mobile, collaboration/sharing.
+**Not yet built:** compile line recordings → full song, pitch accuracy comparison (user vs. reference vocal).
