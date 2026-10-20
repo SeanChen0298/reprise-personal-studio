@@ -38,8 +38,35 @@ export interface ChordSegment {
   beats: number;
   label: string;        // e.g. "F#m7", or "N" for no chord
   root: string | null;
+  root_pc: number | null;
   quality: "maj" | "m" | "7" | "m7" | "N";
   confidence: number;   // 0–1
+}
+
+export interface StrumSection {
+  start_bar: number;
+  end_bar: number;      // inclusive
+  start_ms: number;
+  end_ms: number;
+  /** One character per eighth note: D = down, U = up, - = rest. */
+  pattern: string;
+  /** "detected" = read from the audio; "suggested" = a fallback that fits the tempo. */
+  source: "detected" | "suggested";
+  confidence: number | null;
+}
+
+export interface StrummingSheet {
+  subdivision: number;  // pattern characters per beat
+  main_pattern: string;
+  main_pattern_source: "detected" | "suggested";
+  sections: StrumSection[];
+}
+
+export interface CapoSuggestion {
+  fret: number;                    // 0 = no capo
+  shapes: Record<string, string>;  // chord label -> shape to play with the capo on
+  barre_share_no_capo: number;
+  barre_share_with_capo: number;
 }
 
 /** Shape of chords.json. Fields are added as later analysis stages land. */
@@ -56,6 +83,8 @@ export interface ChordAnalysis {
   beats_ms?: number[];
   bars?: ChordBar[];
   chords?: ChordSegment[];
+  strumming?: StrummingSheet;
+  capo?: CapoSuggestion;
 }
 
 // ---------------------------------------------------------------------------

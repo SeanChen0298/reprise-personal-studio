@@ -27,9 +27,10 @@ import argparse
 import json
 import os
 import sys
+from collections import Counter
 from datetime import datetime, timezone
 
-OUTPUT_VERSION = 2
+OUTPUT_VERSION = 3
 
 SR = 22050
 HOP = 512
@@ -141,9 +142,9 @@ def detect_chords(beat_chroma, beat_times, duration_s, names):
 
     def label_for(state):
         if state == n_states - 1:
-            return {"label": "N", "root": None, "quality": "N"}
+            return {"label": "N", "root": None, "root_pc": None, "quality": "N"}
         root, qual = roots[state], quals[state]
-        return {"label": names[root] + qual, "root": names[root], "quality": qual or "maj"}
+        return {"label": names[root] + qual, "root": names[root], "root_pc": root, "quality": qual or "maj"}
 
     # Beat boundaries: beat i spans beat_times[i] .. beat_times[i+1].
     bounds = list(beat_times) + [duration_s]
@@ -229,6 +230,184 @@ def build_bars(beat_times, meter, phase, duration_s):
 
 
 # ---------------------------------------------------------------------------
+# Strumming (stage 4)
+# ---------------------------------------------------------------------------
+
+STRUM_BLOCK_BARS = 4        # detect one pattern per 4-bar block
+STRUM_HIT_THRESHOLD = 0.45  # slot counts as a strum above this share of the bar's peak
+STRUM_MIN_CONFIDENCE = 0.22
+
+
+def common_pattern(meter: int, tempo: float) -> str:
+    """Fallback strum patterns, one character per eighth note (D = down, U = up, - = rest)."""
+    if meter == 3:
+        return "D-DUDU"
+    if tempo >= 140:
+        return "D-D-D-D-"   # eighth-note ups get hard to play at fast tempos
+    return "D-DU-UDU"
+
+
+def detect_strumming(y_perc, sr, beat_times, bars, meter, tempo):
+    """Detect a down/up strum pattern per 4-bar block from the instrumental's rhythm.
+
+    For each bar we sample how hard the percussive part hits on every eighth
+    note. On-beat eighths become D, off-beat eighths become U. When the
+    rhythm is too flat to read, we fall back to a common pattern for the
+    tempo and meter and mark it as a suggestion.
+    """
+    import numpy as np
+    import librosa
+
+    hop = 256
+    env = librosa.onset.onset_strength(y=y_perc, sr=sr, hop_length=hop)
+    env_times = librosa.frames_to_time(np.arange(len(env)), sr=sr, hop_length=hop)
+    window = 0.04
+
+    def strength_at(t):
+        lo, hi = np.searchsorted(env_times, [t - window, t + window])
+        return float(env[lo:max(hi, lo + 1)].max()) if lo < len(env) else 0.0
+
+    slots = meter * 2
+    bar_vectors = {}
+    for bar in bars:
+        if bar["pickup"] or bar["beats"] != meter:
+            continue
+        b0 = bar["first_beat"]
+        if b0 + meter >= len(beat_times):
+            continue
+        vec = []
+        for k in range(meter):
+            t0, t1 = beat_times[b0 + k], beat_times[b0 + k + 1]
+            vec.append(strength_at(t0))
+            vec.append(strength_at((t0 + t1) / 2))
+        vec = np.array(vec)
+        if vec.max() > 0:
+            bar_vectors[bar["index"]] = vec / vec.max()
+
+    fallback = common_pattern(meter, tempo)
+    full_bars = [b for b in bars if not b["pickup"]]
+    blocks = []
+    for i in range(0, len(full_bars), STRUM_BLOCK_BARS):
+        block = full_bars[i:i + STRUM_BLOCK_BARS]
+        vecs = [bar_vectors[b["index"]] for b in block if b["index"] in bar_vectors]
+        pattern, source, confidence = fallback, "suggested", None
+        if vecs:
+            avg = np.mean(vecs, axis=0)
+            hits = avg > STRUM_HIT_THRESHOLD
+            if hits.all():
+                clarity = float(avg.min())             # straight eighths: every slot strong
+            elif hits.any():
+                clarity = float(avg[hits].mean() - avg[~hits].mean())
+            else:
+                clarity = 0.0
+            detected = "".join(
+                ("D" if j % 2 == 0 else "U") if hits[j] else "-" for j in range(slots)
+            )
+            # A believable strum starts on the beat and has a few strokes.
+            if clarity >= STRUM_MIN_CONFIDENCE and hits[0] and hits.sum() >= 3:
+                pattern, source, confidence = detected, "detected", round(clarity, 3)
+        blocks.append({
+            "start_bar": block[0]["index"],
+            "end_bar": block[-1]["index"],
+            "start_ms": block[0]["start_ms"],
+            "end_ms": block[-1]["end_ms"],
+            "pattern": pattern,
+            "source": source,
+            "confidence": confidence,  # None for suggestions
+        })
+
+    # Songs usually keep one main strum. Snap detected patterns that differ
+    # from the most common one by a single stroke onto it, so the sheet is
+    # not split into many near-identical sections.
+    # A block we could not read gets the song's own main pattern as its
+    # suggestion, rather than a generic one, when the song has one.
+    detected_counts = Counter(b["pattern"] for b in blocks if b["source"] == "detected")
+    main_pattern = detected_counts.most_common(1)[0][0] if detected_counts else fallback
+    for b in blocks:
+        if b["source"] == "detected":
+            if sum(x != y for x, y in zip(b["pattern"], main_pattern)) <= 1:
+                b["pattern"] = main_pattern
+        else:
+            b["pattern"] = main_pattern
+
+    # Merge neighbouring blocks with the same pattern. A section counts as
+    # detected when most of its bars were read from the audio.
+    sections = []
+    for blk in blocks:
+        n_bars = blk["end_bar"] - blk["start_bar"] + 1
+        detected_bars = n_bars if blk["source"] == "detected" else 0
+        conf = [blk["confidence"]] if blk["confidence"] is not None else []
+        prev = sections[-1] if sections else None
+        if prev and prev["pattern"] == blk["pattern"]:
+            prev["end_bar"] = blk["end_bar"]
+            prev["end_ms"] = blk["end_ms"]
+            prev["_bars"] += n_bars
+            prev["_detected_bars"] += detected_bars
+            prev["_conf"] += conf
+        else:
+            sections.append({**blk, "_bars": n_bars, "_detected_bars": detected_bars, "_conf": conf})
+
+    for sec in sections:
+        bars_total, detected_bars, conf = sec.pop("_bars"), sec.pop("_detected_bars"), sec.pop("_conf")
+        sec["source"] = "detected" if detected_bars * 2 >= bars_total else "suggested"
+        sec["confidence"] = round(sum(conf) / len(conf), 3) if conf and sec["source"] == "detected" else None
+
+    return {
+        "subdivision": 2,  # pattern characters per beat (eighth notes)
+        "main_pattern": main_pattern,
+        "main_pattern_source": "detected" if detected_counts else "suggested",
+        "sections": sections,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Capo (stage 4)
+# ---------------------------------------------------------------------------
+
+# Chord shapes most players can play without a barre.
+OPEN_SHAPES = {
+    "C", "A", "G", "E", "D", "Am", "Em", "Dm",
+    "C7", "A7", "G7", "E7", "D7", "B7", "Am7", "Em7", "Dm7",
+}
+MAX_CAPO = 7
+
+
+def suggest_capo(chords):
+    """Pick the capo fret whose chord shapes need the fewest barre chords.
+
+    Each chord's shape is the chord moved down by the capo fret. Every chord
+    is weighted by how long it is played, and each fret adds a tiny cost so a
+    capo is only suggested when it genuinely helps.
+    """
+    played = [c for c in chords if c["root_pc"] is not None]
+    total = sum(c["end_ms"] - c["start_ms"] for c in played) or 1
+
+    def shape_name(chord, capo):
+        suffix = "" if chord["quality"] == "maj" else chord["quality"]
+        return PITCH_NAMES_SHARP[(chord["root_pc"] - capo) % 12] + suffix
+
+    def barre_share(capo):
+        hard = sum(
+            c["end_ms"] - c["start_ms"] for c in played if shape_name(c, capo) not in OPEN_SHAPES
+        )
+        return hard / total
+
+    _, best = min((barre_share(c) + 0.015 * c, c) for c in range(MAX_CAPO + 1))
+    if barre_share(best) >= barre_share(0) - 0.05:
+        best = 0  # not worth a capo
+
+    shapes = {}
+    for c in played:
+        shapes.setdefault(c["label"], shape_name(c, best))
+    return {
+        "fret": best,
+        "shapes": shapes,
+        "barre_share_no_capo": round(barre_share(0), 3),
+        "barre_share_with_capo": round(barre_share(best), 3),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Main analysis
 # ---------------------------------------------------------------------------
 
@@ -268,6 +447,8 @@ def analyze(audio_path: str) -> dict:
     onset_at_beats = onset_env[np.clip(beat_frames, 0, len(onset_env) - 1)]
     meter, phase = detect_meter(path, onset_at_beats)
     bars = build_bars(beat_times, meter, phase, duration_s)
+    strumming = detect_strumming(y_perc, sr, beat_times, bars, meter, tempo)
+    capo = suggest_capo(chords)
 
     return {
         "duration_ms": to_ms(duration_s),
@@ -277,6 +458,8 @@ def analyze(audio_path: str) -> dict:
         "beats_ms": [to_ms(t) for t in beat_times],
         "bars": bars,
         "chords": chords,
+        "strumming": strumming,
+        "capo": capo,
         # Kept for later stages (strumming / fingerstyle) — not written to JSON.
         "_internal": {
             "y_perc": y_perc,
