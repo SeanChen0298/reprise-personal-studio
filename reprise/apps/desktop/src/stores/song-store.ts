@@ -8,6 +8,7 @@ import {
 } from "../lib/audio-download";
 import { analyzePitch } from "../lib/audio-analysis";
 import { alignLyrics } from "../lib/whisperx-align";
+import { analyzeChords } from "../lib/chord-analysis";
 import { localDb } from "../lib/local-db";
 import { readFile } from "@tauri-apps/plugin-fs";
 import MusicTempo from "music-tempo";
@@ -79,10 +80,11 @@ interface SongStore {
   removeSong: (id: string) => Promise<void>;
   togglePin: (id: string) => Promise<void>;
 
-  // Audio download, stem separation, pitch analysis & alignment
+  // Audio download, stem separation, pitch/chord analysis & alignment
   downloadSongAudio: (id: string) => Promise<void>;
   separateSongStems: (id: string) => Promise<void>;
   analyzeSongPitch: (id: string) => Promise<void>;
+  analyzeSongChords: (id: string) => Promise<void>;
   alignSongLyrics: (id: string, model?: string) => Promise<void>;
   markStaleAnalysesAsFailed: () => Promise<void>;
 
@@ -400,6 +402,24 @@ export const useSongStore = create<SongStore>()((set, get) => ({
     }
   },
 
+  analyzeSongChords: async (id) => {
+    const song = get().songs.find((s) => s.id === id);
+    if (!song?.instrumental_path || song.stem_status !== "done") return;
+    if (!song.audio_folder) return;
+
+    await get().updateSong(id, { chord_status: "processing", chord_error: undefined });
+
+    try {
+      const chordDataPath = await analyzeChords(song.instrumental_path, song.audio_folder);
+      await get().updateSong(id, { chord_status: "done", chord_data_path: chordDataPath });
+    } catch (err) {
+      await get().updateSong(id, {
+        chord_status: "error",
+        chord_error: err instanceof Error ? err.message : "Chord analysis failed",
+      });
+    }
+  },
+
   alignSongLyrics: async (id, model) => {
     const song = get().songs.find((s) => s.id === id);
     if (!song) return;
@@ -465,6 +485,10 @@ export const useSongStore = create<SongStore>()((set, get) => ({
       if (song.pitch_status === "processing") {
         updates.pitch_status = "error";
         updates.pitch_error = "Processing timed out after 10 minutes. Please retry.";
+      }
+      if (song.chord_status === "processing") {
+        updates.chord_status = "error";
+        updates.chord_error = "Processing timed out after 10 minutes. Please retry.";
       }
       if (song.align_status === "processing") {
         updates.align_status = "error";
@@ -1028,6 +1052,9 @@ function dbRowToSong(row: Record<string, unknown>): Song {
     pitch_error: row.pitch_error as string | undefined,
     align_status: (row.align_status as Song["align_status"]) ?? "idle",
     align_error: row.align_error as string | undefined,
+    chord_data_path: row.chord_data_path as string | undefined,
+    chord_status: (row.chord_status as Song["chord_status"]) ?? "idle",
+    chord_error: row.chord_error as string | undefined,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -1063,6 +1090,9 @@ function songToDbRow(song: Song): Record<string, unknown> {
     pitch_error: song.pitch_error ?? null,
     align_status: song.align_status ?? "idle",
     align_error: song.align_error ?? null,
+    chord_data_path: song.chord_data_path ?? null,
+    chord_status: song.chord_status ?? "idle",
+    chord_error: song.chord_error ?? null,
     created_at: song.created_at,
     updated_at: song.updated_at,
   };

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Sidebar } from "../components/sidebar";
 import { useSongStore } from "../stores/song-store";
-import type { PitchStatus, AlignStatus } from "../types/song";
+import type { PitchStatus, AlignStatus, ChordStatus } from "../types/song";
 import { useTaskQueueStore } from "../stores/task-queue-store";
 
 export function SongSetupPage() {
@@ -46,6 +46,12 @@ export function SongSetupPage() {
 
   const stemQueued = queueTasks.some((t) => t.songId === song.id && t.type === "stems");
   const pitchQueued = queueTasks.some((t) => t.songId === song.id && t.type === "pitch");
+
+  const chordStatus: ChordStatus = song.chord_status ?? "idle";
+  const chordDone = chordStatus === "done";
+  const chordProcessing = chordStatus === "processing";
+  const chordError = chordStatus === "error";
+  const chordQueued = queueTasks.some((t) => t.songId === song.id && t.type === "chords");
 
   const lines = rawLines ?? [];
   const translationLang = song.translation_language;
@@ -391,6 +397,98 @@ export function SongSetupPage() {
                         <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
                       </svg>
                       {pitchQueued ? "Queued" : pitchError ? "Retry" : "Analyze"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Chord Analysis Section */}
+            {stemsDone && (
+              <div className="mb-6">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-[10.5px] font-medium uppercase tracking-[0.09em] text-[var(--text-muted)] flex-shrink-0">
+                    Chord analysis
+                  </span>
+                  <div className="flex-1 h-px bg-[var(--border-subtle)]" />
+                </div>
+
+                {chordProcessing ? (
+                  <div className="flex items-center gap-3.5 p-4 bg-[#FFFBEB] border border-[#FDE68A] rounded-[var(--radius)]">
+                    <div className="w-10 h-10 rounded-[9px] bg-[#FEF3C7] text-[#D97706] flex items-center justify-center flex-shrink-0">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="animate-spin">
+                        <circle cx="12" cy="12" r="10" />
+                        <polyline points="12 6 12 12 16 14" />
+                      </svg>
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-[13px] font-medium text-[#92400E] mb-[6px]">Analyzing chords...</div>
+                      <div className="h-1 bg-[#FDE68A] rounded-sm overflow-hidden">
+                        <div className="h-full w-[65%] bg-gradient-to-r from-[#F59E0B] to-[#D97706] rounded-sm animate-pulse" />
+                      </div>
+                      <div className="text-[11px] text-[#B45309] mt-1.5">Running on the instrumental track.</div>
+                    </div>
+                  </div>
+                ) : chordDone ? (
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex items-center gap-3.5 p-4 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)] hover:shadow-[0_2px_12px_rgba(0,0,0,0.05)] transition-shadow">
+                      <div className="w-10 h-10 rounded-[9px] bg-[#FFEDD5] text-[#C2410C] flex items-center justify-center flex-shrink-0">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M9 18V5l12-2v13" />
+                        <circle cx="6" cy="18" r="3" />
+                        <circle cx="18" cy="16" r="3" />
+                        </svg>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[13.5px] font-medium flex items-center gap-[6px]">
+                          <span className="w-[6px] h-[6px] rounded-full bg-[#22C55E] flex-shrink-0" />
+                          chords.json
+                        </div>
+                        <div className="text-[11.5px] text-[var(--text-muted)]">Chord data for the play-along view</div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => enqueue(song.id, song.title, "chords")}
+                      disabled={chordQueued || chordProcessing}
+                      className="mt-1 self-start px-3 py-[5px] rounded-[6px] border-[1.5px] border-[var(--border)] bg-transparent text-[12px] font-medium text-[var(--text-secondary)] hover:border-[#888] hover:text-[var(--text-primary)] transition-all flex items-center gap-1 disabled:opacity-50"
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="23 4 23 10 17 10" />
+                        <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
+                      </svg>
+                      {chordQueued ? "Queued" : "Re-analyze"}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3.5 p-4 bg-[var(--bg)] border border-dashed border-[var(--border)] rounded-[var(--radius)]">
+                    <div className="w-10 h-10 rounded-[9px] bg-[#FFEDD5] text-[#C2410C] flex items-center justify-center flex-shrink-0">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M9 18V5l12-2v13" />
+                        <circle cx="6" cy="18" r="3" />
+                        <circle cx="18" cy="16" r="3" />
+                      </svg>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[13.5px] font-medium text-[var(--text-muted)]">Chord Data</div>
+                      <div className="text-[11.5px] text-[var(--text-muted)]">
+                        {chordError ? (
+                          <span className="text-red-500">{song.chord_error}</span>
+                        ) : (
+                          "Analyze the instrumental to get chords for playing along"
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => enqueue(song.id, song.title, "chords")}
+                      disabled={chordQueued || chordProcessing}
+                      className="px-3 py-[5px] rounded-[6px] bg-[var(--accent)] text-white border-[1.5px] border-[var(--accent)] text-[12px] font-medium hover:opacity-85 transition-opacity flex items-center gap-1 flex-shrink-0 disabled:opacity-50"
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M9 18V5l12-2v13" />
+                        <circle cx="6" cy="18" r="3" />
+                        <circle cx="18" cy="16" r="3" />
+                      </svg>
+                      {chordQueued ? "Queued" : chordError ? "Retry" : "Analyze"}
                     </button>
                   </div>
                 )}

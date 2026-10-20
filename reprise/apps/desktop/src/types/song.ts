@@ -4,6 +4,7 @@ export type {
   StemStatus,
   PitchStatus,
   AlignStatus,
+  ChordStatus,
   LineStatus,
   Song,
   Annotation,

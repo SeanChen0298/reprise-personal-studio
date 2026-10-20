@@ -2,8 +2,8 @@
  * Background hook: processes the task queue sequentially — one download,
  * Demucs, or torchcrepe job at a time to prevent saturating CPU/RAM.
  *
- * After a successful stem-separation, automatically enqueues pitch analysis
- * for the same song.
+ * After a successful stem-separation, automatically enqueues pitch and chord
+ * analysis for the same song.
  */
 
 import { useEffect, useRef } from "react";
@@ -19,6 +19,7 @@ export function useTaskQueueProcessor() {
   const separateSongStems = useSongStore((s) => s.separateSongStems);
   const analyzeSongPitch = useSongStore((s) => s.analyzeSongPitch);
   const alignSongLyrics = useSongStore((s) => s.alignSongLyrics);
+  const analyzeSongChords = useSongStore((s) => s.analyzeSongChords);
 
   useEffect(() => {
     const firstPending = tasks.find((t) => t.status === "pending");
@@ -33,17 +34,21 @@ export function useTaskQueueProcessor() {
       firstPending.type === "download" ? downloadSongAudio(firstPending.songId) :
       firstPending.type === "stems"    ? separateSongStems(firstPending.songId) :
       firstPending.type === "pitch"    ? analyzeSongPitch(firstPending.songId)  :
+      firstPending.type === "chords"   ? analyzeSongChords(firstPending.songId) :
       /* align */                        alignSongLyrics(firstPending.songId, firstPending.options?.model);
 
     work
       .then(() => {
-        // After stems succeed, auto-enqueue pitch if not already done/queued
+        // After stems succeed, auto-enqueue pitch and chords if not already done/queued
         if (firstPending.type === "stems") {
           const song = useSongStore
             .getState()
             .songs.find((s) => s.id === firstPending.songId);
           if (song?.stem_status === "done" && (!song.pitch_status || song.pitch_status === "idle")) {
             enqueue(firstPending.songId, firstPending.songTitle, "pitch");
+          }
+          if (song?.stem_status === "done" && (!song.chord_status || song.chord_status === "idle")) {
+            enqueue(firstPending.songId, firstPending.songTitle, "chords");
           }
         }
       })

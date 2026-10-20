@@ -2,6 +2,7 @@ export type DownloadStatus = "idle" | "downloading" | "done" | "error";
 export type StemStatus = "idle" | "processing" | "done" | "error";
 export type PitchStatus = "idle" | "processing" | "done" | "error";
 export type AlignStatus = "idle" | "processing" | "done" | "error";
+export type ChordStatus = "idle" | "processing" | "done" | "error";
 export type LineStatus = "new" | "listened" | "annotated" | "practiced" | "recorded" | "best_take_set";
 
 export interface Song {
@@ -32,6 +33,9 @@ export interface Song {
   pitch_error?: string;
   align_status?: AlignStatus;
   align_error?: string;
+  chord_data_path?: string;
+  chord_status?: ChordStatus;
+  chord_error?: string;
   // Google Drive file IDs (set by desktop after upload, read by mobile for download)
   drive_audio_file_id?: string;
   drive_vocals_file_id?: string;
