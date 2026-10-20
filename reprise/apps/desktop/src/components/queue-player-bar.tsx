@@ -3,6 +3,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { useQueueStore, useCurrentQueueSong } from "../stores/queue-store";
 import { usePreferencesStore } from "../stores/preferences-store";
 import { useLocation } from "react-router-dom";
+import type { Song } from "../types/song";
 
 function formatSecs(secs: number): string {
   if (!isFinite(secs) || secs < 0) return "0:00";
@@ -11,10 +12,16 @@ function formatSecs(secs: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export function QueuePlayerBar() {
+/**
+ * Always-visible library player. With songs selected (queued) it plays only
+ * those; with nothing selected, pressing play plays every song in `allSongs`.
+ */
+export function QueuePlayerBar({ allSongs }: { allSongs: Song[] }) {
   const song = useCurrentQueueSong();
-  const { queue, currentIndex, isPlaying, setIsPlaying, next, prev, clearQueue, setCurrentIndex, removeFromQueue, reorderQueue } =
+  const { queue, currentIndex, isPlaying, isPlayAll, setIsPlaying, next, prev, clearQueue, setCurrentIndex, removeFromQueue, reorderQueue, playAll } =
     useQueueStore();
+  const playableSongs = allSongs.filter((s) => s.audio_path);
+  const isEmpty = queue.length === 0;
   const playbackVolume = usePreferencesStore((s) => s.playbackVolume);
   const setPlaybackVolume = usePreferencesStore((s) => s.setPlaybackVolume);
   const location = useLocation();
@@ -27,7 +34,10 @@ export function QueuePlayerBar() {
   const dragFromRef = useRef<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
-  const visible = queue.length > 0;
+  const handlePlayPause = () => {
+    if (isEmpty) playAll(playableSongs);
+    else setIsPlaying(!isPlaying);
+  };
 
   // Create audio element once
   useEffect(() => {
@@ -88,13 +98,7 @@ export function QueuePlayerBar() {
   };
 
   return (
-    <div
-      className="flex-shrink-0 bg-[var(--surface)] overflow-hidden transition-all duration-300"
-      style={{
-        maxHeight: visible ? 500 : 0,
-        borderTop: visible ? "1px solid var(--border)" : "none",
-      }}
-    >
+    <div className="flex-shrink-0 bg-[var(--surface)] overflow-hidden border-t border-[var(--border)]">
       {/* Queue list panel — slides in above transport */}
       <div
         className="overflow-hidden transition-all duration-300"
@@ -206,8 +210,19 @@ export function QueuePlayerBar() {
 
         {/* Song info */}
         <div className="min-w-0 w-[150px] flex-shrink-0">
-          <div className="text-[12px] font-medium text-[var(--text-primary)] truncate">{song?.title}</div>
-          <div className="text-[10.5px] text-[var(--text-muted)] truncate">{song?.artist}</div>
+          {isEmpty ? (
+            <>
+              <div className="text-[12px] font-medium text-[var(--text-primary)] truncate">All songs</div>
+              <div className="text-[10.5px] text-[var(--text-muted)] truncate">
+                {playableSongs.length > 0 ? `${playableSongs.length} ready to play` : "No downloaded songs"}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-[12px] font-medium text-[var(--text-primary)] truncate">{song?.title}</div>
+              <div className="text-[10.5px] text-[var(--text-muted)] truncate">{song?.artist}</div>
+            </>
+          )}
         </div>
 
         {/* Controls */}
@@ -222,8 +237,10 @@ export function QueuePlayerBar() {
             </svg>
           </button>
           <button
-            onClick={() => setIsPlaying(!isPlaying)}
-            className="w-[32px] h-[32px] rounded-full bg-[var(--theme)] text-white flex items-center justify-center border-none cursor-pointer hover:opacity-85 transition-opacity"
+            onClick={handlePlayPause}
+            disabled={isEmpty && playableSongs.length === 0}
+            title={isEmpty ? "Play all songs" : undefined}
+            className="w-[32px] h-[32px] rounded-full bg-[var(--theme)] text-white flex items-center justify-center border-none cursor-pointer hover:opacity-85 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {isPlaying ? (
               <svg width="9" height="9" viewBox="0 0 24 24" fill="white">
@@ -303,9 +320,10 @@ export function QueuePlayerBar() {
         </div>
 
         {/* Queue toggle + count + clear */}
+        {!isEmpty && (
         <div className="flex items-center gap-1.5 flex-shrink-0">
           <span className="text-[10.5px] text-[var(--text-muted)]">
-            {currentIndex + 1} / {queue.length}
+            {isPlayAll && "All · "}{currentIndex + 1} / {queue.length}
           </span>
           <button
             onClick={() => setQueueOpen((v) => !v)}
@@ -332,6 +350,7 @@ export function QueuePlayerBar() {
             </svg>
           </button>
         </div>
+        )}
       </div>
     </div>
   );

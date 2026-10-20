@@ -1,6 +1,6 @@
 /**
- * Background hook: processes the task queue sequentially — one Demucs or
- * torchcrepe job at a time to prevent saturating CPU/RAM.
+ * Background hook: processes the task queue sequentially — one download,
+ * Demucs, or torchcrepe job at a time to prevent saturating CPU/RAM.
  *
  * After a successful stem-separation, automatically enqueues pitch analysis
  * for the same song.
@@ -15,6 +15,7 @@ export function useTaskQueueProcessor() {
   const processingRef = useRef(false);
 
   // Grab store functions — stable references, safe to omit from deps
+  const downloadSongAudio = useSongStore((s) => s.downloadSongAudio);
   const separateSongStems = useSongStore((s) => s.separateSongStems);
   const analyzeSongPitch = useSongStore((s) => s.analyzeSongPitch);
   const alignSongLyrics = useSongStore((s) => s.alignSongLyrics);
@@ -29,9 +30,10 @@ export function useTaskQueueProcessor() {
     markRunning(firstPending.id);
 
     const work =
-      firstPending.type === "stems"  ? separateSongStems(firstPending.songId) :
-      firstPending.type === "pitch"  ? analyzeSongPitch(firstPending.songId)  :
-      /* align */                      alignSongLyrics(firstPending.songId, firstPending.options?.model);
+      firstPending.type === "download" ? downloadSongAudio(firstPending.songId) :
+      firstPending.type === "stems"    ? separateSongStems(firstPending.songId) :
+      firstPending.type === "pitch"    ? analyzeSongPitch(firstPending.songId)  :
+      /* align */                        alignSongLyrics(firstPending.songId, firstPending.options?.model);
 
     work
       .then(() => {

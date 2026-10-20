@@ -11,6 +11,7 @@ import { alignLyrics } from "../lib/whisperx-align";
 import { localDb } from "../lib/local-db";
 import { readFile } from "@tauri-apps/plugin-fs";
 import MusicTempo from "music-tempo";
+import { useTaskQueueStore } from "./task-queue-store";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -181,13 +182,24 @@ export const useSongStore = create<SongStore>()((set, get) => ({
         .sort((a, b) => b.total - a.total);
       console.log("[loadAllData] DONE", { songs: songRows.length, rawLines: allLineRows.length, totalLines });
       console.table(linesBySongTitled);
+
+      const loadedSongs: Song[] = songRows.map(dbRowToSong);
       set({
-        songs: songRows.map(dbRowToSong),
+        songs: loadedSongs,
         lines,
         recordings,
         sections,
         isLoading: false,
       });
+
+      // Re-enqueue any songs that were mid-download when the app last closed.
+      // useTaskQueueProcessor (mounted at App root) will resume them.
+      const { enqueue } = useTaskQueueStore.getState();
+      for (const song of loadedSongs) {
+        if (song.download_status === "downloading") {
+          enqueue(song.id, song.title, "download");
+        }
+      }
     } catch (err) {
       set({
         loadError: err instanceof Error ? err.message : "Failed to load data",
