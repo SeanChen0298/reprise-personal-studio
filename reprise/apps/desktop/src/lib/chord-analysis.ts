@@ -15,14 +15,47 @@ import { spawnAndWait } from "./audio-download";
 // Types
 // ---------------------------------------------------------------------------
 
+export interface ChordKey {
+  tonic: string;        // e.g. "F#"
+  tonic_pc: number;     // pitch class 0–11 (C = 0)
+  mode: "major" | "minor";
+  name: string;         // e.g. "F# minor"
+  confidence: number;   // 0–1
+}
+
+export interface ChordBar {
+  index: number;
+  start_ms: number;
+  end_ms: number;
+  first_beat: number;   // index into beats_ms
+  beats: number;
+  pickup: boolean;      // partial bar before the first downbeat
+}
+
+export interface ChordSegment {
+  start_ms: number;
+  end_ms: number;
+  beats: number;
+  label: string;        // e.g. "F#m7", or "N" for no chord
+  root: string | null;
+  quality: "maj" | "m" | "7" | "m7" | "N";
+  confidence: number;   // 0–1
+}
+
 /** Shape of chords.json. Fields are added as later analysis stages land. */
 export interface ChordAnalysis {
   version: number;
   status: "ok" | "error";
   analyzed_at: string;
   source_audio: string;
-  duration_ms?: number;
   message?: string;
+  duration_ms?: number;
+  tempo_bpm?: number;
+  key?: ChordKey;
+  time_signature?: { beats_per_bar: number; beat_unit: number };
+  beats_ms?: number[];
+  bars?: ChordBar[];
+  chords?: ChordSegment[];
 }
 
 // ---------------------------------------------------------------------------
@@ -57,8 +90,8 @@ export async function analyzeChords(
   }
 
   if (result.code !== 0) {
-    if (result.stderr.includes("No module named 'soundfile'")) {
-      throw new Error("soundfile is not installed. Run: pip install soundfile");
+    if (result.stderr.includes("No module named 'librosa'")) {
+      throw new Error("librosa is not installed. Run: pip install librosa");
     }
     const lastLine = result.stderr.split("\n").filter(Boolean).pop();
     throw new Error(lastLine || "chord_analyze failed");
