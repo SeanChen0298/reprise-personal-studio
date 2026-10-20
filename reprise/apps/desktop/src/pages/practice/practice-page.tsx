@@ -9,6 +9,7 @@ import { LineNavigator } from "./line-navigator";
 import { PracticeTopbar } from "./practice-topbar";
 import { PracticeCenter } from "./practice-center";
 import { RecordingsBar } from "./recordings-bar";
+import { PlayAlongView } from "./play-along-view";
 
 export function PracticePage() {
   const { id } = useParams<{ id: string }>();
@@ -36,6 +37,7 @@ export function PracticePage() {
 
   const [activeTrack, setActiveTrack] = useState<"vocals" | "instrumental" | "reference">("reference");
   const [isEditing, setIsEditing] = useState(false);
+  const [view, setView] = useState<"practice" | "playAlong">("practice");
   const [autoPlayOnClick, setAutoPlayOnClick] = useState(true);
   const [recordingSection, setRecordingSection] = useState<Section | null>(null);
   const [activeSection, setActiveSection] = useState<Section | null>(null);
@@ -244,6 +246,36 @@ export function PracticePage() {
           onVolumeChange={player.setVolume}
           onNavigateRecordings={() => navigate(`/song/${id}/recordings`)}
         />
+        {/* View switch: vocal practice vs. guitar play-along */}
+        <div className="flex items-center justify-end gap-1 px-6 pt-2 -mb-1">
+          {([
+            ["practice", "Practice"],
+            ["playAlong", "Play along"],
+          ] as const).map(([value, label]) => (
+            <button
+              key={value}
+              onClick={() => setView(value)}
+              className={`px-3 py-[4px] rounded-[6px] text-[12px] font-medium border-[1.5px] transition-all cursor-pointer ${
+                view === value
+                  ? "border-[var(--accent)] text-[var(--accent)] bg-[var(--surface)]"
+                  : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)] bg-transparent"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {view === "playAlong" && (
+          <PlayAlongView
+            song={song}
+            lines={lines}
+            translationLines={translationLines}
+            audioRef={player.audioRef}
+            isPlaying={player.isPlaying}
+          />
+        )}
+        {/* Kept mounted while hidden so recording/edit state survives a view switch */}
+        <div className={view === "practice" ? "contents" : "hidden"}>
         <PracticeCenter
           lines={lines}
           translationLines={translationLines}
@@ -262,6 +294,7 @@ export function PracticePage() {
           recordThrough={recordThrough}
           onEditModeChange={setIsEditing}
         />
+        </div>
         <RecordingsBar
           songId={id!}
           activeLineId={lines[player.currentLineIndex]?.id}
