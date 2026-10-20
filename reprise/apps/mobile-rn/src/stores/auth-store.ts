@@ -19,9 +19,16 @@ export const useAuthStore = create<AuthStore>((set) => ({
 
   initialize() {
     // Get the initial session (resolves from AsyncStorage)
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      set({ session, user: session?.user ?? null, loading: false });
-    });
+    supabase.auth.getSession()
+      .then(({ data: { session } }) => {
+        set({ session, user: session?.user ?? null, loading: false });
+      })
+      .catch((e) => {
+        // e.g. a stale refresh token — fall back to the sign-in screen rather
+        // than leaving `loading` true forever.
+        console.warn("[auth-store] getSession failed", e);
+        set({ session: null, user: null, loading: false });
+      });
 
     // Subscribe to future changes (login, logout, token refresh)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(

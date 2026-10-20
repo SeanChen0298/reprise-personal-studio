@@ -1,8 +1,8 @@
 import { useEffect } from "react";
-import { Stack } from "expo-router";
+import { Stack, type ErrorBoundaryProps } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import * as Linking from "expo-linking";
-import { Alert, View, ActivityIndicator } from "react-native";
+import { Alert, View, ActivityIndicator, Text, ScrollView, Pressable } from "react-native";
 import { useAuthStore } from "../src/stores/auth-store";
 import { useSongFilesStore } from "../src/stores/song-files-store";
 import { usePreferencesStore } from "../src/stores/preferences-store";
@@ -10,6 +10,26 @@ import type { DriveToken } from "../src/lib/google-drive-download";
 import { AuthScreen } from "../src/screens/auth-screen";
 
 SplashScreen.preventAutoHideAsync();
+
+// Never let the native splash cover the app indefinitely if startup stalls.
+setTimeout(() => { SplashScreen.hideAsync().catch(() => {}); }, 8000);
+
+/** Rendered by expo-router when any screen throws — shows the error instead of a white screen. */
+export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
+  useEffect(() => { SplashScreen.hideAsync().catch(() => {}); }, []);
+  return (
+    <ScrollView contentContainerStyle={{ flexGrow: 1, padding: 24, paddingTop: 64, backgroundColor: "#111" }}>
+      <Text style={{ color: "#F87171", fontSize: 18, fontWeight: "600", marginBottom: 12 }}>
+        Something went wrong
+      </Text>
+      <Text selectable style={{ color: "#eee", fontSize: 13, marginBottom: 12 }}>{error.message}</Text>
+      <Text selectable style={{ color: "#888", fontSize: 11, fontFamily: "monospace" }}>{error.stack}</Text>
+      <Pressable onPress={retry} style={{ marginTop: 24, padding: 12, borderRadius: 8, backgroundColor: "#3B82F6", alignItems: "center" }}>
+        <Text style={{ color: "#fff", fontWeight: "600" }}>Retry</Text>
+      </Pressable>
+    </ScrollView>
+  );
+}
 
 export default function RootLayout() {
   const initialize = useAuthStore((s) => s.initialize);

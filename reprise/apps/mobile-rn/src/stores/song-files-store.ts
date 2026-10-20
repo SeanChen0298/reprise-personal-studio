@@ -64,11 +64,27 @@ export const useSongFilesStore = create<SongFilesState>((set, get) => ({
       AsyncStorage.getItem(FILES_KEY),
       AsyncStorage.getItem(TOKEN_KEY),
       AsyncStorage.getItem(SETTINGS_KEY),
-    ]);
+    ]).catch((e) => {
+      console.warn("[song-files-store] AsyncStorage read failed", e);
+      return [null, null, null] as const;
+    });
 
-    const localFiles   = filesRaw    ? (JSON.parse(filesRaw)    as Record<string, SongLocalFiles>) : {};
-    const driveToken   = tokenRaw    ? (JSON.parse(tokenRaw)    as DriveToken)                     : null;
-    const settings     = settingsRaw ? (JSON.parse(settingsRaw) as { autoDownload?: boolean; autoDownloadStems?: boolean }) : {};
+    // A corrupt value must never block startup (hydrated would stay false and the
+    // app would sit on the loading screen forever) — drop the bad key instead.
+    function parseOrReset<T>(raw: string | null, key: string, fallback: T): T {
+      if (!raw) return fallback;
+      try {
+        return JSON.parse(raw) as T;
+      } catch (e) {
+        console.warn(`[song-files-store] corrupt ${key}, resetting`, e);
+        AsyncStorage.removeItem(key).catch(() => {});
+        return fallback;
+      }
+    }
+
+    const localFiles   = parseOrReset<Record<string, SongLocalFiles>>(filesRaw, FILES_KEY, {});
+    const driveToken   = parseOrReset<DriveToken | null>(tokenRaw, TOKEN_KEY, null);
+    const settings     = parseOrReset<{ autoDownload?: boolean; autoDownloadStems?: boolean }>(settingsRaw, SETTINGS_KEY, {});
 
     set({ localFiles, driveToken, hydrated: true, autoDownload: settings.autoDownload ?? false, autoDownloadStems: settings.autoDownloadStems ?? false });
   },
