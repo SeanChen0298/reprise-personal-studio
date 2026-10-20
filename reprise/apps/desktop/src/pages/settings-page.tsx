@@ -4,6 +4,7 @@ import { exists } from "@tauri-apps/plugin-fs";
 import { open } from "@tauri-apps/plugin-shell";
 import { Sidebar } from "../components/sidebar";
 import { checkYtDlpInstalled, checkPythonInstalled, checkFfmpegInstalled, checkDemucsInstalled, COOKIES_PATH } from "../lib/audio-download";
+import { isYtDlpStale, updateYtDlp, ytDlpAgeInDays } from "../lib/yt-dlp-update";
 import { isDesktopPlatform } from "../lib/platform";
 import { checkTorchcrepeInstalled } from "../lib/audio-analysis";
 import { useHighlightStore } from "../lib/highlight-config";
@@ -203,6 +204,8 @@ export function SettingsPage() {
   const [demucsStatus, setDemucsStatus] = useState<string | null | undefined>(undefined);
   const [torchcrepeStatus, setTorchcrepeStatus] = useState<string | null | undefined>(undefined);
   const [checking, setChecking] = useState(false);
+  const [updatingYtdlp, setUpdatingYtdlp] = useState(false);
+  const [ytdlpUpdateMsg, setYtdlpUpdateMsg] = useState<string | null>(null);
 
   const runChecks = useCallback(async () => {
     setChecking(true);
@@ -229,6 +232,22 @@ export function SettingsPage() {
       setDemucsStatus(null);
     } finally {
       setChecking(false);
+    }
+  }, []);
+
+  /** Run yt-dlp's self-updater. YouTube breaks old builds, so this is the fix
+   *  for "HTTP Error 403" without reinstalling the app. */
+  const handleUpdateYtDlp = useCallback(async () => {
+    setUpdatingYtdlp(true);
+    setYtdlpUpdateMsg(null);
+    try {
+      const result = await updateYtDlp();
+      setYtdlpUpdateMsg(result.message);
+      if (result.versionAfter) setYtdlpVersion(result.versionAfter);
+    } catch (err) {
+      setYtdlpUpdateMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUpdatingYtdlp(false);
     }
   }, []);
 
@@ -840,12 +859,22 @@ export function SettingsPage() {
                       <div className="flex-1">
                         <div className="text-[13px] font-medium mb-0.5">yt-dlp</div>
                         <div className="text-[11.5px] text-[var(--text-muted)] leading-[1.5]">
-                          Required for downloading audio from YouTube
+                          Required for downloading audio from YouTube. Updates itself automatically
+                          when it gets old enough for YouTube to reject it.
                         </div>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
                         {ytdlpVersion === undefined ? (
                           <span className="text-[12px] text-[var(--text-muted)]">Not checked</span>
+                        ) : ytdlpVersion && isYtDlpStale(ytdlpVersion) ? (
+                          <span className="flex items-center gap-1.5 text-[12px] font-medium text-[#B45309]">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                              <line x1="12" y1="9" x2="12" y2="13" />
+                              <line x1="12" y1="17" x2="12.01" y2="17" />
+                            </svg>
+                            v{ytdlpVersion} · {ytDlpAgeInDays(ytdlpVersion)} days old
+                          </span>
                         ) : ytdlpVersion ? (
                           <span className="flex items-center gap-1.5 text-[12px] font-medium text-[#15803D]">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -910,6 +939,17 @@ export function SettingsPage() {
                       {checking ? "Checking..." : "Check status"}
                     </button>
                     <button
+                      onClick={handleUpdateYtDlp}
+                      disabled={updatingYtdlp}
+                      title="Fixes HTTP 403 errors caused by an outdated yt-dlp"
+                      className="flex items-center gap-[5px] px-4 py-2 rounded-[7px] border-[1.5px] border-[var(--border)] bg-transparent text-[var(--text-secondary)] text-[13px] font-medium cursor-pointer hover:border-[#888] hover:text-[var(--text-primary)] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={updatingYtdlp ? "animate-spin" : ""}>
+                        <path d="M21 12a9 9 0 11-6.219-8.56" />
+                      </svg>
+                      {updatingYtdlp ? "Updating..." : "Update yt-dlp"}
+                    </button>
+                    <button
                       onClick={() => open("file:///C:/Reprise")}
                       className="flex items-center gap-[5px] px-4 py-2 rounded-[7px] border-[1.5px] border-[var(--border)] bg-transparent text-[var(--text-secondary)] text-[13px] font-medium cursor-pointer hover:border-[#888] hover:text-[var(--text-primary)] transition-all"
                     >
@@ -919,6 +959,10 @@ export function SettingsPage() {
                       Open folder
                     </button>
                   </div>
+
+                  {ytdlpUpdateMsg && (
+                    <p className="mt-2.5 text-[11.5px] text-[var(--text-muted)] leading-relaxed">{ytdlpUpdateMsg}</p>
+                  )}
                 </div>
 
                 {/* Cookie setup guide */}

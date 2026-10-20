@@ -1,6 +1,20 @@
 import { Command } from "@tauri-apps/plugin-shell";
 import { mkdir, exists } from "@tauri-apps/plugin-fs";
-import { invoke } from "@tauri-apps/api/core";
+import {
+  COOKIES_PATH,
+  YT_DLP_BASE,
+  makeYtDlpCommand,
+  spawnAndWait,
+} from "./yt-dlp-runtime";
+import {
+  YT_DLP_STALE_MESSAGE,
+  ensureFreshYtDlp,
+  isStaleYtDlpError,
+  recoverFromStaleYtDlp,
+} from "./yt-dlp-update";
+
+// Re-exported so existing importers keep a single entry point for yt-dlp helpers.
+export { COOKIES_PATH, spawnAndWait };
 
 const REPRISE_ROOT = "C:/Reprise";
 
@@ -19,50 +33,6 @@ function isBotDetectionError(stderr: string): boolean {
   );
 }
 
-interface SpawnResult {
-  code: number | null;
-  stdout: string;
-  stderr: string;
-}
-
-/** Spawn a command and stream stdout/stderr to console in real-time */
-export function spawnAndWait(
-  command: ReturnType<typeof Command.create>,
-  tag: string,
-  onProgress?: (line: string) => void
-): Promise<SpawnResult> {
-  return new Promise((resolve, reject) => {
-    let stdout = "";
-    let stderr = "";
-
-    command.stdout.on("data", (line: string) => {
-      console.log(`${tag} stdout:`, line);
-      stdout += line + "\n";
-      onProgress?.(line);
-    });
-    command.stderr.on("data", (line: string) => {
-      console.warn(`${tag} stderr:`, line);
-      stderr += line + "\n";
-    });
-    command.on("close", (data: { code: number | null }) => {
-      console.log(`${tag} exited with code:`, data.code);
-      resolve({ code: data.code, stdout, stderr });
-    });
-    command.on("error", (err: string) => {
-      // Tauri emits "error" for non-UTF-8 output (e.g. Japanese filenames).
-      // Log but don't reject — wait for the "close" event to determine success.
-      console.warn(`${tag} error (non-fatal):`, err);
-      stderr += `[encoding error] ${err}\n`;
-    });
-    command.spawn().then(() => {
-      console.log(`${tag} spawned, waiting...`);
-    }).catch((err: unknown) => {
-      console.error(`${tag} spawn failed:`, err);
-      reject(err);
-    });
-  });
-}
-
 /** Strip playlist/index params from a YouTube URL to ensure single-video download */
 function sanitizeYouTubeUrl(url: string): string {
   try {
@@ -74,43 +44,6 @@ function sanitizeYouTubeUrl(url: string): string {
   } catch {
     return url;
   }
-}
-
-export const COOKIES_PATH = `${REPRISE_ROOT}/cookies.txt`;
-
-/** Common yt-dlp args: single video, Deno JS runtime (bundled sidecar), cookies for YouTube auth */
-const YT_DLP_BASE = [
-  "--no-playlist",
-  "--js-runtimes", "deno",
-  "--cookies", COOKIES_PATH,
-];
-
-// Cache so we only invoke the Rust command once per session.
-let _cachedSidecarPathEnv: string | null = null;
-
-/**
- * In production, returns env vars that inject the sidecar binaries directory into PATH
- * so yt-dlp can discover the bundled deno.exe at runtime.
- * In dev, returns an empty object (system yt-dlp is used; Deno must be on system PATH).
- */
-async function getYtDlpEnv(): Promise<Record<string, string>> {
-  if (import.meta.env.DEV) return {};
-  if (_cachedSidecarPathEnv === null) {
-    _cachedSidecarPathEnv = await invoke<string>("get_sidecar_path_env");
-  }
-  return { PATH: _cachedSidecarPathEnv, DENO_NO_UPDATE_CHECK: "1" };
-}
-
-/**
- * Creates a yt-dlp Command with the correct invocation for dev vs prod,
- * and with PATH pre-loaded so yt-dlp can find the bundled deno sidecar.
- */
-async function makeYtDlpCommand(args: string[]): Promise<ReturnType<typeof Command.create>> {
-  if (import.meta.env.DEV) {
-    return Command.create("yt-dlp", args);
-  }
-  const env = await getYtDlpEnv();
-  return Command.sidecar("binaries/yt-dlp", args, { env });
 }
 
 /** Remove characters invalid for Windows folder names and non-ASCII chars
@@ -201,6 +134,10 @@ export async function downloadAudio(
   await ensureSongFolder(songFolder);
   console.log("[downloadAudio] Song folder ensured");
 
+  // A stale yt-dlp gets rejected by YouTube (HTTP 403). Refresh it before we
+  // spend time on the download rather than failing halfway through.
+  await ensureFreshYtDlp();
+
   const audioOutput = `${songFolder}/audio.%(ext)s`;
 
   // First pass: download subtitles only
@@ -247,17 +184,31 @@ export async function downloadAudio(
   ];
   console.log("[downloadAudio] Audio pass args:", audioArgs);
 
-  let audioCommand;
-  try {
-    audioCommand = await makeYtDlpCommand(audioArgs);
-    console.log("[downloadAudio] Command created for audio");
-  } catch (err) {
-    console.error("[downloadAudio] makeYtDlpCommand FAILED for audio:", err);
-    throw err;
-  }
+  const runAudioPass = async () => {
+    let audioCommand;
+    try {
+      audioCommand = await makeYtDlpCommand(audioArgs);
+      console.log("[downloadAudio] Command created for audio");
+    } catch (err) {
+      console.error("[downloadAudio] makeYtDlpCommand FAILED for audio:", err);
+      throw err;
+    }
+    return spawnAndWait(audioCommand, "[downloadAudio][audio]", onProgress);
+  };
 
-  const result = await spawnAndWait(audioCommand, "[downloadAudio][audio]", onProgress);
+  let result = await runAudioPass();
   console.log("[downloadAudio] Audio pass done:", { code: result.code });
+
+  // YouTube breaks old yt-dlp builds every few weeks. If the failure looks like
+  // that, self-update and retry once before surfacing an error to the user.
+  if (result.code !== 0 && !isBotDetectionError(result.stderr)) {
+    const recovery = await recoverFromStaleYtDlp(result.stderr);
+    if (recovery) {
+      console.log("[downloadAudio] Retrying after", recovery.message);
+      result = await runAudioPass();
+      console.log("[downloadAudio] Audio pass retry done:", { code: result.code });
+    }
+  }
 
   if (result.code !== 0) {
     if (result.stderr.includes("is not recognized") || result.stderr.includes("not found")) {
@@ -267,6 +218,9 @@ export async function downloadAudio(
     }
     if (isBotDetectionError(result.stderr)) {
       throw new Error(COOKIES_EXPIRED_MESSAGE);
+    }
+    if (isStaleYtDlpError(result.stderr)) {
+      throw new Error(`${YT_DLP_STALE_MESSAGE}\n\nyt-dlp output:\n${result.stderr}`);
     }
     throw new Error(`yt-dlp failed (exit code ${result.code}): ${result.stderr}`);
   }
@@ -421,6 +375,8 @@ export async function fetchLyricsForLanguage(
   await ensureSongFolder(songFolder);
   console.log("[fetchLyrics] Song folder ensured");
 
+  await ensureFreshYtDlp();
+
   // Clean up existing vtt files first
   try {
     const { readDir, remove } = await import("@tauri-apps/plugin-fs");
@@ -561,6 +517,7 @@ export async function separateStems(
  */
 export async function listSubtitleLanguages(youtubeUrl: string): Promise<string[]> {
   const cleanUrl = sanitizeYouTubeUrl(youtubeUrl);
+  await ensureFreshYtDlp();
   const args = [
     ...YT_DLP_BASE,
     "--list-subs",
