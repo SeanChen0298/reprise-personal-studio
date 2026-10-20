@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "binaries:refresh": "powershell -ExecutionPolicy Bypass -File ../../scripts/download-binaries.ps1 -Refresh",
-    "tauri:build": "tauri build --bundles msi"
+    "tauri:build": "tauri build"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
