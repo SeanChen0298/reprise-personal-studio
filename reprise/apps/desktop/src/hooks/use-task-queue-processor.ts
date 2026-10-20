@@ -51,6 +51,16 @@ export function useTaskQueueProcessor() {
             enqueue(firstPending.songId, firstPending.songTitle, "chords");
           }
         }
+        // Chords may have run before pitch existed; re-run them once pitch
+        // lands so the fingerstyle arrangement (which needs the melody) is built.
+        if (firstPending.type === "pitch") {
+          const song = useSongStore
+            .getState()
+            .songs.find((s) => s.id === firstPending.songId);
+          if (song?.pitch_status === "done" && song.chord_status === "done") {
+            enqueue(firstPending.songId, firstPending.songTitle, "chords");
+          }
+        }
       })
       .finally(() => {
         dequeue(firstPending.id);

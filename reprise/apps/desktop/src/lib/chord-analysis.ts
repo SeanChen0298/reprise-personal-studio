@@ -85,7 +85,36 @@ export interface ChordAnalysis {
   chords?: ChordSegment[];
   strumming?: StrummingSheet;
   capo?: CapoSuggestion;
+  fingerstyle?: FingerstyleArrangement;
 }
+
+export interface FingerstyleNote {
+  string: number;   // 1 = high E … 6 = low E
+  fret: number;     // 0 = open
+  midi: number;
+  role: "melody" | "bass" | "fill";
+}
+
+export interface FingerstyleEvent {
+  bar: number;      // index into bars
+  slot: number;     // eighth-note slot within the bar
+  t_ms: number;
+  notes: FingerstyleNote[];
+}
+
+export type FingerstyleArrangement =
+  | {
+      status: "ok";
+      tuning: "standard";
+      melody_shift_semitones: number;
+      slots_per_bar: number;
+      events: FingerstyleEvent[];
+      dropped_notes: number;
+      highest_fret: number;
+      tab_path: string;
+      musicxml_path: string;
+    }
+  | { status: "skipped" | "error"; message: string };
 
 // ---------------------------------------------------------------------------
 // Main function
@@ -93,21 +122,30 @@ export interface ChordAnalysis {
 
 /**
  * Run chord analysis on `instrumentalPath` and write `chords.json` into
- * `songFolder`. Returns the output file path on success; throws on failure.
+ * `songFolder`. When `pitchPath` (the vocals' pitch.csv) is given, a
+ * fingerstyle arrangement is also written next to it. Returns the output
+ * file path on success; throws on failure.
  */
 export async function analyzeChords(
   instrumentalPath: string,
   songFolder: string,
+  pitchPath?: string,
+  title?: string,
 ): Promise<string> {
-  // Resolve bundled Python script (src-tauri/sidecars/chord_analyze.py)
+  // Resolve bundled Python script (src-tauri/sidecars/chord_analyze.py);
+  // it imports fingerstyle_arrange.py from the same folder.
   const scriptPath = await resolveResource("sidecars/chord_analyze.py");
   const outputPath = `${songFolder}/chords.json`;
 
-  const command = Command.create("python", [
+  const args = [
     scriptPath,
     "--audio_path",  instrumentalPath,
     "--output_path", outputPath,
-  ]);
+  ];
+  if (pitchPath) args.push("--pitch_path", pitchPath);
+  if (title) args.push("--title", title);
+
+  const command = Command.create("python", args);
 
   const result = await spawnAndWait(command, "[chords]");
 

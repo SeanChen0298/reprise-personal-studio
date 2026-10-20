@@ -11,7 +11,8 @@
       "identifier": "shell:allow-open",
       "allow": [
         { "url": "https?://.+" },
-        { "url": "file:///C:/Reprise" }
+        { "url": "file:///C:/Reprise" },
+        { "url": "file:///C:/Reprise/**" }
       ]
     },
     {

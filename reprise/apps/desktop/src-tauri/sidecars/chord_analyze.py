@@ -30,7 +30,7 @@ import sys
 from collections import Counter
 from datetime import datetime, timezone
 
-OUTPUT_VERSION = 3
+OUTPUT_VERSION = 4
 
 SR = 22050
 HOP = 512
@@ -460,20 +460,36 @@ def analyze(audio_path: str) -> dict:
         "chords": chords,
         "strumming": strumming,
         "capo": capo,
-        # Kept for later stages (strumming / fingerstyle) — not written to JSON.
-        "_internal": {
-            "y_perc": y_perc,
-            "sr": sr,
-            "beat_times": beat_times,
-            "meter": meter,
-        },
     }
+
+
+def add_fingerstyle(result: dict, pitch_path, output_path: str, title: str) -> None:
+    """Stage 6: arrange for solo guitar when the vocal pitch track exists.
+
+    A failure here never fails the chord analysis — it is reported inside
+    result["fingerstyle"] instead.
+    """
+    if not pitch_path:
+        result["fingerstyle"] = {"status": "skipped", "message": "Pitch analysis has not been run yet"}
+        return
+    if not os.path.isfile(pitch_path):
+        result["fingerstyle"] = {"status": "skipped", "message": f"Pitch data not found: {pitch_path}"}
+        return
+    try:
+        from fingerstyle_arrange import arrange
+
+        out_dir = os.path.dirname(os.path.abspath(output_path))
+        result["fingerstyle"] = arrange(pitch_path, result, out_dir, title)
+    except Exception as err:
+        result["fingerstyle"] = {"status": "error", "message": f"{type(err).__name__}: {err}"}
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Reprise chord analysis")
     parser.add_argument("--audio_path", required=True, help="Instrumental stem (no_vocals.wav)")
     parser.add_argument("--output_path", required=True, help="Where to write chords.json")
+    parser.add_argument("--pitch_path", help="Vocal pitch.csv from torchcrepe (enables fingerstyle)")
+    parser.add_argument("--title", default="", help="Song title for the exported tab")
     args = parser.parse_args()
 
     base = {
@@ -486,11 +502,13 @@ def main() -> int:
         if not os.path.isfile(args.audio_path):
             raise FileNotFoundError(f"Audio file not found: {args.audio_path}")
         result = analyze(args.audio_path)
-        result.pop("_internal", None)
+        add_fingerstyle(result, args.pitch_path, args.output_path, args.title or "Reprise arrangement")
         write_output(args.output_path, {**base, "status": "ok", **result})
+        fs = result["fingerstyle"]
         print(
             f"[chord_analyze] done: key={result['key']['name']} tempo={result['tempo_bpm']} "
-            f"meter={result['time_signature']['beats_per_bar']} chords={len(result['chords'])}"
+            f"meter={result['time_signature']['beats_per_bar']} chords={len(result['chords'])} "
+            f"fingerstyle={fs['status']}" + (f" ({fs.get('message')})" if fs["status"] != "ok" else "")
         )
         return 0
     except Exception as err:  # report every failure through the output file

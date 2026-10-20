@@ -410,7 +410,14 @@ export const useSongStore = create<SongStore>()((set, get) => ({
     await get().updateSong(id, { chord_status: "processing", chord_error: undefined });
 
     try {
-      const chordDataPath = await analyzeChords(song.instrumental_path, song.audio_folder);
+      // With pitch data available the sidecar also writes a fingerstyle arrangement.
+      const pitchPath = song.pitch_status === "done" ? song.pitch_data_path : undefined;
+      const chordDataPath = await analyzeChords(
+        song.instrumental_path,
+        song.audio_folder,
+        pitchPath,
+        song.artist ? `${song.title} — ${song.artist}` : song.title,
+      );
       await get().updateSong(id, { chord_status: "done", chord_data_path: chordDataPath });
     } catch (err) {
       await get().updateSong(id, {

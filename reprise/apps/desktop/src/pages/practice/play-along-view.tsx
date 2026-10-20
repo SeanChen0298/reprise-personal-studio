@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { open } from "@tauri-apps/plugin-shell";
 import type { Line, Song } from "../../types/song";
-import type { ChordAnalysis, ChordBar, ChordSegment, StrumSection } from "../../lib/chord-analysis";
+import type {
+  ChordAnalysis, ChordBar, ChordSegment, FingerstyleEvent, StrumSection,
+} from "../../lib/chord-analysis";
 import { useChordData } from "../../hooks/use-chord-data";
 import { useTaskQueueStore } from "../../stores/task-queue-store";
 
@@ -189,6 +192,133 @@ function BarsPane({
 }
 
 // ---------------------------------------------------------------------------
+// Fingerstyle pane — tab per bar
+// ---------------------------------------------------------------------------
+
+const STRING_LABELS = ["e", "B", "G", "D", "A", "E"];
+
+function openFile(path: string) {
+  open(encodeURI(`file:///${path.replace(/^\/+/, "")}`)).catch((err) =>
+    console.error("[PlayAlong] could not open file:", err),
+  );
+}
+
+function FingerstylePane({
+  analysis, playhead, audioRef, isPlaying,
+}: {
+  analysis: ChordAnalysis;
+  playhead: Playhead;
+  audioRef: React.RefObject<HTMLAudioElement | null>;
+  isPlaying: boolean;
+}) {
+  const fs = analysis.fingerstyle;
+  const containerRef = useRef<HTMLDivElement>(null);
+  const bars = analysis.bars ?? [];
+  const chords = analysis.chords ?? [];
+
+  const eventsByBar = useMemo(() => {
+    const map = new Map<number, Map<number, FingerstyleEvent>>();
+    if (fs?.status === "ok") {
+      for (const ev of fs.events) {
+        if (!map.has(ev.bar)) map.set(ev.bar, new Map());
+        map.get(ev.bar)!.set(ev.slot, ev);
+      }
+    }
+    return map;
+  }, [fs]);
+
+  useEffect(() => {
+    if (!isPlaying || playhead.bar < 0) return;
+    const el = containerRef.current?.querySelector<HTMLElement>(`[data-tab-bar="${playhead.bar}"]`);
+    el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [playhead.bar, isPlaying]);
+
+  if (!fs || fs.status !== "ok") {
+    return (
+      <div className="text-[12.5px] text-[var(--text-muted)] leading-relaxed">
+        {fs?.status === "error" ? (
+          <span className="text-red-500">Fingerstyle arrangement failed: {fs.message}</span>
+        ) : (
+          <>No fingerstyle arrangement yet. It needs the vocal pitch analysis (Audio Setup → Pitch analysis);
+          chords are re-analysed automatically once pitch finishes.</>
+        )}
+      </div>
+    );
+  }
+
+  const slots = fs.slots_per_bar;
+  const arrangedBars = bars.filter((b) => !b.pickup && b.beats * 2 === slots);
+
+  return (
+    <div ref={containerRef} className="flex flex-col gap-3">
+      <div className="flex items-center gap-2 flex-wrap text-[11.5px] text-[var(--text-muted)]">
+        <span>Standard tuning · melody from the vocals, bass from the chord roots · up to fret {fs.highest_fret}</span>
+        <button
+          onClick={() => openFile(fs.tab_path)}
+          className="ml-auto px-2.5 py-[3px] rounded-[6px] border-[1.5px] border-[var(--border)] bg-transparent text-[11.5px] font-medium text-[var(--text-secondary)] hover:border-[#888] cursor-pointer"
+        >
+          Open tab (.txt)
+        </button>
+        <button
+          onClick={() => openFile(fs.musicxml_path)}
+          className="px-2.5 py-[3px] rounded-[6px] border-[1.5px] border-[var(--border)] bg-transparent text-[11.5px] font-medium text-[var(--text-secondary)] hover:border-[#888] cursor-pointer"
+          title="Opens in MuseScore or Guitar Pro"
+        >
+          Open MusicXML
+        </button>
+      </div>
+      <div className="grid grid-cols-1 2xl:grid-cols-2 gap-2">
+        {arrangedBars.map((bar) => {
+          const isCurrent = bar.index === playhead.bar;
+          const evs = eventsByBar.get(bar.index);
+          const chord = chords[indexAt(chords, bar.start_ms, (c) => c.start_ms)];
+          return (
+            <button
+              key={bar.index}
+              data-tab-bar={bar.index}
+              onClick={() => seek(audioRef, bar.start_ms)}
+              className={`text-left px-2.5 py-1.5 rounded-[7px] border bg-[var(--surface)] cursor-pointer ${
+                isCurrent ? "border-[var(--accent)] shadow-[0_0_0_1px_var(--accent)]" : "border-[var(--border)] hover:border-[#888]"
+              }`}
+            >
+              <div className="flex items-baseline gap-2 mb-0.5">
+                <span className="text-[9.5px] text-[var(--text-muted)]">{bar.index + 1}</span>
+                {chord && chord.label !== "N" && (
+                  <span className="text-[12px] font-semibold text-[var(--text-secondary)]">{chord.label}</span>
+                )}
+              </div>
+              <div className="font-mono text-[12px] leading-[15px]">
+                {STRING_LABELS.map((name, si) => (
+                  <div key={name} className="flex">
+                    <span className="w-[14px] text-[var(--text-muted)]">{name}</span>
+                    {Array.from({ length: slots }).map((_, slot) => {
+                      const note = evs?.get(slot)?.notes.find((n) => n.string === si + 1);
+                      const active = isCurrent && slot === playhead.slot;
+                      return (
+                        <span
+                          key={slot}
+                          className={`w-[22px] text-center ${active ? "bg-[var(--accent)] text-white rounded-[3px]" : ""} ${
+                            note
+                              ? note.role === "melody" ? "font-bold text-[var(--text-primary)]" : "text-[var(--text-secondary)]"
+                              : "text-[var(--border)]"
+                          }`}
+                        >
+                          {note ? note.fret : "–"}
+                        </span>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Lyrics pane — chords placed above each timed line
 // ---------------------------------------------------------------------------
 
@@ -285,6 +415,7 @@ export function PlayAlongView({ song, lines, translationLines, audioRef, isPlayi
   const enqueue = useTaskQueueStore((s) => s.enqueue);
   const queued = useTaskQueueStore((s) => s.tasks.some((t) => t.songId === song.id && t.type === "chords"));
   const [useCapoShapes, setUseCapoShapes] = useState(true);
+  const [mode, setMode] = useState<"strumming" | "fingerstyle">("strumming");
   const [playhead, setPlayhead] = useState<Playhead>({ bar: -1, chord: -1, slot: -1, line: -1 });
 
   // Track the playhead from the audio element directly, so seeking while
@@ -375,8 +506,23 @@ export function PlayAlongView({ song, lines, translationLines, audioRef, isPlayi
             <span><b className="text-[var(--text-secondary)] font-medium">{analysis.time_signature.beats_per_bar}/{analysis.time_signature.beat_unit}</b></span>
           )}
         </div>
-        {capo && capo.fret > 0 && (
-          <label className="flex items-center gap-2 text-[12px] text-[var(--text-secondary)] cursor-pointer ml-auto">
+        <div className="flex items-center gap-1 ml-auto">
+          {([["strumming", "Strumming"], ["fingerstyle", "Fingerstyle"]] as const).map(([value, label]) => (
+            <button
+              key={value}
+              onClick={() => setMode(value)}
+              className={`px-2.5 py-[3px] rounded-[6px] text-[12px] font-medium border-[1.5px] cursor-pointer transition-all ${
+                mode === value
+                  ? "border-[var(--accent)] text-[var(--accent)] bg-[var(--bg)]"
+                  : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)] bg-transparent"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {capo && capo.fret > 0 && mode === "strumming" && (
+          <label className="flex items-center gap-2 text-[12px] text-[var(--text-secondary)] cursor-pointer">
             <input type="checkbox" checked={useCapoShapes} onChange={(e) => setUseCapoShapes(e.target.checked)} />
             Capo {capo.fret} shapes
             <span className="text-[var(--text-muted)]">
@@ -389,7 +535,11 @@ export function PlayAlongView({ song, lines, translationLines, audioRef, isPlayi
       {/* Bars + lyrics side by side on wide screens */}
       <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-2">
         <div className="overflow-y-auto px-6 py-5 border-r border-[var(--border-subtle)]">
-          <BarsPane analysis={analysis} playhead={playhead} shapes={shapes} audioRef={audioRef} isPlaying={isPlaying} />
+          {mode === "strumming" ? (
+            <BarsPane analysis={analysis} playhead={playhead} shapes={shapes} audioRef={audioRef} isPlaying={isPlaying} />
+          ) : (
+            <FingerstylePane analysis={analysis} playhead={playhead} audioRef={audioRef} isPlaying={isPlaying} />
+          )}
         </div>
         <div className="overflow-y-auto px-4 py-5">
           <LyricsPane
@@ -397,7 +547,7 @@ export function PlayAlongView({ song, lines, translationLines, audioRef, isPlayi
             translationLines={translationLines}
             chords={analysis.chords ?? []}
             playhead={playhead}
-            shapes={shapes}
+            shapes={mode === "strumming" ? shapes : null}
             audioRef={audioRef}
             isPlaying={isPlaying}
           />
