@@ -829,7 +829,7 @@ export function LibraryPage() {
           </FadeWrapper>
         </main>
 
-        <QueuePlayerBar />
+        <QueuePlayerBar allSongs={filterSongs(flatSongs)} />
       </div>
 
       {/* Context menu portal */}

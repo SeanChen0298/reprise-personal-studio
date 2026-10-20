@@ -5,7 +5,11 @@ interface QueueStore {
   queue: Song[];
   currentIndex: number;
   isPlaying: boolean;
+  /** True when the queue was filled by "play all" rather than by the user selecting songs. */
+  isPlayAll: boolean;
   enqueue: (song: Song) => void;
+  /** Replace the queue with every given song and start playing from the first. */
+  playAll: (songs: Song[]) => void;
   removeFromQueue: (songId: string) => void;
   reorderQueue: (from: number, to: number) => void;
   clearQueue: () => void;
@@ -19,15 +23,26 @@ export const useQueueStore = create<QueueStore>((set) => ({
   queue: [],
   currentIndex: -1,
   isPlaying: false,
+  isPlayAll: false,
 
   enqueue: (song) =>
     set((s) => {
+      // Selecting a song while "play all" is active starts a fresh selection,
+      // so only the selected songs play from here on.
+      if (s.isPlayAll) return { queue: [song], currentIndex: 0, isPlayAll: false };
       if (s.queue.some((q) => q.id === song.id)) return s;
       const queue = [...s.queue, song];
       // Auto-start if nothing is playing
       const currentIndex = s.currentIndex === -1 ? 0 : s.currentIndex;
       return { queue, currentIndex };
     }),
+
+  playAll: (songs) =>
+    set(() =>
+      songs.length === 0
+        ? { queue: [], currentIndex: -1, isPlaying: false, isPlayAll: false }
+        : { queue: songs, currentIndex: 0, isPlaying: true, isPlayAll: true }
+    ),
 
   removeFromQueue: (songId) =>
     set((s) => {
@@ -42,7 +57,12 @@ export const useQueueStore = create<QueueStore>((set) => ({
       } else if (idx === currentIndex) {
         currentIndex = Math.min(currentIndex, queue.length - 1);
       }
-      return { queue, currentIndex, isPlaying: queue.length > 0 ? s.isPlaying : false };
+      return {
+        queue,
+        currentIndex,
+        isPlaying: queue.length > 0 ? s.isPlaying : false,
+        isPlayAll: queue.length > 0 ? s.isPlayAll : false,
+      };
     }),
 
   reorderQueue: (from, to) =>
@@ -58,7 +78,7 @@ export const useQueueStore = create<QueueStore>((set) => ({
       return { queue, currentIndex };
     }),
 
-  clearQueue: () => set({ queue: [], currentIndex: -1, isPlaying: false }),
+  clearQueue: () => set({ queue: [], currentIndex: -1, isPlaying: false, isPlayAll: false }),
 
   setCurrentIndex: (n) => set({ currentIndex: n }),
 
