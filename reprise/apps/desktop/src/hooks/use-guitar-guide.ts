@@ -20,6 +20,7 @@ interface GuideEvent {
   kind: "strum" | "notes";
   direction?: "down" | "up";
   chord?: string;                                // label, for strums
+  chordAt?: number;                              // that chord's start (ms), for its fingering
   notes?: { midi: number; string: number }[];    // for fingerstyle
 }
 
@@ -61,7 +62,9 @@ function buildEvents(
         while (ci + 1 < chords.length && chords[ci + 1].start_ms <= t) ci++;
         const label = chords[ci]?.label;
         if (!label || label === "N") continue;
-        events.push({ t, kind: "strum", direction: stroke === "D" ? "down" : "up", chord: label });
+        events.push({
+          t, kind: "strum", direction: stroke === "D" ? "down" : "up", chord: label, chordAt: chords[ci].start_ms,
+        });
       }
     }
   }
@@ -87,7 +90,7 @@ export function useGuitarGuide(options: {
   /** Play this many ms earlier than the detected beat (positive = earlier). */
   offsetMs: number;
   /** MIDI notes to strum for a chord label (already including any capo). */
-  chordNotes: (label: string) => number[];
+  chordNotes: (label: string, atMs?: number) => number[];
   /** The fingerpicked part, used in "fingerstyle" mode. */
   picking: { t: number; notes: { midi: number; string: number }[] }[];
 }) {
@@ -132,7 +135,7 @@ export function useGuitarGuide(options: {
         const ev = events[i];
         const when = now + Math.max(0, (ev.t - t) / rate - offsetMs) / 1000;
         if (ev.kind === "strum" && ev.chord) {
-          strum(chordNotes(ev.chord), { when, direction: ev.direction });
+          strum(chordNotes(ev.chord, ev.chordAt), { when, direction: ev.direction });
         } else if (ev.notes) {
           for (const n of ev.notes) pluck(n.midi, n.string, when, 0.55);
         }

@@ -87,7 +87,7 @@ function stringsFor(part: string, shape: ChordShape): number[] {
 export function buildPicking(
   analysis: ChordAnalysis,
   pattern: PickPattern,
-  voicingFor: (label: string) => ChordShape | null,
+  voicingFor: (label: string, atMs?: number) => ChordShape | null,
   capo: number,
 ): PickEvent[] {
   const bars = analysis.bars ?? [];
@@ -116,7 +116,7 @@ export function buildPicking(
 
         const chord = chords[ci];
         if (!chord || chord.label === "N") continue;
-        const shape = voicingFor(chord.label);
+        const shape = voicingFor(chord.label, chord.start_ms);
         if (!shape) continue;
 
         const symbol = symbols[(slot - patternStart) % symbols.length];

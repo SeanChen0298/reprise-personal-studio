@@ -7,7 +7,7 @@ import type {
   ChordAnalysis, ChordBar, ChordKey, ChordSegment, StrumSection,
 } from "../../lib/chord-analysis";
 import {
-  CHORD_LABEL_RE, QUALITY_SUFFIXES, canonicalChord, capoShapeLabel, formatChord, getChordVoicings,
+  CHORD_LABEL_RE, canonicalChord, capoShapeLabel, formatChord, getChordVoicings,
   shapeMidiNotes, soundingLabel, type ChordNotation, type ChordShape,
 } from "../../lib/chord-shapes";
 import { buildPicking, PICK_PATTERNS, type PickEvent, type PickPattern } from "../../lib/fingerpicking";
@@ -16,6 +16,7 @@ import {
   loadInstrument, pluck, setInstrument, setSynthVolume, strum, synthNow, type GuitarInstrument,
 } from "../../lib/guitar-synth";
 import { useChordData, type ChordLength } from "../../hooks/use-chord-data";
+import { useFingerings } from "../../hooks/use-fingerings";
 import { saveChordSettings } from "../../lib/chord-analysis";
 import { useGuitarGuide } from "../../hooks/use-guitar-guide";
 import { useTaskQueueStore } from "../../stores/task-queue-store";
@@ -105,9 +106,12 @@ interface PlayAlongActions {
   /** Chord-name style for labels built outside `display` (e.g. in the picker). */
   notation: ChordNotation;
   /** All fingerings for a shown chord name, and the one currently chosen. */
-  voicings: (shown: string) => { all: ChordShape[]; chosen: number };
+  /** Fingerings for a shown chord name, and the one chosen (at a spot in the song if given). */
+  voicings: (shown: string, atMs?: number) => { all: ChordShape[]; chosen: number; songWide: number };
   /** Remember which fingering to use for a shown chord name (0 = back to the default). */
-  chooseVoicing: (shown: string, index: number) => void;
+  /** Choose a fingering at one spot (`atMs`) or for every chord of that name (no `atMs`).
+   *  `index` null = drop the choice (back to the song-wide one, or the default). */
+  chooseVoicing: (shown: string, index: number | null, atMs?: number) => void;
   /** Play the chord and open its diagram next to `anchor`. `index` = segment, when known (enables editing). */
   openChord: (label: string, anchor: HTMLElement, index?: number) => void;
 }
@@ -202,8 +206,12 @@ function qualityLabel(suffix: string, notation: ChordNotation): string {
   if (suffix === "") return "maj";
   return formatChord("C" + suffix, notation).slice(1);
 }
-const BASIC_QUALITIES = QUALITY_SUFFIXES.slice(0, 8);
-const EXTENDED_QUALITIES = QUALITY_SUFFIXES.slice(8);
+/** Chord types grouped the way players think about them. */
+const QUALITY_GROUPS: { title: string; suffixes: string[] }[] = [
+  { title: "Triads", suffixes: ["", "m", "sus2", "sus4", "dim", "aug"] },
+  { title: "Sevenths", suffixes: ["7", "m7", "maj7", "m7b5", "dim7", "7sus4"] },
+  { title: "Added / extended", suffixes: ["6", "m6", "add9", "maj9", "9", "m9"] },
+];
 
 /** Split a label into picker root + suffix, normalising enharmonics to the picker's spelling. */
 function splitLabel(label: string): { root: string; suffix: string } {
@@ -213,9 +221,12 @@ function splitLabel(label: string): { root: string; suffix: string } {
   return { root: enharmonic[m[1]] ?? m[1], suffix: m[2] ?? "" };
 }
 
+type EditorTab = "suggestions" | "pick" | "timing";
+
 /**
- * Pick a replacement for one chord. Works in the names on screen: with the
- * capo toggle on you pick the shape you play, and the sounding chord is saved.
+ * Change one chord: pick a close alternative, any chord, or its timing.
+ * Works in the names on screen: with the capo toggle on you pick the shape
+ * you play, and the sounding chord is saved.
  */
 function ChordEditor({ segment, beatsInBar, onPreview, onSelect, onSave, onLength, onRemove, onReset }: {
   segment: ChordSegment;
@@ -249,53 +260,71 @@ function ChordEditor({ segment, beatsInBar, onPreview, onSelect, onSave, onLengt
     onSelect(fmt(nextRoot + nextSuffix));
     onPreview(toSounding(nextRoot + nextSuffix));
   };
-  const save = async (shown: string) => {
+  const run = async (action: () => Promise<void>) => {
     setSaving(true);
-    try { await onSave(shown === "N" ? "N" : toSounding(shown)); } finally { setSaving(false); }
+    try { await action(); } finally { setSaving(false); }
   };
+
   // Close alternatives: what the analysis nearly picked, then chords that
   // share most of their notes (e.g. Dmaj7 ⇄ F#m7). Shown in screen names.
   const soundingCurrent = segment.label;
   const suggestions = useMemo(() => {
     const seen = new Set<string>([soundingCurrent]);
-    const list: { label: string; note: string; title: string }[] = [];
+    const list: { label: string; fit?: number; why: string }[] = [];
     const mine = chordPitchClasses(soundingCurrent);
     for (const alt of segment.alternatives ?? []) {
       if (alt.label === "N" || seen.has(alt.label)) continue;
       seen.add(alt.label);
       const shared = noteNames(chordPitchClasses(alt.label).filter((pc) => mine.includes(pc)));
-      list.push({
-        label: alt.label,
-        note: `heard ${Math.round(alt.fit * 100)}%`,
-        title: `The analysis rated this ${Math.round(alt.fit * 100)}% as good a fit here` +
-          (shared.length ? ` · shares ${shared.join(" ")}` : ""),
-      });
+      list.push({ label: alt.label, fit: alt.fit, why: shared.length ? `shares ${shared.join(" ")}` : "heard nearby" });
     }
     for (const rel of relatedChords(soundingCurrent, 8)) {
       if (seen.has(rel.label)) continue;
       seen.add(rel.label);
-      list.push({ label: rel.label, note: `${rel.shared.length} shared`, title: `${rel.why} (${rel.shared.join(" ")})` });
+      list.push({ label: rel.label, why: rel.why });
     }
-    return list.slice(0, 8);
+    return list.slice(0, 7);
   }, [segment.alternatives, soundingCurrent]);
 
-  const chip = (active: boolean) =>
-    `h-[24px] rounded-[5px] text-[11.5px] font-medium cursor-pointer border transition-colors ${
+  const [tab, setTab] = useState<EditorTab>(suggestions.length && segment.label !== "N" ? "suggestions" : "pick");
+
+  const tabButton = (value: EditorTab, text: string) => (
+    <button
+      onClick={() => setTab(value)}
+      className={`pb-1.5 text-[12px] font-medium bg-transparent border-none cursor-pointer border-b-2 transition-colors ${
+        tab === value
+          ? "text-[var(--text-primary)] border-[var(--theme)]"
+          : "text-[var(--text-muted)] border-transparent hover:text-[var(--text-primary)]"
+      }`}
+      style={{ borderBottomStyle: "solid", borderBottomWidth: 2, borderBottomColor: tab === value ? "var(--theme)" : "transparent" }}
+    >
+      {text}
+    </button>
+  );
+  // Light, text-like chips: only the selected one is filled.
+  const chip = (active: boolean, extra = "") =>
+    `h-[24px] px-2 rounded-full text-[12px] cursor-pointer border-none transition-colors ${extra} ${
       active
-        ? "border-[var(--theme)] bg-[var(--theme-light)] text-[var(--theme-text)]"
-        : "border-[var(--border)] bg-transparent text-[var(--text-secondary)] hover:border-[#888]"
+        ? "bg-[var(--theme)] text-white font-semibold"
+        : "bg-transparent text-[var(--text-secondary)] hover:bg-[var(--bg)] hover:text-[var(--text-primary)]"
     }`;
+  const sectionTitle = "text-[10px] font-medium uppercase tracking-[0.09em] text-[var(--text-muted)] mb-1";
 
   return (
-    <div>
-      <div className="text-[10.5px] font-medium uppercase tracking-[0.09em] text-[var(--text-muted)] mb-1.5">
-        Wrong chord? Change this one
-        {capoShown > 0 && <span className="normal-case tracking-normal"> · capo {capoShown} shapes</span>}
+    <div className="flex flex-col h-full">
+      <div className="flex items-baseline justify-between mb-2">
+        <span className="text-[13px] font-semibold text-[var(--text-primary)]">Change this chord</span>
+        {capoShown > 0 && <span className="text-[11px] text-[var(--text-muted)]">capo {capoShown} shapes</span>}
       </div>
-      {suggestions.length > 0 && segment.label !== "N" && (
-        <div className="mb-2">
-          <div className="text-[10.5px] text-[var(--text-muted)] mb-1">Close alternatives</div>
-          <div className="flex flex-wrap gap-1">
+      <div className="flex gap-4 mb-3 border-b border-[var(--border-subtle)]">
+        {suggestions.length > 0 && segment.label !== "N" && tabButton("suggestions", "Suggestions")}
+        {tabButton("pick", "Any chord")}
+        {tabButton("timing", "Timing")}
+      </div>
+
+      <div className="flex-1 min-h-[214px]">
+        {tab === "suggestions" && (
+          <div className="flex flex-col gap-0.5">
             {suggestions.map((sug) => {
               const shown = display(sug.label);
               const parts = splitLabel(shown);
@@ -304,117 +333,145 @@ function ChordEditor({ segment, beatsInBar, onPreview, onSelect, onSave, onLengt
                 <button
                   key={sug.label}
                   onClick={() => pick(parts.root, parts.suffix)}
-                  title={sug.title}
-                  className={`flex items-baseline gap-1 px-2 h-[26px] rounded-[5px] border text-[12px] font-semibold cursor-pointer transition-colors ${
-                    active
-                      ? "border-[var(--theme)] bg-[var(--theme-light)] text-[var(--theme-text)]"
-                      : "border-[var(--border)] bg-transparent text-[var(--text-primary)] hover:border-[#888]"
+                  className={`flex items-center gap-3 px-2.5 py-[5px] rounded-[7px] text-left border-none cursor-pointer transition-colors ${
+                    active ? "bg-[var(--theme-light)]" : "bg-transparent hover:bg-[var(--bg)]"
                   }`}
                 >
-                  {shown}
-                  <span className="text-[9.5px] font-normal text-[var(--text-muted)]">{sug.note}</span>
+                  <span className={`w-[64px] text-[13.5px] font-semibold ${active ? "text-[var(--theme-text)]" : "text-[var(--text-primary)]"}`}>
+                    {shown}
+                  </span>
+                  <span className="flex-1 text-[11px] text-[var(--text-muted)] truncate">{sug.why}</span>
+                  {sug.fit != null ? (
+                    <span className="flex items-center gap-1.5" title={`The analysis rated this ${Math.round(sug.fit * 100)}% as good a fit here`}>
+                      <span className="w-[44px] h-[4px] rounded-full bg-[var(--bg)] overflow-hidden">
+                        <span className="block h-full bg-[var(--theme)]" style={{ width: `${Math.round(sug.fit * 100)}%` }} />
+                      </span>
+                      <span className="text-[10px] tabular-nums text-[var(--text-muted)] w-[26px] text-right">{Math.round(sug.fit * 100)}%</span>
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-[var(--text-muted)] w-[76px] text-right">related</span>
+                  )}
                 </button>
               );
             })}
           </div>
-          <div className="text-[10.5px] text-[var(--text-muted)] mt-1.5 mb-1">Or pick any chord</div>
-        </div>
-      )}
-      <div className="grid grid-cols-6 gap-1 mb-1.5">
-        {PICKER_ROOTS.map((r) => (
-          <button key={r} onClick={() => pick(r, suffix)} className={chip(!noChord && root === r)}>{r}</button>
-        ))}
+        )}
+
+        {tab === "pick" && (
+          <div className="flex flex-col gap-2.5">
+            <div>
+              <div className={sectionTitle}>Root</div>
+              <div className="flex flex-wrap gap-0.5">
+                {PICKER_ROOTS.map((r) => (
+                  <button key={r} onClick={() => pick(r, suffix)} className={chip(!noChord && root === r, "min-w-[30px]")}>{r}</button>
+                ))}
+              </div>
+            </div>
+            {QUALITY_GROUPS.map((group) => (
+              <div key={group.title}>
+                <div className={sectionTitle}>{group.title}</div>
+                <div className="flex flex-wrap gap-0.5">
+                  {group.suffixes.map((q) => (
+                    <button key={q} onClick={() => pick(root, q)} className={chip(!noChord && suffix === q)}>
+                      {qualityLabel(q, notation)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+            <button
+              onClick={() => { setNoChord(true); onSelect("N"); }}
+              className={`self-start ${chip(noChord)}`}
+              title="Nothing playing here"
+            >
+              No chord (N.C.)
+            </button>
+          </div>
+        )}
+
+        {tab === "timing" && (
+          <div className="flex flex-col gap-3">
+            <div>
+              <div className={sectionTitle}>Length · now {segment.beats} beat{segment.beats === 1 ? "" : "s"}</div>
+              <div className="inline-flex p-[2px] rounded-[8px] bg-[var(--bg)] border border-[var(--border)]">
+                {[1, 2, 3, 4].map((n) => (
+                  <button
+                    key={n}
+                    disabled={saving || n === segment.beats}
+                    onClick={() => run(() => onLength(n))}
+                    title={n > segment.beats ? `Hold for ${n} beats (replaces what follows)` : n < segment.beats ? `Shorten to ${n}; the next chord starts earlier` : "Current length"}
+                    className={`w-[34px] py-[3px] rounded-[6px] text-[12px] font-medium border-none cursor-pointer transition-all disabled:cursor-default ${
+                      n === segment.beats
+                        ? "bg-[var(--surface)] text-[var(--text-primary)] shadow-[0_1px_2px_rgba(0,0,0,0.08)]"
+                        : "bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                    }`}
+                  >
+                    {n}
+                  </button>
+                ))}
+                {beatsInBar > 0 && beatsInBar !== segment.beats && (
+                  <button
+                    disabled={saving}
+                    onClick={() => run(() => onLength("bar"))}
+                    title="Hold until the end of the bar"
+                    className="px-2.5 py-[3px] rounded-[6px] text-[12px] font-medium border-none cursor-pointer bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                  >
+                    to bar end
+                  </button>
+                )}
+              </div>
+              <div className="text-[10.5px] text-[var(--text-muted)] mt-1">Longer replaces the chords after it; shorter lets the next chord start earlier.</div>
+            </div>
+            <div>
+              <div className={sectionTitle}>Remove this chord</div>
+              <div className="flex flex-col gap-1">
+                <button
+                  disabled={saving}
+                  onClick={() => run(() => onRemove("next"))}
+                  className="text-left px-2.5 py-1.5 rounded-[7px] border-none bg-transparent hover:bg-[var(--bg)] cursor-pointer"
+                >
+                  <span className="block text-[12.5px] font-medium text-[var(--text-primary)]">Next chord starts here</span>
+                  <span className="block text-[10.5px] text-[var(--text-muted)]">e.g. drop the first chord of a bar</span>
+                </button>
+                <button
+                  disabled={saving}
+                  onClick={() => run(() => onRemove("previous"))}
+                  className="text-left px-2.5 py-1.5 rounded-[7px] border-none bg-transparent hover:bg-[var(--bg)] cursor-pointer"
+                >
+                  <span className="block text-[12.5px] font-medium text-[var(--text-primary)]">Previous chord carries on</span>
+                  <span className="block text-[10.5px] text-[var(--text-muted)]">e.g. drop a stray chord in the middle</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
-      <div className="grid grid-cols-5 gap-1 mb-1">
-        {BASIC_QUALITIES.map((q) => (
-          <button key={q} onClick={() => pick(root, q)} className={chip(!noChord && suffix === q)}>
-            {qualityLabel(q, notation)}
+
+      {/* Footer */}
+      <div className="flex items-center gap-2 pt-2.5 mt-2 border-t border-[var(--border-subtle)]">
+        {tab !== "timing" && (
+          <button
+            onClick={() => run(() => onSave(chosen === "N" ? "N" : toSounding(chosen)))}
+            disabled={saving || chosen === shownCurrent}
+            className="h-[30px] px-4 rounded-[7px] bg-[var(--accent)] text-white text-[12.5px] font-medium border-none cursor-pointer hover:opacity-85 disabled:opacity-35 disabled:cursor-default"
+          >
+            {chosen === shownCurrent ? "No change" : `Use ${fmt(chosen)}`}
           </button>
-        ))}
-        <button onClick={() => { setNoChord(true); onSelect("N"); }} className={chip(noChord)} title="No chord here">N.C.</button>
-      </div>
-      <div className="grid grid-cols-5 gap-1 mb-2" title="Extended chords (not detected automatically)">
-        {EXTENDED_QUALITIES.map((q) => (
-          <button key={q} onClick={() => pick(root, q)} className={chip(!noChord && suffix === q)}>
-            {qualityLabel(q, notation)}
-          </button>
-        ))}
-      </div>
-      <div className="flex items-center gap-1.5">
-        <button
-          onClick={() => save(chosen)}
-          disabled={saving || chosen === shownCurrent}
-          className="flex-1 h-[28px] rounded-[6px] bg-[var(--accent)] text-white text-[12px] font-medium border-none cursor-pointer hover:opacity-85 disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {chosen === shownCurrent ? "Current" : `Use ${fmt(chosen)}`}
-        </button>
+        )}
         {segment.edited && (
           <button
-            onClick={async () => {
-              setSaving(true);
-              // Back to the detected chord, played with its default fingering.
-              if (detected !== "N") chooseVoicing(display(detected), 0);
-              if (shownCurrent !== "N") chooseVoicing(shownCurrent, 0);
-              try { await onReset(); } finally { setSaving(false); }
-            }}
+            onClick={() => run(async () => {
+              // Back to the detected chord, with this spot's fingering choice cleared.
+              chooseVoicing(shownCurrent, null, segment.start_ms);
+              await onReset();
+            })}
             disabled={saving}
             title={`Remove every change made to this chord's beats (detected: ${shownDetected})`}
-            className="h-[28px] px-2.5 rounded-[6px] border-[1.5px] border-[var(--border)] bg-transparent text-[11.5px] font-medium text-[var(--text-secondary)] hover:border-[#888] cursor-pointer"
+            className="ml-auto text-[11.5px] text-[var(--text-secondary)] bg-transparent border-none cursor-pointer hover:text-[var(--text-primary)] hover:underline"
           >
             Undo changes here
           </button>
         )}
-      </div>
-
-      {/* How long this chord lasts */}
-      <div className="mt-3 pt-3 border-t border-[var(--border-subtle)]">
-        <div className="text-[10.5px] font-medium uppercase tracking-[0.09em] text-[var(--text-muted)] mb-1.5">
-          Length · now {segment.beats} beat{segment.beats === 1 ? "" : "s"}
-        </div>
-        <div className="flex flex-wrap gap-1">
-          {[1, 2, 3, 4].map((n) => (
-            <button
-              key={n}
-              disabled={saving}
-              onClick={async () => { setSaving(true); try { await onLength(n); } finally { setSaving(false); } }}
-              title={n > segment.beats ? `Hold for ${n} beats (replaces what follows)` : n < segment.beats ? `Shorten to ${n}; the next chord starts earlier` : "Current length"}
-              className={`${chip(segment.beats === n)} w-[34px]`}
-            >
-              {n}
-            </button>
-          ))}
-          {beatsInBar > 0 && beatsInBar !== segment.beats && (
-            <button
-              disabled={saving}
-              onClick={async () => { setSaving(true); try { await onLength("bar"); } finally { setSaving(false); } }}
-              title="Hold until the end of the bar"
-              className={`${chip(false)} px-2`}
-            >
-              to bar end ({beatsInBar})
-            </button>
-          )}
-        </div>
-        <div className="text-[10.5px] font-medium uppercase tracking-[0.09em] text-[var(--text-muted)] mt-3 mb-1.5">
-          Remove this chord
-        </div>
-        <div className="flex flex-wrap gap-1">
-          <button
-            disabled={saving}
-            onClick={async () => { setSaving(true); try { await onRemove("next"); } finally { setSaving(false); } }}
-            title="The chord after this one starts here instead (e.g. remove the first chord of a bar)"
-            className={`${chip(false)} px-2 text-red-500`}
-          >
-            Next chord starts here
-          </button>
-          <button
-            disabled={saving}
-            onClick={async () => { setSaving(true); try { await onRemove("previous"); } finally { setSaving(false); } }}
-            title="The chord before this one keeps playing through these beats"
-            className={`${chip(false)} px-2 text-red-500`}
-          >
-            Previous chord carries on
-          </button>
-        </div>
       </div>
     </div>
   );
@@ -446,14 +503,17 @@ function ChordPopover({
   const shapeLabel = selected ?? currentShown;
   const previewing = selected != null && selected !== currentShown;
   const soundingShown = shapeLabel === "N" ? "N" : toSounding(shapeLabel);
-  const { all, chosen } = voicings(shapeLabel);
+  // Opened from a chord in the song: fingering choices apply to that spot.
+  // Opened from the chord chart: they apply to every chord of that name.
+  const at = segment?.start_ms;
+  const { all, chosen, songWide } = voicings(shapeLabel, at);
   const shape = all[chosen];
   const playShape = (v: ChordShape | undefined) => {
     if (v) strum(shapeMidiNotes(v, capoShown), { direction: "down", spreadMs: 22, velocity: 0.7 });
   };
   const step = (delta: number) => {
     const next = (chosen + delta + all.length) % all.length;
-    chooseVoicing(shapeLabel, next);
+    chooseVoicing(shapeLabel, next, at);
     // Play the newly chosen fingering directly (onPlay still has the old choice).
     playShape(all[next]);
   };
@@ -528,15 +588,31 @@ function ChordPopover({
                 </button>
               </div>
             )}
-            {chosen > 0 && (
-              <button
-                onClick={() => { chooseVoicing(shapeLabel, 0); playShape(all[0]); }}
-                title="Back to the default fingering"
-                className="mt-1 text-[10.5px] text-[var(--theme-text)] bg-transparent border-none cursor-pointer hover:underline"
-              >
-                Use default fingering
-              </button>
-            )}
+            <div className="flex flex-col items-center mt-1 gap-0.5">
+              {at != null && chosen !== songWide && (
+                <button
+                  onClick={() => chooseVoicing(shapeLabel, chosen)}
+                  title={`Use this fingering for every ${shapeLabel} in this song`}
+                  className="text-[10.5px] text-[var(--theme-text)] bg-transparent border-none cursor-pointer hover:underline"
+                >
+                  Use for every {shapeLabel} in this song
+                </button>
+              )}
+              {chosen > 0 && (
+                <button
+                  onClick={() => { chooseVoicing(shapeLabel, 0, at); playShape(all[0]); }}
+                  title="Back to the first (default) fingering"
+                  className="text-[10.5px] text-[var(--text-muted)] bg-transparent border-none cursor-pointer hover:underline"
+                >
+                  Use default fingering
+                </button>
+              )}
+              {at != null && (
+                <span className="text-[9.5px] text-[var(--text-muted)]">
+                  {chosen === songWide ? "fingering for this whole song" : "fingering for this spot only"}
+                </span>
+              )}
+            </div>
           </div>
         ) : (
           <div className="text-[12px] text-[var(--text-muted)] py-4 text-center">
@@ -1444,20 +1520,24 @@ export function PlayAlongView({
     [capoShown, songKey],
   );
 
+  // Fingering choices, saved per song (one spot, or every chord of a name).
+  const fingerings = useFingerings(song.audio_folder);
   const voicingKey = (v: ChordShape) => `${v.kind}@${v.position}`;
   const voicings = useCallback(
-    (shown: string) => {
+    (shown: string, atMs?: number) => {
       const all = getChordVoicings(shown);
-      const want = guidePrefs.voicings[shown];
-      const found = want ? all.findIndex((v) => voicingKey(v) === want) : -1;
-      return { all, chosen: found >= 0 ? found : 0 };
+      const indexOf = (key: string | undefined) => {
+        const i = key ? all.findIndex((v) => voicingKey(v) === key) : -1;
+        return i >= 0 ? i : 0;
+      };
+      return { all, chosen: indexOf(fingerings.lookup(shown, atMs)), songWide: indexOf(fingerings.lookup(shown)) };
     },
-    [guidePrefs.voicings],
+    [fingerings],
   );
-  /** The fingering to use for a chord (as fingered: the capo shape when the capo is shown). */
+  /** The fingering to use for a chord at a spot (as fingered: the capo shape when the capo is shown). */
   const voicingFor = useCallback(
-    (label: string): ChordShape | null => {
-      const { all, chosen } = voicings(capoShown ? capoShapeLabel(label, capoShown) : label);
+    (label: string, atMs?: number): ChordShape | null => {
+      const { all, chosen } = voicings(capoShown ? capoShapeLabel(label, capoShown) : label, atMs);
       return all[chosen] ?? null;
     },
     [voicings, capoShown],
@@ -1465,8 +1545,8 @@ export function PlayAlongView({
 
   /** Sounding notes for a chord: its chosen fingering, plus the capo when shapes are capo shapes. */
   const chordNotes = useCallback(
-    (label: string) => {
-      const shape = voicingFor(label);
+    (label: string, atMs?: number) => {
+      const shape = voicingFor(label, atMs);
       return shape ? shapeMidiNotes(shape, capoShown) : [];
     },
     [voicingFor, capoShown],
@@ -1492,23 +1572,18 @@ export function PlayAlongView({
     capoShown,
     notation,
     voicings,
-    chooseVoicing: (shown, index) => {
+    chooseVoicing: (shown, index, atMs) => {
+      if (index == null) { fingerings.choose(shown, null, atMs); return; }
       const v = getChordVoicings(shown)[index];
       if (!v) return;
-      setGuidePrefs((prev) => {
-        const voicingsPref = { ...prev.voicings };
-        if (index === 0) delete voicingsPref[shown];
-        else voicingsPref[shown] = voicingKey(v);
-        const next = { ...prev, voicings: voicingsPref };
-        try { localStorage.setItem(GUIDE_PREFS_KEY, JSON.stringify(next)); } catch { /* convenience only */ }
-        return next;
-      });
+      // The first fingering is the default: song-wide, no need to store it.
+      fingerings.choose(shown, atMs == null && index === 0 ? null : voicingKey(v), atMs);
     },
     openChord: (label, anchor, index) => {
       if (label !== "N") playChord(label);
       setPopover({ label, anchor: anchor.getBoundingClientRect(), index });
     },
-  }), [onSeek, display, toSounding, capoShown, notation, voicings, playChord]);
+  }), [onSeek, display, toSounding, capoShown, notation, voicings, fingerings, playChord]);
 
   const picking = useMemo(
     () => (analysis ? buildPicking(analysis, guidePrefs.pickPattern, voicingFor, capoShown) : []),
