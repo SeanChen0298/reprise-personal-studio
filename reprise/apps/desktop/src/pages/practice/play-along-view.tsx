@@ -371,17 +371,22 @@ interface SheetSegment {
  * Time within the line is mapped to a character position, so a chord that
  * changes halfway through the line sits above the middle character.
  */
-function sheetSegments(line: Line, chords: ChordSegment[]): SheetSegment[] {
+function sheetSegments(
+  line: Line,
+  chords: ChordSegment[],
+  window: { from: number; to: number },
+): SheetSegment[] {
   const chars = Array.from(line.custom_text ?? line.text);
   if (line.start_ms == null || line.end_ms == null || line.end_ms <= line.start_ms || chords.length === 0) {
     return [{ chord: null, text: chars.join("") }];
   }
-  const start = line.start_ms, end = line.end_ms, dur = end - start;
+  const start = line.start_ms, dur = line.end_ms - start;
 
+  // Only chords that START in this line's window; a chord still ringing on
+  // from the previous line isn't repeated here.
   const marks: { ci: number; idx: number }[] = [];
-  const first = indexAt(chords, start, (c) => c.start_ms);
-  for (let i = Math.max(first, 0); i < chords.length && chords[i].start_ms < end; i++) {
-    if (chords[i].end_ms <= start) continue;
+  for (let i = Math.max(indexAt(chords, window.from - 1, (c) => c.start_ms) + 1, 0);
+    i < chords.length && chords[i].start_ms < window.to; i++) {
     const prev = marks[marks.length - 1];
     if (prev && chords[prev.ci].label === chords[i].label) continue;
     const frac = (Math.max(chords[i].start_ms, start) - start) / dur;
@@ -496,7 +501,22 @@ function SheetView({
     () => new Map(translationLines.map((l) => [l.order, l.custom_text ?? l.text])),
     [translationLines],
   );
-  const segmentsByLine = useMemo(() => lines.map((l) => sheetSegments(l, chords)), [lines, chords]);
+  const segmentsByLine = useMemo(() => {
+    // Each chord belongs to exactly one line: the one it starts in. A chord
+    // that starts in the gap between two lines, or just before a line
+    // (lyric timing is loose), opens the next line.
+    const SNAP_MS = 250;
+    const from = lines.map((l, i) => {
+      if (l.start_ms == null) return Number.POSITIVE_INFINITY;
+      const prevEnd = i > 0 ? lines[i - 1].end_ms ?? -Infinity : -Infinity;
+      return i === 0 ? -Infinity : Math.min(prevEnd, l.start_ms - SNAP_MS);
+    });
+    return lines.map((l, i) => {
+      const nextFrom = from.slice(i + 1).find((f) => Number.isFinite(f));
+      const to = nextFrom ?? Number.POSITIVE_INFINITY;
+      return sheetSegments(l, chords, { from: from[i], to: Math.max(to, from[i]) });
+    });
+  }, [lines, chords]);
   useFollow(containerRef, playhead.line >= 0 ? `[data-line="${playhead.line}"]` : null, isPlaying, "center");
 
   return (
