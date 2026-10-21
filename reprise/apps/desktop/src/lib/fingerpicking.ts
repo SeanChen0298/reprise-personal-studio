@@ -116,7 +116,7 @@ export function buildPicking(
 
         const chord = chords[ci];
         if (!chord || chord.label === "N") continue;
-        const shape = voicingFor(chord.label, chord.start_ms);
+        const shape = voicingFor(chord.label, t);   // fingering chosen for this bar
         if (!shape) continue;
 
         const symbol = symbols[(slot - patternStart) % symbols.length];

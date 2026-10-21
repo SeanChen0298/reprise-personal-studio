@@ -141,7 +141,7 @@ export function useGuitarGuide(options: {
         const ev = events[i];
         const when = now + Math.max(0, (ev.t - t) / rate - offsetMs) / 1000;
         if (ev.kind === "strum" && ev.chord) {
-          strum(chordNotesRef.current(ev.chord, ev.chordAt), { when, direction: ev.direction });
+          strum(chordNotesRef.current(ev.chord, ev.t), { when, direction: ev.direction });
         } else if (ev.notes) {
           for (const n of ev.notes) pluck(n.midi, n.string, when, 0.55);
         }

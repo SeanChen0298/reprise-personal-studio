@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { readChordAnalysis, type ChordAnalysis, type ChordSegment } from "../lib/chord-analysis";
 import {
-  applyChordEdits, chordEditsPath, readChordEdits, restoreDetectedSpan, saveChordSpan, saveChordSpans,
-  undoLastChordEdit,
+  applyChordEdits, chordEditsPath, ensureEditSpace, readChordEdits, restoreDetectedSpan, saveChordSpan,
+  saveChordSpans, undoLastChordEdit, type EditSpace,
 } from "../lib/chord-edits";
 
 /** How long a chord should last: a number of beats, or to the end of its bar. */
@@ -41,6 +41,8 @@ const TOLERANCE_MS = 80;
 export function useChordData(
   chordDataPath: string | undefined,
   reloadKey?: string,
+  /** Strumming and fingerpicking keep separate edits. */
+  space: EditSpace = "strum",
 ): UseChordDataReturn {
   const [analysis, setAnalysis] = useState<ChordAnalysis | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -60,9 +62,10 @@ export function useChordData(
 
     (async () => {
       try {
+        await ensureEditSpace(chordDataPath, space);
         const [data, edits] = await Promise.all([
           readChordAnalysis(chordDataPath),
-          readChordEdits(chordEditsPath(chordDataPath)),
+          readChordEdits(chordEditsPath(chordDataPath, space)),
         ]);
         if (cancelled) return;
         setEditCount(edits.length);
@@ -79,15 +82,15 @@ export function useChordData(
     })();
 
     return () => { cancelled = true; };
-  }, [chordDataPath, reloadKey, editsVersion]);
+  }, [chordDataPath, reloadKey, editsVersion, space]);
 
   const span = useCallback(
     async (start: number, end: number, label: string, detected: string) => {
       if (!chordDataPath || end <= start) return;
-      await saveChordSpan(chordEditsPath(chordDataPath), start, end, label, detected);
+      await saveChordSpan(chordEditsPath(chordDataPath, space), start, end, label, detected);
       setEditsVersion((v) => v + 1);
     },
-    [chordDataPath],
+    [chordDataPath, space],
   );
 
   const editChord = useCallback(
@@ -149,24 +152,24 @@ export function useChordData(
   const applySpans = useCallback(
     async (spans: { start_ms: number; end_ms: number; label: string }[]) => {
       if (!chordDataPath || spans.length === 0) return;
-      await saveChordSpans(chordEditsPath(chordDataPath), spans);
+      await saveChordSpans(chordEditsPath(chordDataPath, space), spans);
       setEditsVersion((v) => v + 1);
     },
-    [chordDataPath],
+    [chordDataPath, space],
   );
 
   const undoLastEdit = useCallback(async () => {
     if (!chordDataPath) return;
-    if (await undoLastChordEdit(chordEditsPath(chordDataPath))) setEditsVersion((v) => v + 1);
+    if (await undoLastChordEdit(chordEditsPath(chordDataPath, space))) setEditsVersion((v) => v + 1);
   }, [chordDataPath]);
 
   const resetChord = useCallback(
     async (segment: ChordSegment) => {
       if (!chordDataPath) return;
-      await restoreDetectedSpan(chordEditsPath(chordDataPath), segment.start_ms, segment.end_ms);
+      await restoreDetectedSpan(chordEditsPath(chordDataPath, space), segment.start_ms, segment.end_ms);
       setEditsVersion((v) => v + 1);
     },
-    [chordDataPath],
+    [chordDataPath, space],
   );
 
   return {

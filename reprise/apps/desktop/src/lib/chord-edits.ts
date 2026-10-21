@@ -33,8 +33,22 @@ interface ChordEditsFile {
 /** How close (ms) a time must be to a beat / chord start to count as on it. */
 const TOLERANCE_MS = 80;
 
-export function chordEditsPath(chordDataPath: string): string {
-  return chordDataPath.replace(/[\\/][^\\/]*$/, "") + "/chord_edits.json";
+/** Strumming and fingerpicking keep separate chord edits so they never affect each other. */
+export type EditSpace = "strum" | "fingerstyle";
+
+export function chordEditsPath(chordDataPath: string, space: EditSpace = "strum"): string {
+  const folder = chordDataPath.replace(/[\\/][^\\/]*$/, "");
+  return space === "fingerstyle" ? `${folder}/chord_edits.fingerstyle.json` : `${folder}/chord_edits.json`;
+}
+
+/** First use of the fingerpicking space: start from a copy of the strumming edits. */
+export async function ensureEditSpace(chordDataPath: string, space: EditSpace): Promise<void> {
+  if (space !== "fingerstyle") return;
+  const target = chordEditsPath(chordDataPath, "fingerstyle");
+  if (await exists(target)) return;
+  const source = chordEditsPath(chordDataPath, "strum");
+  const content = (await exists(source)) ? await readTextFile(source) : JSON.stringify({ version: 2, edits: [] });
+  await writeTextFile(target, content);
 }
 
 export async function readChordEdits(path: string): Promise<ChordEdit[]> {
