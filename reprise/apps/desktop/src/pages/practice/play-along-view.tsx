@@ -103,7 +103,7 @@ interface PlayAlongActions {
   capoShown: number;
   /** All fingerings for a shown chord name, and the one currently chosen. */
   voicings: (shown: string) => { all: ChordShape[]; chosen: number };
-  /** Remember which fingering to use for a shown chord name. */
+  /** Remember which fingering to use for a shown chord name (0 = back to the default). */
   chooseVoicing: (shown: string, index: number) => void;
   /** Play the chord and open its diagram next to `anchor`. `index` = segment, when known (enables editing). */
   openChord: (label: string, anchor: HTMLElement, index?: number) => void;
@@ -208,12 +208,14 @@ function splitLabel(label: string): { root: string; suffix: string } {
  * Pick a replacement for one chord. Works in the names on screen: with the
  * capo toggle on you pick the shape you play, and the sounding chord is saved.
  */
-function ChordEditor({ segment, onPreview, onSave }: {
+function ChordEditor({ segment, onPreview, onSelect, onSave }: {
   segment: ChordSegment;
   onPreview: (soundingLabel: string) => void;
+  /** The chord currently selected in the picker (screen name), so the popover can show it. */
+  onSelect: (shown: string) => void;
   onSave: (soundingLabel: string) => Promise<void>;
 }) {
-  const { display, toSounding, capoShown } = useActions();
+  const { display, toSounding, capoShown, chooseVoicing } = useActions();
   const shownCurrent = segment.label === "N" ? "N" : display(segment.label);
   const initial = shownCurrent === "N" ? { root: "C", suffix: "" } : splitLabel(shownCurrent);
   const [root, setRoot] = useState(initial.root);
@@ -228,6 +230,7 @@ function ChordEditor({ segment, onPreview, onSave }: {
     setRoot(nextRoot);
     setSuffix(nextSuffix);
     setNoChord(false);
+    onSelect(nextRoot + nextSuffix);
     onPreview(toSounding(nextRoot + nextSuffix));
   };
   const save = async (shown: string) => {
@@ -312,7 +315,7 @@ function ChordEditor({ segment, onPreview, onSave }: {
             {q.label}
           </button>
         ))}
-        <button onClick={() => setNoChord(true)} className={chip(noChord)} title="No chord here">N.C.</button>
+        <button onClick={() => { setNoChord(true); onSelect("N"); }} className={chip(noChord)} title="No chord here">N.C.</button>
       </div>
       <div className="flex items-center gap-1.5">
         <button
@@ -326,6 +329,9 @@ function ChordEditor({ segment, onPreview, onSave }: {
           <button
             onClick={async () => {
               setSaving(true);
+              // Back to the detected chord, played with its default fingering.
+              if (detected !== "N") chooseVoicing(display(detected), 0);
+              if (shownCurrent !== "N") chooseVoicing(shownCurrent, 0);
               try { await onSave(detected); } finally { setSaving(false); }
             }}
             disabled={saving}
@@ -355,14 +361,23 @@ function ChordPopover({
 }) {
   const { display, toSounding, voicings, chooseVoicing, capoShown } = useActions();
   const ref = useRef<HTMLDivElement>(null);
-  const shapeLabel = display(label);
+  // A chord picked in the editor (screen name) replaces the one shown, so its
+  // fingering, sound and buttons follow the selection before it's saved.
+  const [selected, setSelected] = useState<string | null>(null);
+  const currentShown = display(label);
+  const shapeLabel = selected ?? currentShown;
+  const previewing = selected != null && selected !== currentShown;
+  const soundingShown = shapeLabel === "N" ? "N" : toSounding(shapeLabel);
   const { all, chosen } = voicings(shapeLabel);
   const shape = all[chosen];
+  const playShape = (v: ChordShape | undefined) => {
+    if (v) strum(shapeMidiNotes(v, capoShown), { direction: "down", spreadMs: 22, velocity: 0.7 });
+  };
   const step = (delta: number) => {
     const next = (chosen + delta + all.length) % all.length;
     chooseVoicing(shapeLabel, next);
     // Play the newly chosen fingering directly (onPlay still has the old choice).
-    strum(shapeMidiNotes(all[next], capoShown), { direction: "down", spreadMs: 22, velocity: 0.7 });
+    playShape(all[next]);
   };
 
   useEffect(() => {
@@ -404,10 +419,11 @@ function ChordPopover({
       {/* How to play it */}
       <div className="w-[176px] flex-shrink-0">
         <div className="flex items-baseline justify-between mb-1 gap-2">
-          <span className="text-[18px] font-semibold text-[var(--text-primary)]">{label === "N" ? "N.C." : shapeLabel}</span>
+          <span className="text-[18px] font-semibold text-[var(--text-primary)]">{shapeLabel === "N" ? "N.C." : shapeLabel}</span>
           <span className="text-[11px] text-[var(--text-muted)] text-right">
-            {useCapo && capoFret > 0 && label !== "N" && <>capo {capoFret} · sounds {toSounding(shapeLabel)}</>}
-            {segment?.edited && <>{useCapo ? " · " : ""}edited</>}
+            {previewing && <span className="text-[var(--theme-text)]">preview · </span>}
+            {useCapo && capoFret > 0 && shapeLabel !== "N" && <>capo {capoFret} · sounds {soundingShown}</>}
+            {!previewing && segment?.edited && <>{useCapo ? " · " : ""}edited</>}
           </span>
         </div>
         {shape ? (
@@ -434,14 +450,25 @@ function ChordPopover({
                 </button>
               </div>
             )}
+            {chosen > 0 && (
+              <button
+                onClick={() => { chooseVoicing(shapeLabel, 0); playShape(all[0]); }}
+                title="Back to the default fingering"
+                className="mt-1 text-[10.5px] text-[var(--theme-text)] bg-transparent border-none cursor-pointer hover:underline"
+              >
+                Use default fingering
+              </button>
+            )}
           </div>
         ) : (
-          <div className="text-[12px] text-[var(--text-muted)] py-4 text-center">No diagram for this chord</div>
+          <div className="text-[12px] text-[var(--text-muted)] py-4 text-center">
+            {shapeLabel === "N" ? "No chord" : "No diagram for this chord"}
+          </div>
         )}
-        {label !== "N" && (
+        {shapeLabel !== "N" && (
           <div className="flex gap-1.5 mt-2">
-            <button onClick={() => onPlay(label, "strum")} className={smallButton}>Strum</button>
-            <button onClick={() => onPlay(label, "arpeggio")} className={smallButton}>Note by note</button>
+            <button onClick={() => onPlay(soundingShown, "strum")} className={smallButton}>Strum</button>
+            <button onClick={() => onPlay(soundingShown, "arpeggio")} className={smallButton}>Note by note</button>
           </div>
         )}
       </div>
@@ -453,6 +480,7 @@ function ChordPopover({
             key={`${segment.start_ms}:${segment.label}`}
             segment={segment}
             onPreview={(l) => onPlay(l, "strum")}
+            onSelect={setSelected}
             onSave={async (l) => { await onEdit(segment, l); onClose(); }}
           />
         </div>
@@ -1278,7 +1306,10 @@ export function PlayAlongView({
       const v = getChordVoicings(shown)[index];
       if (!v) return;
       setGuidePrefs((prev) => {
-        const next = { ...prev, voicings: { ...prev.voicings, [shown]: voicingKey(v) } };
+        const voicingsPref = { ...prev.voicings };
+        if (index === 0) delete voicingsPref[shown];
+        else voicingsPref[shown] = voicingKey(v);
+        const next = { ...prev, voicings: voicingsPref };
         try { localStorage.setItem(GUIDE_PREFS_KEY, JSON.stringify(next)); } catch { /* convenience only */ }
         return next;
       });
