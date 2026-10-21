@@ -742,9 +742,11 @@ function LeadSheetView({ analysis, lines, chords, playhead, isPlaying }: {
   playhead: Playhead;
   isPlaying: boolean;
 }) {
-  const { seek, openChord } = useActions();
+  const { seek, openChord, display } = useActions();
   const containerRef = useRef<HTMLDivElement>(null);
   const bars = analysis.bars ?? [];
+  /** Chord name size: long names (Em7(♭5), DM7(9)) a size smaller so they fit their beat. */
+  const nameSize = (label: string) => (display(label).length > 5 ? "text-[12px] tracking-[-0.02em]" : "text-[14px]");
   const beats = analysis.beats_ms ?? [];
   useFollow(containerRef, playhead.bar >= 0 ? `[data-sheet-bar="${playhead.bar}"]` : null, isPlaying, "center");
 
@@ -785,7 +787,7 @@ function LeadSheetView({ analysis, lines, chords, playhead, isPlaying }: {
               <div
                 key={bar.index}
                 data-sheet-bar={bar.index}
-                className={`relative border-l border-[var(--border)] pl-1 pr-1 pt-4 pb-2 ${
+                className={`relative border-l border-[var(--border)] pl-1.5 pr-1.5 pt-4 pb-2 ${
                   bar.free ? "bg-[repeating-linear-gradient(135deg,transparent,transparent_6px,var(--bg)_6px,var(--bg)_12px)]" : ""
                 } ${isCurrentBar ? "bg-[var(--theme-light)]" : ""}`}
               >
@@ -816,7 +818,7 @@ function LeadSheetView({ analysis, lines, chords, playhead, isPlaying }: {
                                 index={andCi}
                                 scope={{ start: chords[andCi].start_ms, end: bar.end_ms }}
                                 edited={chords[andCi].edited}
-                                className={`text-[14px] font-semibold leading-none whitespace-nowrap ${
+                                className={`${nameSize(chords[andCi].label)} font-semibold leading-none whitespace-nowrap ${
                                   andCi === playhead.chord ? "text-[var(--theme-text)]" : "text-[var(--text-primary)]"
                                 }`}
                               />
@@ -828,7 +830,7 @@ function LeadSheetView({ analysis, lines, chords, playhead, isPlaying }: {
                               index={ci}
                               scope={scope}
                               edited={chords[ci].edited}
-                              className={`text-[14px] font-semibold leading-none whitespace-nowrap ${
+                              className={`${nameSize(chords[ci].label)} font-semibold leading-none whitespace-nowrap ${
                                 ci === playhead.chord ? "text-[var(--theme-text)]" : "text-[var(--text-primary)]"
                               }`}
                             />
@@ -1645,7 +1647,7 @@ export function PlayAlongView({
         )}
 
         {/* Now playing */}
-        <div className="flex items-center gap-6 px-6 pt-3 pb-2 bg-[var(--surface)]">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-6 pt-3 pb-2 bg-[var(--surface)]">
           <button
             onClick={onTogglePlay}
             title={isPlaying ? "Pause (Space)" : "Play (Space)"}
@@ -1687,7 +1689,7 @@ export function PlayAlongView({
             />
           )}
 
-          <div className="flex items-center gap-2 ml-auto">
+          <div className="flex flex-wrap items-center justify-end gap-2 ml-auto">
             <span className="text-[12px] text-[var(--text-muted)] whitespace-nowrap mr-2">
               {analysis.key && <>{analysis.key.name}<span className="mx-1.5">·</span></>}
               {analysis.tempo_bpm != null && (
