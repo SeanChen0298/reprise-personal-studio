@@ -38,6 +38,8 @@ export function PracticePage() {
   const [activeTrack, setActiveTrack] = useState<"vocals" | "instrumental" | "reference">("reference");
   const [isEditing, setIsEditing] = useState(false);
   const [view, setView] = useState<"practice" | "playAlong">("practice");
+  // Play-along renders its view-mode tabs into the right side of the switch row.
+  const [modeTabsEl, setModeTabsEl] = useState<HTMLDivElement | null>(null);
   const [autoPlayOnClick, setAutoPlayOnClick] = useState(true);
   const [recordingSection, setRecordingSection] = useState<Section | null>(null);
   const [activeSection, setActiveSection] = useState<Section | null>(null);
@@ -266,6 +268,7 @@ export function PracticePage() {
               </button>
             ))}
           </div>
+          <div ref={setModeTabsEl} className="ml-auto" />
         </div>
         {view === "playAlong" && (
           <PlayAlongView
@@ -276,6 +279,7 @@ export function PracticePage() {
             isPlaying={player.isPlaying}
             onTogglePlay={player.togglePlay}
             onSeek={player.seekTo}
+            modeTabsContainer={modeTabsEl}
           />
         )}
         {/* Kept mounted while hidden so recording/edit state survives a view switch */}

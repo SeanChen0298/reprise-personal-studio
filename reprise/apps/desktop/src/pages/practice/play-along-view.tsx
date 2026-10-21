@@ -1,8 +1,11 @@
-import { createContext, Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext, Fragment, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState,
+} from "react";
+import { createPortal } from "react-dom";
 import { open } from "@tauri-apps/plugin-shell";
 import type { Line, Song } from "../../types/song";
 import type {
-  ChordAnalysis, ChordBar, ChordSegment, FingerstyleEvent, StrumSection,
+  ChordAnalysis, ChordBar, ChordKey, ChordSegment, FingerstyleEvent, StrumSection,
 } from "../../lib/chord-analysis";
 import { getChordShape, shapeMidiNotes } from "../../lib/chord-shapes";
 import {
@@ -21,6 +24,8 @@ interface PlayAlongViewProps {
   isPlaying: boolean;
   onTogglePlay: () => void;
   onSeek: (ms: number) => void;
+  /** Element in the page's view-switch row where the mode tabs are rendered. */
+  modeTabsContainer?: HTMLElement | null;
 }
 
 interface Playhead {
@@ -40,6 +45,24 @@ function indexAt<T>(items: T[], t: number, start: (x: T) => number): number {
     if (start(items[mid]) <= t) { ans = mid; lo = mid + 1; } else { hi = mid - 1; }
   }
   return ans;
+}
+
+const SHARP_TO_FLAT: Record<string, string> = { "C#": "Db", "D#": "Eb", "F#": "Gb", "G#": "Ab", "A#": "Bb" };
+const FLAT_MAJOR_KEYS = new Set([5, 10, 3, 8, 1, 6]);   // F Bb Eb Ab Db Gb (and relative minors)
+const SHARP_HEAVY_MAJOR_KEYS = new Set([4, 11]);        // E B
+
+/**
+ * Conventional spelling for the song's key: flats in flat keys, and Bb / Eb
+ * (not A# / D#) for borrowed chords in sharp keys with few sharps.
+ */
+function respell(label: string, key?: ChordKey): string {
+  if (!key) return label;
+  const m = /^([A-G]#)(.*)$/.exec(label);
+  if (!m) return label;
+  const majorTonic = key.mode === "major" ? key.tonic_pc : (key.tonic_pc + 3) % 12;
+  if (FLAT_MAJOR_KEYS.has(majorTonic)) return SHARP_TO_FLAT[m[1]] + m[2];
+  if (!SHARP_HEAVY_MAJOR_KEYS.has(majorTonic) && (m[1] === "A#" || m[1] === "D#")) return SHARP_TO_FLAT[m[1]] + m[2];
+  return label;
 }
 
 function formatTime(ms: number): string {
@@ -365,6 +388,76 @@ function sheetSegments(line: Line, chords: ChordSegment[]): SheetSegment[] {
   return segments;
 }
 
+/**
+ * One lyric line with chord names floating above it. Names take no width in
+ * the text, so the lyric stays continuous; after layout, any name that would
+ * overlap the previous one is nudged right.
+ */
+function SheetLine({ segments, chords, isCurrent, playheadChord }: {
+  segments: SheetSegment[];
+  chords: ChordSegment[];
+  isCurrent: boolean;
+  playheadChord: number;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const layout = () => {
+      const labels = Array.from(el.querySelectorAll<HTMLElement>("[data-chord-label]"));
+      labels.forEach((l) => { l.style.transform = ""; });
+      let prevRight = -Infinity;
+      let prevTop: number | null = null;
+      for (const l of labels) {
+        const r = l.getBoundingClientRect();
+        const sameRow = prevTop !== null && Math.abs(r.top - prevTop) < 4;
+        if (sameRow && r.left < prevRight + 8) {
+          const dx = prevRight + 8 - r.left;
+          l.style.transform = `translateX(${dx}px)`;
+          prevRight = r.right + dx;
+        } else {
+          prevRight = r.right;
+        }
+        prevTop = r.top;
+      }
+    };
+    layout();
+    const observer = new ResizeObserver(layout);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [segments]);
+
+  return (
+    <div ref={ref} className="flex flex-wrap items-end">
+      {segments.map((seg, si) => {
+        const activeChord = seg.chord != null && seg.chord === playheadChord && isCurrent;
+        return (
+          <span key={si} className="relative inline-block pt-[19px]">
+            {seg.chord != null && (
+              <span
+                data-chord-label
+                className={`absolute left-0 top-0 h-[18px] leading-[18px] text-[12.5px] font-semibold whitespace-nowrap ${
+                  activeChord ? "text-[var(--theme-text)]" : "text-[var(--text-secondary)]"
+                }`}
+              >
+                <ChordName label={chords[seg.chord].label} index={seg.chord} edited={chords[seg.chord].edited} />
+              </span>
+            )}
+            <span
+              className={`text-[15px] leading-[22px] whitespace-pre-wrap ${
+                isCurrent ? "text-[var(--text-primary)] font-medium" : "text-[var(--text-secondary)]"
+              }`}
+            >
+              {seg.text || "\u00a0"}
+            </span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 function SheetView({
   lines, translationLines, chords, playhead, isPlaying,
 }: {
@@ -384,7 +477,7 @@ function SheetView({
   useFollow(containerRef, playhead.line >= 0 ? `[data-line="${playhead.line}"]` : null, isPlaying, "center");
 
   return (
-    <div ref={containerRef} className="max-w-[820px] flex flex-col gap-0.5">
+    <div ref={containerRef} className="max-w-[820px] flex flex-col gap-1">
       {lines.map((line, li) => {
         const isCurrent = li === playhead.line;
         const translation = translationByOrder.get(line.order);
@@ -393,37 +486,13 @@ function SheetView({
             key={line.id}
             data-line={li}
             onClick={() => line.start_ms != null && seek(line.start_ms)}
-            className={`text-left px-3 py-2 rounded-[8px] transition-colors cursor-pointer ${
+            className={`px-4 py-2 rounded-[8px] transition-colors cursor-pointer ${
               isCurrent ? "bg-[var(--theme-light)]" : "hover:bg-[var(--surface)]"
             }`}
           >
-            <div className="flex flex-wrap items-end">
-              {segmentsByLine[li].map((seg, si) => {
-                const activeChord = seg.chord != null && seg.chord === playhead.chord && isCurrent;
-                return (
-                  <span key={si} className="inline-flex flex-col">
-                    <span
-                      className={`h-[18px] text-[12.5px] font-semibold whitespace-nowrap pr-2 leading-[18px] ${
-                        activeChord ? "text-[var(--theme-text)]" : "text-[var(--text-secondary)]"
-                      }`}
-                    >
-                      {seg.chord != null ? (
-                        <ChordName label={chords[seg.chord].label} index={seg.chord} edited={chords[seg.chord].edited} />
-                      ) : ""}
-                    </span>
-                    <span
-                      className={`text-[15px] leading-[22px] whitespace-pre-wrap ${
-                        isCurrent ? "text-[var(--text-primary)] font-medium" : "text-[var(--text-secondary)]"
-                      }`}
-                    >
-                      {seg.text || " "}
-                    </span>
-                  </span>
-                );
-              })}
-            </div>
+            <SheetLine segments={segmentsByLine[li]} chords={chords} isCurrent={isCurrent} playheadChord={playhead.chord} />
             {translation && (
-              <div className="text-[12px] text-[var(--text-muted)] leading-snug mt-0.5">{translation}</div>
+              <div className="text-[12px] text-[var(--text-muted)] leading-snug mt-1">{translation}</div>
             )}
           </div>
         );
@@ -828,7 +897,7 @@ function GuideSettings({ prefs, onChange, onClose, anchor }: {
 }
 
 export function PlayAlongView({
-  song, lines, translationLines, audioRef, isPlaying, onTogglePlay, onSeek,
+  song, lines, translationLines, audioRef, isPlaying, onTogglePlay, onSeek, modeTabsContainer,
 }: PlayAlongViewProps) {
   const { analysis, isLoading, error, editChord } = useChordData(
     song.chord_status === "done" ? song.chord_data_path : undefined,
@@ -906,9 +975,10 @@ export function PlayAlongView({
   const capoAvailable = capoFret > 0 && mode !== "tab";
   const shapes = capoAvailable && useCapoShapes ? capo!.shapes : null;
 
+  const songKey = analysis?.key;
   const display = useCallback(
-    (label: string) => (label === "N" ? "N.C." : shapes?.[label] ?? label),
-    [shapes],
+    (label: string) => (label === "N" ? "N.C." : shapes?.[label] ?? respell(label, songKey)),
+    [shapes, songKey],
   );
 
   /** Sounding notes for a chord: the shown shape, plus the capo when shapes are capo shapes. */
@@ -1024,26 +1094,41 @@ export function PlayAlongView({
   return (
     <ActionsContext.Provider value={actions}>
       <div className="flex-1 min-h-0 flex flex-col">
-        {/* Now playing: transport, current / next chord, live strum, song facts, view controls */}
-        <div className="flex items-center gap-x-5 gap-y-3 px-6 py-3 border-b border-[var(--border)] bg-[var(--surface)] flex-wrap">
-          <div className="flex items-center gap-2.5">
-            <button
-              onClick={onTogglePlay}
-              title={isPlaying ? "Pause (Space)" : "Play (Space)"}
-              className="w-[38px] h-[38px] rounded-full bg-[var(--theme)] text-white flex items-center justify-center border-none cursor-pointer hover:opacity-90 transition-opacity flex-shrink-0"
-            >
-              {isPlaying ? (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="4" width="5" height="16" rx="1" /><rect x="14" y="4" width="5" height="16" rx="1" /></svg>
-              ) : (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" className="ml-[2px]"><path d="M6 4l14 8-14 8z" /></svg>
-              )}
-            </button>
-            <span className="text-[11.5px] tabular-nums text-[var(--text-muted)] w-[74px]">
-              {formatTime(clock.now)} / {formatTime(clock.total)}
-            </span>
-          </div>
+        {/* View-mode tabs live in the page's view-switch row */}
+        {modeTabsContainer && createPortal(
+          <div className="flex p-[2px] rounded-[8px] bg-[var(--bg)] border border-[var(--border)]">
+            {MODES.map(({ value, label }) => (
+              <button
+                key={value}
+                onClick={() => setMode(value)}
+                className={`px-3 py-[4px] rounded-[6px] text-[12px] font-medium cursor-pointer border-none transition-all ${
+                  mode === value
+                    ? "bg-[var(--surface)] text-[var(--text-primary)] shadow-[0_1px_2px_rgba(0,0,0,0.08)]"
+                    : "bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>,
+          modeTabsContainer,
+        )}
 
-          <div className="flex items-baseline gap-3 min-w-[140px]">
+        {/* Now playing */}
+        <div className="flex items-center gap-6 px-6 pt-3 pb-2 bg-[var(--surface)]">
+          <button
+            onClick={onTogglePlay}
+            title={isPlaying ? "Pause (Space)" : "Play (Space)"}
+            className="w-[40px] h-[40px] rounded-full bg-[var(--theme)] text-white flex items-center justify-center border-none cursor-pointer hover:opacity-90 transition-opacity flex-shrink-0"
+          >
+            {isPlaying ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="4" width="5" height="16" rx="1" /><rect x="14" y="4" width="5" height="16" rx="1" /></svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" className="ml-[2px]"><path d="M6 4l14 8-14 8z" /></svg>
+            )}
+          </button>
+
+          <div className="flex items-baseline gap-2.5 w-[150px] flex-shrink-0">
             {current && current.label !== "N" ? (
               <ChordName
                 label={current.label}
@@ -1055,8 +1140,8 @@ export function PlayAlongView({
               <span className="text-[30px] font-semibold leading-none text-[var(--text-muted)]">–</span>
             )}
             {next && (
-              <span className="flex items-center gap-1 text-[13px] text-[var(--text-muted)]">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <span className="flex items-center gap-1 text-[13px] text-[var(--text-muted)] whitespace-nowrap">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M5 12h14M13 6l6 6-6 6" />
                 </svg>
                 <ChordName label={next.label} index={nextIndex} edited={next.edited} className="font-semibold text-[var(--text-secondary)]" />
@@ -1078,9 +1163,9 @@ export function PlayAlongView({
             </div>
           )}
 
-          <div className="flex items-center gap-3 ml-auto flex-wrap">
+          <div className="flex items-center gap-2 ml-auto">
             {meta.length > 0 && (
-              <span className="text-[12px] text-[var(--text-muted)]">
+              <span className="text-[12px] text-[var(--text-muted)] whitespace-nowrap mr-2">
                 {meta.map((m, i) => (
                   <Fragment key={i}>{i > 0 && <span className="mx-1.5">·</span>}{m}</Fragment>
                 ))}
@@ -1092,7 +1177,7 @@ export function PlayAlongView({
                 title={`Show the chord shapes to play with a capo on fret ${capoFret} (barre chords ${Math.round(
                   capo!.barre_share_no_capo * 100,
                 )}% → ${Math.round(capo!.barre_share_with_capo * 100)}%)`}
-                className={`px-2.5 py-[4px] rounded-[6px] text-[12px] font-medium border-[1.5px] cursor-pointer transition-all ${
+                className={`h-[28px] px-2.5 rounded-[6px] text-[12px] font-medium border-[1.5px] cursor-pointer transition-all whitespace-nowrap ${
                   useCapoShapes
                     ? "border-[var(--theme)] text-[var(--theme-text)] bg-[var(--theme-light)]"
                     : "border-[var(--border)] text-[var(--text-secondary)] bg-transparent hover:border-[#888]"
@@ -1101,17 +1186,17 @@ export function PlayAlongView({
                 Capo {capoFret}
               </button>
             )}
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center rounded-[6px] border-[1.5px] border-[var(--border)] overflow-hidden">
               <button
                 onClick={() => setGuideOn((v) => !v)}
                 disabled={guideDisabled}
                 title={mode === "tab"
                   ? "Play the fingerstyle arrangement along with the song"
                   : "Strum the chords along with the song, using the strum pattern"}
-                className={`flex items-center gap-1.5 px-2.5 py-[4px] rounded-[6px] text-[12px] font-medium border-[1.5px] cursor-pointer transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                className={`h-[25px] flex items-center gap-1.5 px-2.5 text-[12px] font-medium border-none cursor-pointer transition-all whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed ${
                   guideOn
-                    ? "border-[var(--theme)] text-[var(--theme-text)] bg-[var(--theme-light)]"
-                    : "border-[var(--border)] text-[var(--text-secondary)] bg-transparent hover:border-[#888]"
+                    ? "text-[var(--theme-text)] bg-[var(--theme-light)]"
+                    : "text-[var(--text-secondary)] bg-transparent hover:text-[var(--text-primary)]"
                 }`}
               >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1123,44 +1208,40 @@ export function PlayAlongView({
               <button
                 onClick={(e) => setGuideSettingsAnchor(e.currentTarget.getBoundingClientRect())}
                 title="Guitar sound, volume and timing"
-                className="w-[26px] h-[26px] rounded-[6px] border-[1.5px] border-[var(--border)] bg-transparent text-[var(--text-secondary)] hover:border-[#888] cursor-pointer flex items-center justify-center"
+                className="h-[25px] w-[26px] border-none border-l border-[var(--border)] bg-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer flex items-center justify-center"
+                style={{ borderLeft: "1.5px solid var(--border)" }}
               >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0" />
+                  <path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12" />
                   <circle cx="16" cy="6" r="2" /><circle cx="10" cy="12" r="2" /><circle cx="18" cy="18" r="2" />
                 </svg>
               </button>
-            </div>
-            <div className="flex p-[2px] rounded-[8px] bg-[var(--bg)] border border-[var(--border)]">
-              {MODES.map(({ value, label }) => (
-                <button
-                  key={value}
-                  onClick={() => setMode(value)}
-                  className={`px-3 py-[4px] rounded-[6px] text-[12px] font-medium cursor-pointer border-none transition-all ${
-                    mode === value
-                      ? "bg-[var(--surface)] text-[var(--text-primary)] shadow-[0_1px_2px_rgba(0,0,0,0.08)]"
-                      : "bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
             </div>
           </div>
         </div>
 
         {/* Seek bar */}
-        <div
-          className="h-[5px] bg-[var(--bg)] cursor-pointer group"
-          onClick={(e) => {
-            const r = e.currentTarget.getBoundingClientRect();
-            if (clock.total > 0) onSeek(((e.clientX - r.left) / r.width) * clock.total);
-          }}
-        >
+        <div className="flex items-center gap-3 px-6 pb-3 bg-[var(--surface)] border-b border-[var(--border)]">
+          <span className="text-[11px] tabular-nums text-[var(--text-muted)] w-[34px] text-right">{formatTime(clock.now)}</span>
           <div
-            className="h-full bg-[var(--theme)] opacity-70 group-hover:opacity-100 transition-opacity"
-            style={{ width: `${clock.total > 0 ? Math.min(100, (clock.now / clock.total) * 100) : 0}%` }}
-          />
+            className="relative flex-1 h-[14px] flex items-center cursor-pointer group"
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              if (clock.total > 0) onSeek(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * clock.total);
+            }}
+          >
+            <div className="w-full h-[4px] rounded-full bg-[var(--bg)] border border-[var(--border-subtle)] overflow-hidden">
+              <div
+                className="h-full bg-[var(--theme)]"
+                style={{ width: `${clock.total > 0 ? Math.min(100, (clock.now / clock.total) * 100) : 0}%` }}
+              />
+            </div>
+            <div
+              className="absolute w-[11px] h-[11px] rounded-full bg-[var(--theme)] border-2 border-[var(--surface)] shadow-[0_0_0_1px_var(--theme)] -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity"
+              style={{ left: `${clock.total > 0 ? Math.min(100, (clock.now / clock.total) * 100) : 0}%` }}
+            />
+          </div>
+          <span className="text-[11px] tabular-nums text-[var(--text-muted)] w-[34px]">{formatTime(clock.total)}</span>
         </div>
 
         {/* One scrolling area for whichever view is selected */}
