@@ -39,7 +39,9 @@ export interface ChordSegment {
   label: string;        // e.g. "F#m7", or "N" for no chord
   root: string | null;
   root_pc: number | null;
-  quality: "maj" | "m" | "7" | "m7" | "maj7" | "m7b5" | "dim" | "sus4" | "N";
+  quality:
+    | "maj" | "m" | "7" | "m7" | "maj7" | "m7b5" | "dim" | "sus4"
+    | "maj9" | "9" | "m9" | "add9" | "6" | "m6" | "sus2" | "7sus4" | "aug" | "dim7" | "N";
   confidence: number;   // 0–1
   /** Set when the user corrected this chord (see chord-edits.ts). */
   edited?: boolean;

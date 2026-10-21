@@ -7,8 +7,8 @@ import type {
   ChordAnalysis, ChordBar, ChordKey, ChordSegment, StrumSection,
 } from "../../lib/chord-analysis";
 import {
-  CHORD_LABEL_RE, QUALITY_SUFFIXES, capoShapeLabel, getChordVoicings, shapeMidiNotes, soundingLabel,
-  type ChordShape,
+  CHORD_LABEL_RE, QUALITY_SUFFIXES, canonicalChord, capoShapeLabel, formatChord, getChordVoicings,
+  shapeMidiNotes, soundingLabel, type ChordNotation, type ChordShape,
 } from "../../lib/chord-shapes";
 import { buildPicking, PICK_PATTERNS, type PickEvent, type PickPattern } from "../../lib/fingerpicking";
 import { chordPitchClasses, noteNames, relatedChords } from "../../lib/chord-relations";
@@ -102,6 +102,8 @@ interface PlayAlongActions {
   toSounding: (shown: string) => string;
   /** Capo fret when chord names are shown as capo shapes, else 0. */
   capoShown: number;
+  /** Chord-name style for labels built outside `display` (e.g. in the picker). */
+  notation: ChordNotation;
   /** All fingerings for a shown chord name, and the one currently chosen. */
   voicings: (shown: string) => { all: ChordShape[]; chosen: number };
   /** Remember which fingering to use for a shown chord name (0 = back to the default). */
@@ -195,11 +197,17 @@ function StrumPattern({ pattern, activeSlot, showCounts = true }: {
 // ---------------------------------------------------------------------------
 
 const PICKER_ROOTS = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
-const PICKER_QUALITIES = QUALITY_SUFFIXES.map((suffix) => ({ suffix, label: suffix === "" ? "maj" : suffix }));
+/** Picker label for a quality suffix in the chosen notation ("" -> "maj"). */
+function qualityLabel(suffix: string, notation: ChordNotation): string {
+  if (suffix === "") return "maj";
+  return formatChord("C" + suffix, notation).slice(1);
+}
+const BASIC_QUALITIES = QUALITY_SUFFIXES.slice(0, 8);
+const EXTENDED_QUALITIES = QUALITY_SUFFIXES.slice(8);
 
 /** Split a label into picker root + suffix, normalising enharmonics to the picker's spelling. */
 function splitLabel(label: string): { root: string; suffix: string } {
-  const m = CHORD_LABEL_RE.exec(label);
+  const m = CHORD_LABEL_RE.exec(canonicalChord(label));
   if (!m) return { root: "C", suffix: "" };
   const enharmonic: Record<string, string> = { Db: "C#", "D#": "Eb", Gb: "F#", "G#": "Ab", "A#": "Bb" };
   return { root: enharmonic[m[1]] ?? m[1], suffix: m[2] ?? "" };
@@ -216,8 +224,10 @@ function ChordEditor({ segment, onPreview, onSelect, onSave }: {
   onSelect: (shown: string) => void;
   onSave: (soundingLabel: string) => Promise<void>;
 }) {
-  const { display, toSounding, capoShown, chooseVoicing } = useActions();
-  const shownCurrent = segment.label === "N" ? "N" : display(segment.label);
+  const { display, toSounding, capoShown, chooseVoicing, notation } = useActions();
+  // Compare and build labels in canonical form; show them in the chosen notation.
+  const shownCurrent = segment.label === "N" ? "N" : canonicalChord(display(segment.label));
+  const fmt = (l: string) => (l === "N" ? "N.C." : formatChord(l, notation));
   const initial = shownCurrent === "N" ? { root: "C", suffix: "" } : splitLabel(shownCurrent);
   const [root, setRoot] = useState(initial.root);
   const [suffix, setSuffix] = useState(initial.suffix);
@@ -231,7 +241,7 @@ function ChordEditor({ segment, onPreview, onSelect, onSave }: {
     setRoot(nextRoot);
     setSuffix(nextSuffix);
     setNoChord(false);
-    onSelect(nextRoot + nextSuffix);
+    onSelect(fmt(nextRoot + nextSuffix));
     onPreview(toSounding(nextRoot + nextSuffix));
   };
   const save = async (shown: string) => {
@@ -310,13 +320,20 @@ function ChordEditor({ segment, onPreview, onSelect, onSave }: {
           <button key={r} onClick={() => pick(r, suffix)} className={chip(!noChord && root === r)}>{r}</button>
         ))}
       </div>
-      <div className="grid grid-cols-5 gap-1 mb-2">
-        {PICKER_QUALITIES.map((q) => (
-          <button key={q.label} onClick={() => pick(root, q.suffix)} className={chip(!noChord && suffix === q.suffix)}>
-            {q.label}
+      <div className="grid grid-cols-5 gap-1 mb-1">
+        {BASIC_QUALITIES.map((q) => (
+          <button key={q} onClick={() => pick(root, q)} className={chip(!noChord && suffix === q)}>
+            {qualityLabel(q, notation)}
           </button>
         ))}
         <button onClick={() => { setNoChord(true); onSelect("N"); }} className={chip(noChord)} title="No chord here">N.C.</button>
+      </div>
+      <div className="grid grid-cols-5 gap-1 mb-2" title="Extended chords (not detected automatically)">
+        {EXTENDED_QUALITIES.map((q) => (
+          <button key={q} onClick={() => pick(root, q)} className={chip(!noChord && suffix === q)}>
+            {qualityLabel(q, notation)}
+          </button>
+        ))}
       </div>
       <div className="flex items-center gap-1.5">
         <button
@@ -324,7 +341,7 @@ function ChordEditor({ segment, onPreview, onSelect, onSave }: {
           disabled={saving || chosen === shownCurrent}
           className="flex-1 h-[28px] rounded-[6px] bg-[var(--accent)] text-white text-[12px] font-medium border-none cursor-pointer hover:opacity-85 disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          {chosen === shownCurrent ? "Current" : `Use ${chosen === "N" ? "N.C." : chosen}`}
+          {chosen === shownCurrent ? "Current" : `Use ${fmt(chosen)}`}
         </button>
         {segment.edited && (
           <button
@@ -360,7 +377,7 @@ function ChordPopover({
   onEdit: (segment: ChordSegment, label: string) => Promise<void>;
   onClose: () => void;
 }) {
-  const { display, toSounding, voicings, chooseVoicing, capoShown } = useActions();
+  const { display, toSounding, voicings, chooseVoicing, capoShown, notation } = useActions();
   const ref = useRef<HTMLDivElement>(null);
   // A chord picked in the editor (screen name) replaces the one shown, so its
   // fingering, sound and buttons follow the selection before it's saved.
@@ -423,7 +440,7 @@ function ChordPopover({
           <span className="text-[18px] font-semibold text-[var(--text-primary)]">{shapeLabel === "N" ? "N.C." : shapeLabel}</span>
           <span className="text-[11px] text-[var(--text-muted)] text-right">
             {previewing && <span className="text-[var(--theme-text)]">preview · </span>}
-            {useCapo && capoFret > 0 && shapeLabel !== "N" && <>capo {capoFret} · sounds {soundingShown}</>}
+            {useCapo && capoFret > 0 && shapeLabel !== "N" && <>capo {capoFret} · sounds {formatChord(canonicalChord(soundingShown), notation)}</>}
             {!previewing && segment?.edited && <>{useCapo ? " · " : ""}edited</>}
           </span>
         </div>
@@ -1123,13 +1140,15 @@ interface GuidePrefs {
   volume: number;        // 0..1
   offsetMs: number;      // play this much earlier than the detected beat
   instrument: GuitarInstrument;
+  /** Chord-name style: Dmaj9 (standard) or DM7(9) (J-pop charts). */
+  notation: ChordNotation;
   pickPattern: PickPattern;
   /** Chosen fingering per chord name: "E shape@3" etc. */
   voicings: Record<string, string>;
 }
 
 const DEFAULT_GUIDE_PREFS: GuidePrefs = {
-  volume: 0.3, offsetMs: 60, instrument: "steel", pickPattern: "travis", voicings: {},
+  volume: 0.3, offsetMs: 60, instrument: "steel", notation: "standard", pickPattern: "travis", voicings: {},
 };
 
 function readGuidePrefs(): GuidePrefs {
@@ -1168,6 +1187,24 @@ function GuideSettings({ prefs, onChange, onClose, anchor }: {
       style={{ left, top: anchor.bottom + 6, width }}
       className="fixed z-50 p-3 rounded-[10px] border border-[var(--border)] bg-[var(--surface)] shadow-[0_8px_28px_rgba(0,0,0,0.14)] flex flex-col gap-3"
     >
+      <div>
+        <div className={label}>Chord names</div>
+        <div className="flex p-[2px] rounded-[8px] bg-[var(--bg)] border border-[var(--border)]">
+          {([["standard", "Dmaj9 · Dm7♭5"], ["jpop", "DM7(9) · Dm7(♭5)"]] as const).map(([value, text]) => (
+            <button
+              key={value}
+              onClick={() => onChange({ ...prefs, notation: value })}
+              className={`flex-1 px-2 py-[3px] rounded-[6px] text-[11.5px] font-medium cursor-pointer border-none ${
+                prefs.notation === value
+                  ? "bg-[var(--surface)] text-[var(--text-primary)] shadow-[0_1px_2px_rgba(0,0,0,0.08)]"
+                  : "bg-transparent text-[var(--text-muted)]"
+              }`}
+            >
+              {text}
+            </button>
+          ))}
+        </div>
+      </div>
       <div>
         <div className={label}>Sound</div>
         <div className="flex p-[2px] rounded-[8px] bg-[var(--bg)] border border-[var(--border)]">
@@ -1299,10 +1336,13 @@ export function PlayAlongView({
   const capoShown = capoAvailable && useCapoShapes ? capoFret : 0;
 
   const songKey = analysis?.key;
+  const notation = guidePrefs.notation;
   const display = useCallback(
     (label: string) =>
-      label === "N" ? "N.C." : capoShown ? capoShapeLabel(label, capoShown) : respell(label, songKey),
-    [capoShown, songKey],
+      label === "N"
+        ? "N.C."
+        : formatChord(capoShown ? capoShapeLabel(label, capoShown) : respell(canonicalChord(label), songKey), notation),
+    [capoShown, songKey, notation],
   );
   const toSounding = useCallback(
     (shown: string) => (capoShown ? respell(soundingLabel(shown, capoShown), songKey) : shown),
@@ -1355,6 +1395,7 @@ export function PlayAlongView({
     display,
     toSounding,
     capoShown,
+    notation,
     voicings,
     chooseVoicing: (shown, index) => {
       const v = getChordVoicings(shown)[index];
@@ -1372,7 +1413,7 @@ export function PlayAlongView({
       if (label !== "N") playChord(label);
       setPopover({ label, anchor: anchor.getBoundingClientRect(), index });
     },
-  }), [onSeek, display, toSounding, capoShown, voicings, playChord]);
+  }), [onSeek, display, toSounding, capoShown, notation, voicings, playChord]);
 
   const picking = useMemo(
     () => (analysis ? buildPicking(analysis, guidePrefs.pickPattern, voicingFor, capoShown) : []),

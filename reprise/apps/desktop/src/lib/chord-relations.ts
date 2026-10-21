@@ -7,12 +7,7 @@
  * alternatives when correcting a chord.
  */
 
-import { parseChordLabel, QUALITY_SUFFIXES, type Quality } from "./chord-shapes";
-
-const INTERVALS: Record<Quality, number[]> = {
-  "": [0, 4, 7], m: [0, 3, 7], "7": [0, 4, 7, 10], m7: [0, 3, 7, 10],
-  maj7: [0, 4, 7, 11], m7b5: [0, 3, 6, 10], dim: [0, 3, 6], sus4: [0, 5, 7],
-};
+import { parseChordLabel, QUALITY_INTERVALS as INTERVALS, QUALITY_SUFFIXES } from "./chord-shapes";
 const NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
 
 /** Pitch classes (0–11) in a chord, or [] for "N" / unknown. */
@@ -62,9 +57,12 @@ export function relatedChords(label: string, limit = 8): RelatedChord[] {
           : shared.length === mine.length
             ? `every ${label} note is in ${candidate}`
             : `${shared.length} shared notes, ${NAMES[root]} in the bass`;
-      // Prefer more shared notes, then same root, then simpler chords.
-      const score = shared.length * 10 + (sameRoot ? 3 : 0) - (theirs.length === 4 ? 1 : 0)
-        - (q === "dim" || q === "m7b5" || q === "sus4" ? 2 : 0);
+      // Prefer more shared notes and few added ones, then same root, then
+      // common chord types over colour chords.
+      const added = theirs.length - shared.length;
+      const colour = ["dim", "m7b5", "sus4", "sus2", "aug", "dim7", "7sus4", "6", "m6"].includes(q) ? 2 : 0;
+      const extended = ["maj9", "9", "m9", "add9"].includes(q) ? 2 : 0;
+      const score = shared.length * 10 - added * 4 + (sameRoot ? 3 : 0) - colour - extended;
       out.push({ label: candidate, shared: noteNames(shared), why, score });
     }
   }
