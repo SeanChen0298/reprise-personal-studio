@@ -41,6 +41,8 @@ export interface PickNote {
   fret: number;     // as fingered (relative to the capo when one is used)
   midi: number;     // sounding pitch
   role: "bass" | "treble";
+  /** Set by hand in the tab. */
+  edited?: boolean;
 }
 
 export interface PickEvent {
@@ -139,4 +141,78 @@ export function buildPicking(
     }
   }
   return events;
+}
+
+// ---------------------------------------------------------------------------
+// Hand edits to single notes (see hooks/use-tab-edits.ts)
+// ---------------------------------------------------------------------------
+
+export type TabEdit =
+  | { kind: "note"; bar: number; slot: number; string: number; fret: number | null; capo: number; edited_at: string }
+  | { kind: "reset"; bar: number; edited_at: string };
+
+/**
+ * Apply the user's note edits on top of the generated part. Each edit sets
+ * one string in one eighth-note cell (a fret, or a rest); a "reset" drops the
+ * earlier edits of its bar. Cells nobody edited keep following the chords.
+ * Frets are stored relative to the capo they were typed with, so they keep
+ * their pitch when the capo view changes.
+ */
+export function applyTabEdits(
+  events: PickEvent[],
+  edits: TabEdit[],
+  analysis: ChordAnalysis,
+  capo: number,
+): PickEvent[] {
+  if (edits.length === 0) return events;
+  const bars = analysis.bars ?? [];
+  const beats = analysis.beats_ms ?? [];
+  const chords = analysis.chords ?? [];
+
+  // Latest edit per cell, after the bar's last reset.
+  const cells = new Map<string, Extract<TabEdit, { kind: "note" }>>();
+  for (const e of edits) {
+    if (e.kind === "reset") {
+      for (const key of Array.from(cells.keys())) if (key.startsWith(`${e.bar}:`)) cells.delete(key);
+    } else {
+      cells.set(`${e.bar}:${e.slot}:${e.string}`, e);
+    }
+  }
+  if (cells.size === 0) return events;
+
+  const bySlot = new Map<string, PickEvent>();
+  const out = events.map((ev) => {
+    const copy = { ...ev, notes: [...ev.notes] };
+    bySlot.set(`${ev.bar}:${ev.slot}`, copy);
+    return copy;
+  });
+
+  for (const e of cells.values()) {
+    const bar = bars[e.bar];
+    if (!bar) continue;
+    let ev = bySlot.get(`${e.bar}:${e.slot}`);
+    if (!ev) {
+      const b = bar.first_beat + Math.floor(e.slot / 2);
+      const t0 = beats[b];
+      if (t0 == null || b >= bar.first_beat + bar.beats) continue;
+      const t1 = beats[b + 1] ?? bar.end_ms;
+      const t = e.slot % 2 === 0 ? t0 : (t0 + t1) / 2;
+      let ci = 0;
+      while (ci + 1 < chords.length && chords[ci + 1].start_ms <= t) ci++;
+      ev = { t, bar: e.bar, slot: e.slot, chord: ci, notes: [] };
+      bySlot.set(`${e.bar}:${e.slot}`, ev);
+      out.push(ev);
+    }
+    ev.notes = ev.notes.filter((n) => n.string !== e.string);
+    if (e.fret != null) {
+      const fret = e.fret + e.capo - capo;   // same pitch under the capo shown now
+      if (fret >= 0) {
+        ev.notes.push({
+          string: e.string, fret, midi: STANDARD_TUNING[6 - e.string] + e.fret + e.capo,
+          role: e.string >= 4 ? "bass" : "treble", edited: true,
+        });
+      }
+    }
+  }
+  return out.filter((ev) => ev.notes.length > 0).sort((a, b) => a.t - b.t);
 }

@@ -8,10 +8,11 @@ import type {
 } from "../../lib/chord-analysis";
 import {
   CHORD_LABEL_RE, canonicalChord, capoShapeLabel, formatChord, getChordVoicings,
-  shapeMidiNotes, soundingLabel, type ChordNotation, type ChordShape,
+  shapeMidiNotes, soundingLabel, STANDARD_TUNING, type ChordNotation, type ChordShape,
 } from "../../lib/chord-shapes";
 import { halfBeatTimes } from "../../lib/chord-edits";
-import { buildPicking, PICK_PATTERNS, type PickEvent, type PickPattern } from "../../lib/fingerpicking";
+import { applyTabEdits, buildPicking, PICK_PATTERNS, type PickEvent, type PickPattern } from "../../lib/fingerpicking";
+import { useTabEdits, type TabEdits } from "../../hooks/use-tab-edits";
 import {
   loadInstrument, pluck, setInstrument, setSynthVolume, strum, synthNow, type GuitarInstrument,
 } from "../../lib/guitar-synth";
@@ -886,15 +887,78 @@ function LeadSheetView({ analysis, lines, chords, playhead, isPlaying }: {
 const STRING_LABELS = ["e", "B", "G", "D", "A", "E"];
 
 /** Fingerpicked accompaniment from the chords, shown as tab one bar per card. */
-function PickingView({ analysis, picking, pattern, onPattern, playhead, isPlaying }: {
+/**
+ * Fret entry for one tab cell. Enter / click away saves (empty, "-" or "x" =
+ * rest), Escape cancels, arrow keys save and move to the neighbouring cell.
+ */
+function TabCellInput({ initial, onDone }: {
+  initial: string;
+  /** text = null when cancelled or unchanged; move = where to go next. */
+  onDone: (text: string | null, move?: { slot: number; string: number }) => void;
+}) {
+  const [text, setText] = useState(initial);
+  const done = useRef(false);
+  const finish = (value: string | null, move?: { slot: number; string: number }) => {
+    if (done.current) return;
+    done.current = true;
+    onDone(value === initial ? null : value, move);
+  };
+  const moves: Record<string, { slot: number; string: number }> = {
+    ArrowLeft: { slot: -1, string: 0 }, ArrowRight: { slot: 1, string: 0 },
+    ArrowUp: { slot: 0, string: -1 }, ArrowDown: { slot: 0, string: 1 },
+  };
+  return (
+    <input
+      autoFocus
+      value={text}
+      onFocus={(e) => e.currentTarget.select()}
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => setText(e.target.value.replace(/[^0-9xX-]/g, "").slice(0, 2))}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === "Enter") finish(text);
+        else if (e.key === "Escape") finish(null);
+        else if (moves[e.key]) { e.preventDefault(); finish(text, moves[e.key]); }
+      }}
+      onBlur={() => finish(text)}
+      className="w-[26px] h-[16px] p-0 text-center font-mono text-[12px] leading-[16px] rounded-[3px] border-none outline outline-1 outline-[var(--theme)] bg-[var(--surface)] text-[var(--text-primary)]"
+    />
+  );
+}
+
+/** A tab cell being typed into: bar index, eighth-note slot, string (1 = high e). */
+interface TabCell { bar: number; slot: number; string: number }
+
+function PickingView({ analysis, picking, pattern, onPattern, playhead, isPlaying, tabEdits }: {
   analysis: ChordAnalysis;
   picking: PickEvent[];
   pattern: PickPattern;
   onPattern: (p: PickPattern) => void;
   playhead: Playhead;
   isPlaying: boolean;
+  tabEdits: TabEdits;
 }) {
   const { seek, capoShown } = useActions();
+  const [editing, setEditing] = useState<TabCell | null>(null);
+  // Bars with hand edits still in effect (since their last reset).
+  const editedBars = useMemo(() => {
+    const set = new Set<number>();
+    for (const e of tabEdits.edits) {
+      if (e.kind === "reset") set.delete(e.bar); else set.add(e.bar);
+    }
+    return set;
+  }, [tabEdits.edits]);
+  const commit = (cell: TabCell, text: string) => {
+    const v = text.trim();
+    if (v === "" || v === "-" || v.toLowerCase() === "x") {
+      tabEdits.setNote(cell.bar, cell.slot, cell.string, null, capoShown);
+      return;
+    }
+    const fret = Number(v);
+    if (!Number.isInteger(fret) || fret < 0 || fret > 24) return;
+    tabEdits.setNote(cell.bar, cell.slot, cell.string, fret, capoShown);
+    pluck(STANDARD_TUNING[6 - cell.string] + fret + capoShown, cell.string, synthNow() + 0.02, 0.7);
+  };
   const containerRef = useRef<HTMLDivElement>(null);
   const bars = analysis.bars ?? [];
   const chords = analysis.chords ?? [];
@@ -934,8 +998,17 @@ function PickingView({ analysis, picking, pattern, onPattern, playhead, isPlayin
         </div>
         <span className="text-[11.5px] text-[var(--text-muted)]">
           Fingerpicking the chords{capoShown ? ` · capo ${capoShown}` : ""} · <b className="font-semibold text-[var(--text-primary)]">bold</b> = thumb (bass) ·
-          click a chord name to change its fingering
+          click a chord name to change its fingering · click a note to type a fret (empty = rest)
         </span>
+        {tabEdits.edits.length > 0 && (
+          <button
+            onClick={tabEdits.undo}
+            title="Undo your most recent note edit"
+            className="ml-auto h-[26px] px-2.5 rounded-[6px] text-[12px] font-medium border-[1.5px] border-[var(--border)] text-[var(--text-secondary)] bg-transparent hover:border-[#888] cursor-pointer whitespace-nowrap"
+          >
+            Undo note
+          </button>
+        )}
       </div>
       <div className="grid grid-cols-[repeat(auto-fill,minmax(232px,1fr))] gap-1.5">
         {pickedBars.map((bar) => {
@@ -964,22 +1037,54 @@ function PickingView({ analysis, picking, pattern, onPattern, playhead, isPlayin
                     className="text-[12.5px] font-semibold text-[var(--text-secondary)]"
                   />
                 ))}
+                {editedBars.has(bar.index) && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); tabEdits.resetBar(bar.index); }}
+                    title="Put this bar back to the pattern (undoable)"
+                    className="ml-auto bg-transparent border-none p-0 cursor-pointer text-[10.5px] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                  >
+                    Reset bar
+                  </button>
+                )}
               </div>
               <div className="font-mono text-[12px] leading-[16px]">
                 {STRING_LABELS.map((name, si) => (
                   <div key={name} className="flex items-center">
                     <span className="w-[14px] text-[var(--text-muted)]">{name}</span>
                     {Array.from({ length: slots }).map((_, slot) => {
-                      const note = evs?.get(slot)?.notes.find((n) => n.string === si + 1);
+                      const string = si + 1;
+                      const note = evs?.get(slot)?.notes.find((n) => n.string === string);
                       const active = isCurrent && slot === playhead.slot;
+                      const cell = { bar: bar.index, slot, string };
+                      if (editing && editing.bar === bar.index && editing.slot === slot && editing.string === string) {
+                        return (
+                          <TabCellInput
+                            key={slot}
+                            initial={note ? String(note.fret) : ""}
+                            onDone={(text, move) => {
+                              if (text != null) commit(cell, text);
+                              setEditing(move ? {
+                                bar: bar.index,
+                                slot: Math.min(slots - 1, Math.max(0, slot + move.slot)),
+                                string: Math.min(6, Math.max(1, string + move.string)),
+                              } : null);
+                            }}
+                          />
+                        );
+                      }
                       return (
                         <span
                           key={slot}
-                          className={`w-[26px] text-center ${active ? "bg-[var(--theme)] text-white rounded-[3px]" : ""} ${
+                          role="button"
+                          onClick={(e) => { e.stopPropagation(); setEditing(cell); }}
+                          title={note?.edited ? "Edited by you · click to change" : "Click to type a fret"}
+                          className={`w-[26px] text-center cursor-text rounded-[3px] hover:outline hover:outline-1 hover:outline-[var(--theme)] ${active ? "bg-[var(--theme)] text-white" : ""} ${
                             note
-                              ? note.role === "bass"
-                                ? `font-bold ${active ? "" : "text-[var(--text-primary)]"}`
-                                : active ? "" : "text-[var(--text-secondary)]"
+                              ? note.edited
+                                ? `font-semibold ${active ? "" : "text-[var(--theme-text)] bg-[var(--theme-light)]"}`
+                                : note.role === "bass"
+                                  ? `font-bold ${active ? "" : "text-[var(--text-primary)]"}`
+                                  : active ? "" : "text-[var(--text-secondary)]"
                               : active ? "opacity-60" : "text-[var(--border)]"
                           }`}
                         >
@@ -1521,9 +1626,13 @@ export function PlayAlongView({
     });
   }, [analysis, fingerings, barOf, shapeOf]);
 
+  // Fingerpicking: the generated pattern plus the user's hand-edited notes.
+  const tabEdits = useTabEdits(song.audio_folder);
   const picking = useMemo(
-    () => (analysis ? buildPicking(analysis, guidePrefs.pickPattern, voicingFor, capoShown) : []),
-    [analysis, guidePrefs.pickPattern, voicingFor, capoShown],
+    () => (analysis
+      ? applyTabEdits(buildPicking(analysis, guidePrefs.pickPattern, voicingFor, capoShown), tabEdits.edits, analysis, capoShown)
+      : []),
+    [analysis, guidePrefs.pickPattern, voicingFor, capoShown, tabEdits.edits],
   );
 
   // Sound + volume apply to chord previews too, not just the guide.
@@ -1811,6 +1920,7 @@ export function PlayAlongView({
               onPattern={(p) => changeGuidePrefs({ ...guidePrefs, pickPattern: p })}
               playhead={playhead}
               isPlaying={isPlaying}
+              tabEdits={tabEdits}
             />
           )}
         </div>
