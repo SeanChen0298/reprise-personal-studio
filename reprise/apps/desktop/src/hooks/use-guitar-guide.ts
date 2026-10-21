@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { ChordAnalysis } from "../lib/chord-analysis";
 import { damp, pluck, setSynthVolume, strum, synthNow } from "../lib/guitar-synth";
 
@@ -104,6 +104,12 @@ export function useGuitarGuide(options: {
     if (enabled) setSynthVolume(volume);
   }, [enabled, volume]);
 
+  // Read the latest fingerings through a ref: a fingering or capo change
+  // should affect the next strums, not restart the scheduler (restarting
+  // stops the notes that are ringing).
+  const chordNotesRef = useRef(chordNotes);
+  chordNotesRef.current = chordNotes;
+
   useEffect(() => {
     if (!enabled || events.length === 0) return;
 
@@ -135,7 +141,7 @@ export function useGuitarGuide(options: {
         const ev = events[i];
         const when = now + Math.max(0, (ev.t - t) / rate - offsetMs) / 1000;
         if (ev.kind === "strum" && ev.chord) {
-          strum(chordNotes(ev.chord, ev.chordAt), { when, direction: ev.direction });
+          strum(chordNotesRef.current(ev.chord, ev.chordAt), { when, direction: ev.direction });
         } else if (ev.notes) {
           for (const n of ev.notes) pluck(n.midi, n.string, when, 0.55);
         }
@@ -147,5 +153,5 @@ export function useGuitarGuide(options: {
       window.clearInterval(timer);
       damp();
     };
-  }, [enabled, events, audioRef, chordNotes, offsetMs]);
+  }, [enabled, events, audioRef, offsetMs]);
 }

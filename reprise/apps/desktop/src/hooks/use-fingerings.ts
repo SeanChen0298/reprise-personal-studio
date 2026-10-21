@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { exists, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 
 /**
@@ -78,5 +78,8 @@ export function useFingerings(songFolder: string | undefined): Fingerings {
     [path],
   );
 
-  return { lookup, hasOwn, choose };
+  // Stable object: consumers (the guide guitar's scheduler, the picking
+  // part) must only re-run when a fingering actually changes, not on every
+  // render — re-running the guide stops the notes that are ringing.
+  return useMemo(() => ({ lookup, hasOwn, choose }), [lookup, hasOwn, choose]);
 }
