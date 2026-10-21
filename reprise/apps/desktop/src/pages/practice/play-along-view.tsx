@@ -15,7 +15,7 @@ import { chordPitchClasses, noteNames, relatedChords } from "../../lib/chord-rel
 import {
   loadInstrument, pluck, setInstrument, setSynthVolume, strum, synthNow, type GuitarInstrument,
 } from "../../lib/guitar-synth";
-import { useChordData } from "../../hooks/use-chord-data";
+import { useChordData, type ChordLength } from "../../hooks/use-chord-data";
 import { saveChordSettings } from "../../lib/chord-analysis";
 import { useGuitarGuide } from "../../hooks/use-guitar-guide";
 import { useTaskQueueStore } from "../../stores/task-queue-store";
@@ -217,12 +217,17 @@ function splitLabel(label: string): { root: string; suffix: string } {
  * Pick a replacement for one chord. Works in the names on screen: with the
  * capo toggle on you pick the shape you play, and the sounding chord is saved.
  */
-function ChordEditor({ segment, onPreview, onSelect, onSave }: {
+function ChordEditor({ segment, beatsInBar, onPreview, onSelect, onSave, onLength, onRemove, onReset }: {
   segment: ChordSegment;
+  /** Beats from this chord's start to the end of its bar. */
+  beatsInBar: number;
   onPreview: (soundingLabel: string) => void;
   /** The chord currently selected in the picker (screen name), so the popover can show it. */
   onSelect: (shown: string) => void;
   onSave: (soundingLabel: string) => Promise<void>;
+  onLength: (length: ChordLength) => Promise<void>;
+  onRemove: () => Promise<void>;
+  onReset: () => Promise<void>;
 }) {
   const { display, toSounding, capoShown, chooseVoicing, notation } = useActions();
   // Compare and build labels in canonical form; show them in the chosen notation.
@@ -350,7 +355,7 @@ function ChordEditor({ segment, onPreview, onSelect, onSave }: {
               // Back to the detected chord, played with its default fingering.
               if (detected !== "N") chooseVoicing(display(detected), 0);
               if (shownCurrent !== "N") chooseVoicing(shownCurrent, 0);
-              try { await onSave(detected); } finally { setSaving(false); }
+              try { await onReset(); } finally { setSaving(false); }
             }}
             disabled={saving}
             title={`Back to the detected chord (${shownDetected})`}
@@ -360,21 +365,63 @@ function ChordEditor({ segment, onPreview, onSelect, onSave }: {
           </button>
         )}
       </div>
+
+      {/* How long this chord lasts */}
+      <div className="mt-3 pt-3 border-t border-[var(--border-subtle)]">
+        <div className="text-[10.5px] font-medium uppercase tracking-[0.09em] text-[var(--text-muted)] mb-1.5">
+          Length · now {segment.beats} beat{segment.beats === 1 ? "" : "s"}
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {[1, 2, 3, 4].map((n) => (
+            <button
+              key={n}
+              disabled={saving}
+              onClick={async () => { setSaving(true); try { await onLength(n); } finally { setSaving(false); } }}
+              title={n > segment.beats ? `Hold for ${n} beats (replaces what follows)` : n < segment.beats ? `Shorten to ${n}; the next chord starts earlier` : "Current length"}
+              className={`${chip(segment.beats === n)} w-[34px]`}
+            >
+              {n}
+            </button>
+          ))}
+          {beatsInBar > 0 && beatsInBar !== segment.beats && (
+            <button
+              disabled={saving}
+              onClick={async () => { setSaving(true); try { await onLength("bar"); } finally { setSaving(false); } }}
+              title="Hold until the end of the bar"
+              className={`${chip(false)} px-2`}
+            >
+              to bar end ({beatsInBar})
+            </button>
+          )}
+          <button
+            disabled={saving}
+            onClick={async () => { setSaving(true); try { await onRemove(); } finally { setSaving(false); } }}
+            title="Remove this chord; the previous chord keeps playing through its beats"
+            className={`${chip(false)} px-2 ml-auto text-red-500`}
+          >
+            Remove chord
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
 
 function ChordPopover({
-  label, anchor, segment, capoFret, useCapo, onPlay, onEdit, onClose,
+  label, anchor, segment, beatsInBar, capoFret, useCapo, onPlay, onEdit, onLength, onRemove, onReset, onClose,
 }: {
   label: string;
   anchor: DOMRect;
   /** The specific chord in the song, when opened from one (enables editing). */
   segment?: ChordSegment;
+  beatsInBar: number;
   capoFret: number;
   useCapo: boolean;
   onPlay: (label: string, how: "strum" | "arpeggio") => void;
   onEdit: (segment: ChordSegment, label: string) => Promise<void>;
+  onLength: (segment: ChordSegment, length: ChordLength) => Promise<void>;
+  onRemove: (segment: ChordSegment) => Promise<void>;
+  onReset: (segment: ChordSegment) => Promise<void>;
   onClose: () => void;
 }) {
   const { display, toSounding, voicings, chooseVoicing, capoShown, notation } = useActions();
@@ -498,8 +545,12 @@ function ChordPopover({
             key={`${segment.start_ms}:${segment.label}`}
             segment={segment}
             onPreview={(l) => onPlay(l, "strum")}
+            beatsInBar={beatsInBar}
             onSelect={setSelected}
             onSave={async (l) => { await onEdit(segment, l); onClose(); }}
+            onLength={async (n) => { await onLength(segment, n); onClose(); }}
+            onRemove={async () => { await onRemove(segment); onClose(); }}
+            onReset={async () => { await onReset(segment); onClose(); }}
           />
         </div>
       )}
@@ -1167,16 +1218,23 @@ interface GuidePrefs {
   pickPattern: PickPattern;
   /** Chosen fingering per chord name: "E shape@3" etc. */
   voicings: Record<string, string>;
+  prefsVersion?: number;
 }
 
 const DEFAULT_GUIDE_PREFS: GuidePrefs = {
-  volume: 0.3, offsetMs: 60, instrument: "steel", notation: "standard", pickPattern: "travis", voicings: {},
+  volume: 0.3, offsetMs: 0, instrument: "steel", notation: "standard", pickPattern: "travis", voicings: {},
 };
 
 function readGuidePrefs(): GuidePrefs {
   try {
     const raw = localStorage.getItem(GUIDE_PREFS_KEY);
-    return raw ? { ...DEFAULT_GUIDE_PREFS, ...JSON.parse(raw) } : DEFAULT_GUIDE_PREFS;
+    if (!raw) return DEFAULT_GUIDE_PREFS;
+    const saved = JSON.parse(raw);
+    // The old 60 ms default compensated for a beat grid that sat late in some
+    // passages; beats are now aligned to the music, so an untouched old
+    // default moves to the new one.
+    if (!saved.prefsVersion && saved.offsetMs === 60) saved.offsetMs = DEFAULT_GUIDE_PREFS.offsetMs;
+    return { ...DEFAULT_GUIDE_PREFS, ...saved, prefsVersion: 2 };
   } catch {
     return DEFAULT_GUIDE_PREFS;
   }
@@ -1281,7 +1339,7 @@ function GuideSettings({ prefs, onChange, onClose, anchor }: {
 export function PlayAlongView({
   song, lines, translationLines, audioRef, isPlaying, onTogglePlay, onSeek, modeTabsContainer,
 }: PlayAlongViewProps) {
-  const { analysis, isLoading, error, editChord } = useChordData(
+  const { analysis, isLoading, error, editChord, setChordLength, removeChord, resetChord } = useChordData(
     song.chord_status === "done" ? song.chord_data_path : undefined,
     `${song.chord_status}:${song.updated_at}`,
   );
@@ -1714,10 +1772,20 @@ export function PlayAlongView({
             label={popover.label}
             anchor={popover.anchor}
             segment={popover.index != null && popover.index >= 0 ? chords[popover.index] : undefined}
+            beatsInBar={(() => {
+              const seg = popover.index != null && popover.index >= 0 ? chords[popover.index] : undefined;
+              if (!seg) return 0;
+              const bar = (analysis.bars ?? []).find((b) => b.start_ms <= seg.start_ms + 80 && seg.start_ms < b.end_ms);
+              const beats = analysis.beats_ms ?? [];
+              return bar ? beats.filter((t) => t >= seg.start_ms - 80 && t < bar.end_ms - 80).length : 0;
+            })()}
             capoFret={capoFret}
             useCapo={capoShown > 0}
             onPlay={playChord}
             onEdit={editChord}
+            onLength={setChordLength}
+            onRemove={removeChord}
+            onReset={resetChord}
             onClose={() => setPopover(null)}
           />
         )}

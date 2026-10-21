@@ -30,7 +30,7 @@ import sys
 from collections import Counter
 from datetime import datetime, timezone
 
-OUTPUT_VERSION = 11
+OUTPUT_VERSION = 12
 ALTERNATIVES_PER_CHORD = 4
 
 SR = 22050
@@ -67,6 +67,10 @@ PITCH_NAMES_FLAT = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", 
 #                   job on the part that suits it. Off by default (helps drum-heavy
 #                   songs like Tabiji, slightly hurt Kaerou); set per song in
 #                   chord_settings.json from the app.
+#   beat_align_window / beat_align_smooth  shift each beat onto the nearest
+#                   attack within this many seconds, smoothed over this many
+#                   beats (0 = off). Keeps the grid on the music when the
+#                   tracker's phase drifts between sections.
 #   tempo_hint      force the beat grid to this BPM. Set per song (from the
 #                   app's Half / Double tempo buttons) in chord_settings.json
 #                   next to chords.json, because the audio alone can't tell a
@@ -85,6 +89,8 @@ TUNING = {
     "min_chord_beats": 1,
     "tempo_hint": None,
     "use_stems": False,
+    "beat_align_window": 0.07,
+    "beat_align_smooth": 9,
     "temperature": 0.06,
 }
 
@@ -614,6 +620,51 @@ def suggest_capo(chords):
 
 
 # ---------------------------------------------------------------------------
+# Beat alignment
+# ---------------------------------------------------------------------------
+
+def align_beats_to_onsets(beat_times, onset_env, sr):
+    """Line each beat up with the actual attacks around it.
+
+    The beat tracker gets the tempo right but its phase can sit tens of ms
+    off in some passages (Kaerou's intro: ~45 ms late, then exact from the
+    bridge), which makes a fixed play-along offset right in one part and
+    wrong in another. Measure how far the nearest strong onset is from each
+    beat (within beat_align_window), smooth that over a few beats so single
+    stray hits don't jitter the grid, and shift the beat by it.
+    """
+    import numpy as np
+    import librosa
+
+    window = TUNING["beat_align_window"]
+    if window <= 0 or len(beat_times) < 4:
+        return beat_times
+    onsets = librosa.onset.onset_detect(
+        onset_envelope=onset_env, sr=sr, hop_length=HOP, units="time", backtrack=False,
+    )
+    if len(onsets) == 0:
+        return beat_times
+    idx = np.clip(np.searchsorted(onsets, beat_times), 1, len(onsets) - 1)
+    nearest = np.where(
+        np.abs(onsets[idx] - beat_times) < np.abs(onsets[idx - 1] - beat_times), onsets[idx], onsets[idx - 1],
+    )
+    offset = nearest - beat_times
+    offset[np.abs(offset) > window] = np.nan
+    half = TUNING["beat_align_smooth"] // 2
+    shift = np.zeros(len(beat_times))
+    for i in range(len(beat_times)):
+        local = offset[max(0, i - half): i + half + 1]
+        local = local[~np.isnan(local)]
+        shift[i] = float(np.median(local)) if len(local) >= 2 else 0.0
+    aligned = np.maximum(beat_times + shift, 0.0)
+    # Keep beats in order and at least half a beat apart.
+    gaps = np.diff(beat_times)
+    for i in range(1, len(aligned)):
+        aligned[i] = max(aligned[i], aligned[i - 1] + 0.5 * gaps[i - 1])
+    return aligned
+
+
+# ---------------------------------------------------------------------------
 # Four-stem separation (drums / bass / other / vocals)
 # ---------------------------------------------------------------------------
 
@@ -704,6 +755,8 @@ def analyze(audio_path: str, stems=None) -> dict:
     if len(beat_frames) < 8:
         raise ValueError("Could not find a steady beat in this song")
     beat_times = librosa.frames_to_time(beat_frames, sr=sr, hop_length=HOP)
+    beat_times = align_beats_to_onsets(beat_times, onset_env, sr)
+    beat_frames = librosa.time_to_frames(beat_times, sr=sr, hop_length=HOP)
 
     # Chroma, one vector per beat
     chroma = librosa.feature.chroma_cqt(y=y_harm, sr=sr, hop_length=HOP)
