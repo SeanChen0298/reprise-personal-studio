@@ -55,6 +55,7 @@ KK_MINOR = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.
 # Keys conventionally spelled with flats.
 FLAT_MAJOR_TONICS = {5, 10, 3, 8, 1, 6}       # F Bb Eb Ab Db Gb
 FLAT_MINOR_TONICS = {2, 7, 0, 5, 10, 3}       # D G C F Bb Eb minor
+SHARP_HEAVY_MAJOR_TONICS = {4, 11, 6, 1}     # E B F# C# major (and their relative minors)
 
 
 def write_output(output_path: str, payload: dict) -> None:
@@ -85,7 +86,12 @@ def detect_key(chroma_mean):
                 best = (r, tonic, mode)
     r, tonic, mode = best
     use_flats = tonic in (FLAT_MAJOR_TONICS if mode == "major" else FLAT_MINOR_TONICS)
-    names = PITCH_NAMES_FLAT if use_flats else PITCH_NAMES_SHARP
+    names = list(PITCH_NAMES_FLAT if use_flats else PITCH_NAMES_SHARP)
+    # Borrowed chords on the flat side (bVII, bIII) are written Bb / Eb even
+    # in sharp keys, unless the key itself has four or more sharps.
+    major_tonic = tonic if mode == "major" else (tonic + 3) % 12
+    if not use_flats and major_tonic not in SHARP_HEAVY_MAJOR_TONICS:
+        names[10], names[3] = "Bb", "Eb"
     return {
         "tonic": names[tonic],
         "tonic_pc": tonic,

@@ -247,23 +247,25 @@ export function PracticePage() {
           onNavigateRecordings={() => navigate(`/song/${id}/recordings`)}
         />
         {/* View switch: vocal practice vs. guitar play-along */}
-        <div className="flex items-center justify-end gap-1 px-6 pt-2 -mb-1">
-          {([
-            ["practice", "Practice"],
-            ["playAlong", "Play along"],
-          ] as const).map(([value, label]) => (
-            <button
-              key={value}
-              onClick={() => setView(value)}
-              className={`px-3 py-[4px] rounded-[6px] text-[12px] font-medium border-[1.5px] transition-all cursor-pointer ${
-                view === value
-                  ? "border-[var(--accent)] text-[var(--accent)] bg-[var(--surface)]"
-                  : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)] bg-transparent"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
+        <div className="flex items-center px-6 py-2 border-b border-[var(--border)] bg-[var(--surface)]">
+          <div className="flex p-[2px] rounded-[8px] bg-[var(--bg)] border border-[var(--border)]">
+            {([
+              ["practice", "Vocal practice"],
+              ["playAlong", "Guitar play-along"],
+            ] as const).map(([value, label]) => (
+              <button
+                key={value}
+                onClick={() => setView(value)}
+                className={`px-3 py-[4px] rounded-[6px] text-[12px] font-medium cursor-pointer border-none transition-all ${
+                  view === value
+                    ? "bg-[var(--surface)] text-[var(--text-primary)] shadow-[0_1px_2px_rgba(0,0,0,0.08)]"
+                    : "bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
         {view === "playAlong" && (
           <PlayAlongView
