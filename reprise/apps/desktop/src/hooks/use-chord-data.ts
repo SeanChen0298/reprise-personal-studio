@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { readChordAnalysis, type ChordAnalysis, type ChordSegment } from "../lib/chord-analysis";
 import {
-  applyChordEdits, chordEditsPath, readChordEdits, restoreDetectedSpan, saveChordSpan, undoLastChordEdit,
+  applyChordEdits, chordEditsPath, readChordEdits, restoreDetectedSpan, saveChordSpan, saveChordSpans,
+  undoLastChordEdit,
 } from "../lib/chord-edits";
 
 /** How long a chord should last: a number of beats, or to the end of its bar. */
@@ -26,6 +27,8 @@ interface UseChordDataReturn {
   editCount: number;
   /** Undo the most recent correction. */
   undoLastEdit: () => Promise<void>;
+  /** Save many chord spans as one undoable step (chart import). */
+  applySpans: (spans: { start_ms: number; end_ms: number; label: string }[]) => Promise<void>;
 }
 
 const TOLERANCE_MS = 80;
@@ -143,6 +146,15 @@ export function useChordData(
     [span, chordAfter, chordBefore],
   );
 
+  const applySpans = useCallback(
+    async (spans: { start_ms: number; end_ms: number; label: string }[]) => {
+      if (!chordDataPath || spans.length === 0) return;
+      await saveChordSpans(chordEditsPath(chordDataPath), spans);
+      setEditsVersion((v) => v + 1);
+    },
+    [chordDataPath],
+  );
+
   const undoLastEdit = useCallback(async () => {
     if (!chordDataPath) return;
     if (await undoLastChordEdit(chordEditsPath(chordDataPath))) setEditsVersion((v) => v + 1);
@@ -157,5 +169,7 @@ export function useChordData(
     [chordDataPath],
   );
 
-  return { analysis, isLoading, error, editChord, setChordLength, removeChord, resetChord, editCount, undoLastEdit };
+  return {
+    analysis, isLoading, error, editChord, setChordLength, removeChord, resetChord, editCount, undoLastEdit, applySpans,
+  };
 }

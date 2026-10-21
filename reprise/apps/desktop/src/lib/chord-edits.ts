@@ -166,11 +166,26 @@ export function applyChordEdits(analysis: ChordAnalysis, edits: ChordEdit[]): Ch
   return { ...analysis, chords };
 }
 
-/** Remove the most recent edit (undo). Returns false when there was nothing to undo. */
+/** Remove the most recent step (undo). A step is every edit saved at the same moment,
+ *  e.g. a whole chart import. Returns false when there was nothing to undo. */
 export async function undoLastChordEdit(path: string): Promise<boolean> {
   const edits = await readChordEdits(path);
   if (edits.length === 0) return false;
-  const latest = edits.reduce((a, b) => (a.edited_at >= b.edited_at ? a : b));
-  await writeChordEdits(path, edits.filter((e) => e !== latest));
+  const latest = edits.reduce((a, b) => (a.edited_at >= b.edited_at ? a : b)).edited_at;
+  await writeChordEdits(path, edits.filter((e) => e.edited_at !== latest));
   return true;
+}
+
+/** Save several spans as one step (one Undo removes them all), e.g. an imported chart. */
+export async function saveChordSpans(
+  path: string,
+  spans: { start_ms: number; end_ms: number; label: string }[],
+): Promise<void> {
+  const edits = await readChordEdits(path);
+  const at = new Date().toISOString();
+  for (const s of spans) {
+    if (s.end_ms <= s.start_ms) continue;
+    edits.push({ start_ms: s.start_ms, end_ms: s.end_ms, label: s.label === "N" ? "N" : canonicalChord(s.label), detected: "", edited_at: at });
+  }
+  await writeChordEdits(path, edits);
 }

@@ -17,6 +17,7 @@ import {
 import { useChordData, type ChordLength } from "../../hooks/use-chord-data";
 import { useFingerings } from "../../hooks/use-fingerings";
 import { planFingerings } from "../../lib/smooth-fingerings";
+import { placeChart } from "../../lib/chord-chart";
 import { saveChordSettings } from "../../lib/chord-analysis";
 import { useGuitarGuide } from "../../hooks/use-guitar-guide";
 import { useTaskQueueStore } from "../../stores/task-queue-store";
@@ -1173,6 +1174,103 @@ const MODES: { value: Mode; label: string }[] = [
   { value: "tab", label: "Fingerpicking" },
 ];
 
+/** Paste a chord chart you trust; preview where it lands, then apply it as one undoable step. */
+function ImportChartDialog({ analysis, lines, onApply, onClose }: {
+  analysis: ChordAnalysis;
+  lines: Line[];
+  onApply: (spans: { start_ms: number; end_ms: number; label: string }[]) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [text, setText] = useState("");
+  const [applying, setApplying] = useState(false);
+  const result = useMemo(() => (text.trim() ? placeChart(text, analysis, lines) : null), [text, analysis, lines]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const changes = result?.spans.length ?? 0;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onMouseDown={onClose}>
+      <div
+        onMouseDown={(e) => e.stopPropagation()}
+        className="w-[640px] max-w-[calc(100vw-32px)] max-h-[calc(100vh-48px)] flex flex-col rounded-[12px] border border-[var(--border)] bg-[var(--surface)] shadow-[0_12px_40px_rgba(0,0,0,0.2)]"
+      >
+        <div className="px-5 pt-4 pb-3 border-b border-[var(--border-subtle)]">
+          <div className="text-[15px] font-semibold text-[var(--text-primary)]">Import a chord chart</div>
+          <div className="text-[12px] text-[var(--text-muted)] leading-snug mt-1">
+            Paste a chart you trust. Chords above lyrics or [C]inline chords are placed on your timed lyric lines;
+            a chords-only chart is lined up with the detected chords. It's applied as one step — Undo edit removes it.
+          </div>
+        </div>
+        <div className="px-5 py-3 flex-1 min-h-0 flex flex-col gap-3 overflow-y-auto">
+          <textarea
+            autoFocus
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            spellCheck={false}
+            placeholder={"Dmaj7        C#m7\n(lyric line)\n\nor  [Dmaj7](lyric)[C#m7](lyric)\nor  | Dmaj7 | C#m7 | F#m7 Em7 |"}
+            className="w-full h-[220px] resize-y p-3 rounded-[8px] border border-[var(--border)] bg-[var(--bg)] font-mono text-[12.5px] leading-[1.5] text-[var(--text-primary)] outline-none focus:border-[var(--theme)]"
+          />
+          {result && (
+            <div className="text-[12px] leading-relaxed">
+              {result.mode === "lyrics" ? (
+                <div className="text-[var(--text-secondary)]">
+                  <b className="text-[var(--text-primary)]">{result.matchedLines} of {result.chartLines}</b> chart lines found in the song ·{" "}
+                  <b className="text-[var(--text-primary)]">{changes}</b> chord changes will be placed.
+                </div>
+              ) : (
+                <div className="text-[var(--text-secondary)]">
+                  Chords-only chart: <b className="text-[var(--text-primary)]">{result.chartLines}</b> chords lined up with the detected chords
+                  ({changes} chords in the song will be renamed).
+                </div>
+              )}
+              {result.unmatched.length > 0 && (
+                <div className="mt-1.5 text-[var(--text-muted)]">
+                  Not found in the song's lyrics (left as they are):
+                  <ul className="mt-0.5 ml-4 list-disc">
+                    {result.unmatched.slice(0, 6).map((l, i) => <li key={i} className="truncate">{l}</li>)}
+                    {result.unmatched.length > 6 && <li>…and {result.unmatched.length - 6} more</li>}
+                  </ul>
+                </div>
+              )}
+              {result.unknownChords.length > 0 && (
+                <div className="mt-1.5 text-[var(--text-muted)]">
+                  Couldn't read: {result.unknownChords.slice(0, 10).join(", ")}{result.unknownChords.length > 10 ? " …" : ""}
+                </div>
+              )}
+              {changes === 0 && (
+                <div className="mt-1.5 text-red-500">Nothing to place yet — check the chart has chord names over lyrics or [brackets].</div>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="px-5 py-3 border-t border-[var(--border-subtle)] flex items-center justify-end gap-2">
+          <button
+            onClick={onClose}
+            className="h-[32px] px-4 rounded-[7px] border-[1.5px] border-[var(--border)] bg-transparent text-[12.5px] font-medium text-[var(--text-secondary)] hover:border-[#888] cursor-pointer"
+          >
+            Cancel
+          </button>
+          <button
+            disabled={!result || changes === 0 || applying}
+            onClick={async () => {
+              if (!result) return;
+              setApplying(true);
+              try { await onApply(result.spans); onClose(); } finally { setApplying(false); }
+            }}
+            className="h-[32px] px-4 rounded-[7px] bg-[var(--accent)] text-white text-[12.5px] font-medium border-none cursor-pointer hover:opacity-85 disabled:opacity-35 disabled:cursor-default"
+          >
+            {applying ? "Applying…" : `Apply ${changes || ""} chord${changes === 1 ? "" : "s"}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /**
  * The song's tempo, with a menu of per-song analysis fixes: half / double
  * time, and analysing on separated instruments. Choices are saved per song
@@ -1398,7 +1496,7 @@ export function PlayAlongView({
   song, lines, translationLines, audioRef, isPlaying, onTogglePlay, onSeek, modeTabsContainer,
 }: PlayAlongViewProps) {
   const {
-    analysis, isLoading, error, editChord, setChordLength, removeChord, resetChord, editCount, undoLastEdit,
+    analysis, isLoading, error, editChord, setChordLength, removeChord, resetChord, editCount, undoLastEdit, applySpans,
   } = useChordData(
     song.chord_status === "done" ? song.chord_data_path : undefined,
     `${song.chord_status}:${song.updated_at}`,
@@ -1410,6 +1508,7 @@ export function PlayAlongView({
   const [guideOn, setGuideOn] = useState(false);
   const [guidePrefs, setGuidePrefs] = useState<GuidePrefs>(readGuidePrefs);
   const [guideSettingsAnchor, setGuideSettingsAnchor] = useState<DOMRect | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
   const [popover, setPopover] = useState<{
     label: string; anchor: DOMRect; index?: number; scope?: { start: number; end: number };
   } | null>(null);
@@ -1771,6 +1870,13 @@ export function PlayAlongView({
                 <><span className="mx-1.5">·</span>{analysis.time_signature.beats_per_bar}/{analysis.time_signature.beat_unit}</>
               )}
             </span>
+            <button
+              onClick={() => setImportOpen(true)}
+              title="Paste a chord chart you trust and line it up with the song"
+              className="h-[28px] px-2.5 rounded-[6px] text-[12px] font-medium border-[1.5px] border-[var(--border)] text-[var(--text-secondary)] bg-transparent hover:border-[#888] cursor-pointer whitespace-nowrap"
+            >
+              Import chart
+            </button>
             {editCount > 0 && (
               <button
                 onClick={() => void undoLastEdit()}
@@ -1896,6 +2002,14 @@ export function PlayAlongView({
             onRemove={removeChord}
             onReset={resetChord}
             onClose={() => setPopover(null)}
+          />
+        )}
+        {importOpen && (
+          <ImportChartDialog
+            analysis={analysis}
+            lines={lines}
+            onApply={applySpans}
+            onClose={() => setImportOpen(false)}
           />
         )}
         {guideSettingsAnchor && (
