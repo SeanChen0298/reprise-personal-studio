@@ -30,7 +30,7 @@ import sys
 from collections import Counter
 from datetime import datetime, timezone
 
-OUTPUT_VERSION = 8
+OUTPUT_VERSION = 9
 ALTERNATIVES_PER_CHORD = 4
 
 SR = 22050
@@ -56,11 +56,13 @@ PITCH_NAMES_FLAT = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", 
 #                   bass note on its FIRST beat — where the root is played before
 #                   any passing notes. Separates Dmaj7 / F#m7 (shared notes,
 #                   different bass) without adding chord changes. 0 = off.
-#   snap_tolerance  chord changes on a weak beat (2 or 4) move to the nearer
-#                   strong beat (1 or 3) unless that costs more than this much
-#                   fit per moved beat. Pop harmony changes on strong beats; a
-#                   weak-beat change is usually an anticipation or a stray beat.
+#   snap_weak_changes / snap_tolerance  when on, chord changes on a weak beat
+#                   (2 or 4) move to the nearer strong beat unless that costs
+#                   more than snap_tolerance fit per moved beat. OFF by default:
+#                   on Kaerou it erased real syncopated changes.
 #   min_chord_beats chords shorter than this are merged into a neighbour.
+#                   1 = keep everything (default): 2 removed a real one-beat
+#                   passing chord (C7 -> Bm) on Kaerou.
 TUNING = {
     "seventh_prior": 0.98,
     "maj7_prior": 0.95,
@@ -70,8 +72,9 @@ TUNING = {
     "bass_weight": 0.0,
     "bass_rerank": 0.25,
     "rerank_min_fit": 0.85,
+    "snap_weak_changes": False,
     "snap_tolerance": 0.12,
-    "min_chord_beats": 2,
+    "min_chord_beats": 1,
     "temperature": 0.06,
 }
 
@@ -231,7 +234,7 @@ def regularize_path(path, scores, meter, phase):
             b += 1
         return a, b
 
-    i = 1
+    i = 1 if TUNING["snap_weak_changes"] else n
     while i < n:
         if path[i] != path[i - 1] and pos(i) not in strong:
             A, B = path[i - 1], path[i]
