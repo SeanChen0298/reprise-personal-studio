@@ -11,6 +11,7 @@ import {
   type ChordShape,
 } from "../../lib/chord-shapes";
 import { buildPicking, PICK_PATTERNS, type PickEvent, type PickPattern } from "../../lib/fingerpicking";
+import { chordPitchClasses, noteNames, relatedChords } from "../../lib/chord-relations";
 import {
   loadInstrument, pluck, setInstrument, setSynthVolume, strum, synthNow, type GuitarInstrument,
 } from "../../lib/guitar-synth";
@@ -233,6 +234,32 @@ function ChordEditor({ segment, onPreview, onSave }: {
     setSaving(true);
     try { await onSave(shown === "N" ? "N" : toSounding(shown)); } finally { setSaving(false); }
   };
+  // Close alternatives: what the analysis nearly picked, then chords that
+  // share most of their notes (e.g. Dmaj7 ⇄ F#m7). Shown in screen names.
+  const soundingCurrent = segment.label;
+  const suggestions = useMemo(() => {
+    const seen = new Set<string>([soundingCurrent]);
+    const list: { label: string; note: string; title: string }[] = [];
+    const mine = chordPitchClasses(soundingCurrent);
+    for (const alt of segment.alternatives ?? []) {
+      if (alt.label === "N" || seen.has(alt.label)) continue;
+      seen.add(alt.label);
+      const shared = noteNames(chordPitchClasses(alt.label).filter((pc) => mine.includes(pc)));
+      list.push({
+        label: alt.label,
+        note: `heard ${Math.round(alt.fit * 100)}%`,
+        title: `The analysis rated this ${Math.round(alt.fit * 100)}% as good a fit here` +
+          (shared.length ? ` · shares ${shared.join(" ")}` : ""),
+      });
+    }
+    for (const rel of relatedChords(soundingCurrent, 8)) {
+      if (seen.has(rel.label)) continue;
+      seen.add(rel.label);
+      list.push({ label: rel.label, note: `${rel.shared.length} shared`, title: `${rel.why} (${rel.shared.join(" ")})` });
+    }
+    return list.slice(0, 8);
+  }, [segment.alternatives, soundingCurrent]);
+
   const chip = (active: boolean) =>
     `h-[24px] rounded-[5px] text-[11.5px] font-medium cursor-pointer border transition-colors ${
       active
@@ -246,6 +273,34 @@ function ChordEditor({ segment, onPreview, onSave }: {
         Wrong chord? Change this one
         {capoShown > 0 && <span className="normal-case tracking-normal"> · capo {capoShown} shapes</span>}
       </div>
+      {suggestions.length > 0 && segment.label !== "N" && (
+        <div className="mb-2">
+          <div className="text-[10.5px] text-[var(--text-muted)] mb-1">Close alternatives</div>
+          <div className="flex flex-wrap gap-1">
+            {suggestions.map((sug) => {
+              const shown = display(sug.label);
+              const parts = splitLabel(shown);
+              const active = !noChord && root === parts.root && suffix === parts.suffix;
+              return (
+                <button
+                  key={sug.label}
+                  onClick={() => pick(parts.root, parts.suffix)}
+                  title={sug.title}
+                  className={`flex items-baseline gap-1 px-2 h-[26px] rounded-[5px] border text-[12px] font-semibold cursor-pointer transition-colors ${
+                    active
+                      ? "border-[var(--theme)] bg-[var(--theme-light)] text-[var(--theme-text)]"
+                      : "border-[var(--border)] bg-transparent text-[var(--text-primary)] hover:border-[#888]"
+                  }`}
+                >
+                  {shown}
+                  <span className="text-[9.5px] font-normal text-[var(--text-muted)]">{sug.note}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="text-[10.5px] text-[var(--text-muted)] mt-1.5 mb-1">Or pick any chord</div>
+        </div>
+      )}
       <div className="grid grid-cols-6 gap-1 mb-1.5">
         {PICKER_ROOTS.map((r) => (
           <button key={r} onClick={() => pick(r, suffix)} className={chip(!noChord && root === r)}>{r}</button>
@@ -325,7 +380,7 @@ function ChordPopover({
 
   const width = segment ? 248 : 196;
   const left = Math.min(Math.max(8, anchor.left + anchor.width / 2 - width / 2), window.innerWidth - width - 8);
-  const below = anchor.bottom + (segment ? 360 : 210) < window.innerHeight;
+  const below = anchor.bottom + (segment ? 470 : 230) < window.innerHeight;
   const top = below ? anchor.bottom + 6 : anchor.top - 6;
 
   const smallButton =

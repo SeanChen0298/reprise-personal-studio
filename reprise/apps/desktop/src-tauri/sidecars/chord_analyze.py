@@ -30,7 +30,8 @@ import sys
 from collections import Counter
 from datetime import datetime, timezone
 
-OUTPUT_VERSION = 5
+OUTPUT_VERSION = 6
+ALTERNATIVES_PER_CHORD = 4
 
 SR = 22050
 HOP = 512
@@ -182,6 +183,7 @@ def detect_chords(beat_chroma, beat_times, duration_s, names):
             seg = segments[-1]
             seg["end_ms"] = to_ms(end)
             seg["_conf"].append(conf)
+            seg["_beats"].append(i)
             seg["beats"] += 1
         else:
             segments.append({
@@ -190,12 +192,30 @@ def detect_chords(beat_chroma, beat_times, duration_s, names):
                 "end_ms": to_ms(end),
                 "beats": 1,
                 "_conf": [conf],
+                "_beats": [i],
                 **label_for(state),
             })
 
+    # Runner-ups: the chords whose templates fit this stretch almost as well
+    # (e.g. Dmaj7 vs F#m7, which share three notes). Offered in the app as
+    # one-click alternatives when correcting a chord.
+    n_templates = len(templates)
     for seg in segments:
         seg["confidence"] = round(float(np.mean(seg.pop("_conf"))), 3)
-        seg.pop("_state")
+        state = seg.pop("_state")
+        fit = sims[:, seg.pop("_beats")].mean(axis=1)
+        best = float(fit.max()) or 1.0
+        alternatives = []
+        for k in np.argsort(-fit):
+            if k == state or k >= n_templates:
+                continue
+            alt = label_for(int(k))
+            if any(a["label"] == alt["label"] for a in alternatives):
+                continue
+            alternatives.append({"label": alt["label"], "fit": round(float(fit[k]) / best, 3)})
+            if len(alternatives) == ALTERNATIVES_PER_CHORD:
+                break
+        seg["alternatives"] = alternatives
     return segments, path, n_states
 
 

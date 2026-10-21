@@ -45,6 +45,8 @@ export interface ChordSegment {
   edited?: boolean;
   /** The analysis' original label, when edited. */
   detected_label?: string;
+  /** Runner-up chords that fit this stretch almost as well (fit relative to the winner, 0–1). */
+  alternatives?: { label: string; fit: number }[];
 }
 
 export interface StrumSection {
