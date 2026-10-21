@@ -91,6 +91,8 @@ export interface ChordAnalysis {
   beats_ms?: number[];
   bars?: ChordBar[];
   chords?: ChordSegment[];
+  /** Settings the analysis ran with (incl. tempo_hint when the tempo was corrected). */
+  tuning?: { tempo_hint?: number | null } & Record<string, unknown>;
   strumming?: StrummingSheet;
   capo?: CapoSuggestion;
   fingerstyle?: FingerstyleArrangement;
@@ -179,4 +181,30 @@ export async function analyzeChords(
 export async function readChordAnalysis(path: string): Promise<ChordAnalysis> {
   const raw = await readTextFile(path);
   return JSON.parse(raw) as ChordAnalysis;
+}
+
+// ---------------------------------------------------------------------------
+// Per-song analysis settings (chord_settings.json next to chords.json)
+// ---------------------------------------------------------------------------
+
+export interface ChordSettings {
+  /** Force the beat grid to this BPM (fixes half / double-time detection). */
+  tempo_hint?: number | null;
+}
+
+function settingsPath(chordDataPath: string): string {
+  return chordDataPath.replace(/[\/][^\/]*$/, "") + "/chord_settings.json";
+}
+
+/** Merge `patch` into the song's chord_settings.json; the analysis reads it on the next run. */
+export async function saveChordSettings(chordDataPath: string, patch: ChordSettings): Promise<void> {
+  const path = settingsPath(chordDataPath);
+  let current: ChordSettings = {};
+  if (await exists(path)) {
+    try { current = JSON.parse(await readTextFile(path)); } catch { current = {}; }
+  }
+  const next = { ...current, ...patch };
+  if (next.tempo_hint == null) delete next.tempo_hint;
+  const { writeTextFile } = await import("@tauri-apps/plugin-fs");
+  await writeTextFile(path, JSON.stringify(next, null, 2));
 }

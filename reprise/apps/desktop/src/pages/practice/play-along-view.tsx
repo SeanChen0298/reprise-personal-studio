@@ -16,6 +16,7 @@ import {
   loadInstrument, pluck, setInstrument, setSynthVolume, strum, synthNow, type GuitarInstrument,
 } from "../../lib/guitar-synth";
 import { useChordData } from "../../hooks/use-chord-data";
+import { saveChordSettings } from "../../lib/chord-analysis";
 import { useGuitarGuide } from "../../hooks/use-guitar-guide";
 import { useTaskQueueStore } from "../../stores/task-queue-store";
 import { ChordDiagram } from "../../components/chord-diagram";
@@ -1062,6 +1063,59 @@ const MODES: { value: Mode; label: string }[] = [
   { value: "tab", label: "Fingerpicking" },
 ];
 
+/**
+ * The song's tempo, with a menu to fix half / double-time detection. The
+ * choice is saved per song and the chords are re-analysed on that beat grid.
+ */
+function TempoButton({ bpm, corrected, busy, onSet }: {
+  bpm: number;
+  corrected: boolean;
+  busy: boolean;
+  onSet: (hint: number | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+  const choose = (hint: number | null) => { setOpen(false); onSet(hint); };
+  const item = "w-full text-left px-2.5 py-1.5 rounded-[6px] text-[12px] bg-transparent border-none cursor-pointer hover:bg-[var(--bg)] text-[var(--text-primary)]";
+
+  return (
+    <span ref={ref} className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        disabled={busy}
+        title="Tempo wrong? Fix half / double time"
+        className="bg-transparent border-none p-0 cursor-pointer text-[12px] text-[var(--text-muted)] hover:text-[var(--text-primary)] underline decoration-dotted underline-offset-[3px] disabled:opacity-50"
+      >
+        {busy ? "re-analysing…" : `${Math.round(bpm)} BPM`}{corrected && !busy ? " ✓" : ""}
+      </button>
+      {open && (
+        <div className="absolute right-0 top-[22px] z-50 w-[210px] p-1.5 rounded-[8px] border border-[var(--border)] bg-[var(--surface)] shadow-[0_8px_28px_rgba(0,0,0,0.14)]">
+          <div className="px-2.5 pt-1 pb-1.5 text-[11px] text-[var(--text-muted)] leading-snug">
+            Beat grid twice too fast or too slow? Pick the tempo you'd tap your foot to.
+          </div>
+          <button onClick={() => choose(Math.round(bpm / 2 * 10) / 10)} className={item}>
+            Half time — {Math.round(bpm / 2)} BPM
+          </button>
+          <button onClick={() => choose(Math.round(bpm * 2 * 10) / 10)} className={item}>
+            Double time — {Math.round(bpm * 2)} BPM
+          </button>
+          {corrected && (
+            <button onClick={() => choose(null)} className={`${item} text-[var(--text-secondary)]`}>
+              Back to automatic detection
+            </button>
+          )}
+        </div>
+      )}
+    </span>
+  );
+}
+
 // Per-machine guide preferences (conveniences only — fine to lose).
 const GUIDE_PREFS_KEY = "reprise.playAlong.guide";
 
@@ -1397,11 +1451,12 @@ export function PlayAlongView({
   const currentSection =
     sections.find((s) => playhead.bar >= s.start_bar && playhead.bar <= s.end_bar) ?? sections[0];
   const pattern = currentSection?.pattern ?? analysis.strumming?.main_pattern;
-  const meta = [
-    analysis.key?.name,
-    analysis.tempo_bpm ? `${Math.round(analysis.tempo_bpm)} BPM` : null,
-    analysis.time_signature ? `${analysis.time_signature.beats_per_bar}/${analysis.time_signature.beat_unit}` : null,
-  ].filter(Boolean);
+  const tempoCorrected = analysis.tuning?.tempo_hint != null;
+  const setTempoHint = async (hint: number | null) => {
+    if (!song.chord_data_path) return;
+    await saveChordSettings(song.chord_data_path, { tempo_hint: hint });
+    enqueue(song.id, song.title, "chords");
+  };
   const guideDisabled = false;
 
   return (
@@ -1477,13 +1532,20 @@ export function PlayAlongView({
           )}
 
           <div className="flex items-center gap-2 ml-auto">
-            {meta.length > 0 && (
-              <span className="text-[12px] text-[var(--text-muted)] whitespace-nowrap mr-2">
-                {meta.map((m, i) => (
-                  <Fragment key={i}>{i > 0 && <span className="mx-1.5">·</span>}{m}</Fragment>
-                ))}
-              </span>
-            )}
+            <span className="text-[12px] text-[var(--text-muted)] whitespace-nowrap mr-2">
+              {analysis.key && <>{analysis.key.name}<span className="mx-1.5">·</span></>}
+              {analysis.tempo_bpm != null && (
+                <TempoButton
+                  bpm={analysis.tempo_bpm}
+                  corrected={tempoCorrected}
+                  busy={queued || processing}
+                  onSet={setTempoHint}
+                />
+              )}
+              {analysis.time_signature && (
+                <><span className="mx-1.5">·</span>{analysis.time_signature.beats_per_bar}/{analysis.time_signature.beat_unit}</>
+              )}
+            </span>
             {capoAvailable && (
               <button
                 onClick={() => setUseCapoShapes((v) => !v)}

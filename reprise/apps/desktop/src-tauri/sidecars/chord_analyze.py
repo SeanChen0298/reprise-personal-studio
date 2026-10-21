@@ -30,7 +30,7 @@ import sys
 from collections import Counter
 from datetime import datetime, timezone
 
-OUTPUT_VERSION = 9
+OUTPUT_VERSION = 10
 ALTERNATIVES_PER_CHORD = 4
 
 SR = 22050
@@ -63,6 +63,10 @@ PITCH_NAMES_FLAT = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", 
 #   min_chord_beats chords shorter than this are merged into a neighbour.
 #                   1 = keep everything (default): 2 removed a real one-beat
 #                   passing chord (C7 -> Bm) on Kaerou.
+#   tempo_hint      force the beat grid to this BPM. Set per song (from the
+#                   app's Half / Double tempo buttons) in chord_settings.json
+#                   next to chords.json, because the audio alone can't tell a
+#                   song at 86 BPM from the same song felt at 172.
 TUNING = {
     "seventh_prior": 0.98,
     "maj7_prior": 0.95,
@@ -75,6 +79,7 @@ TUNING = {
     "snap_weak_changes": False,
     "snap_tolerance": 0.12,
     "min_chord_beats": 1,
+    "tempo_hint": None,
     "temperature": 0.06,
 }
 
@@ -620,8 +625,10 @@ def analyze(audio_path: str) -> dict:
 
     # Beats
     onset_env = librosa.onset.onset_strength(y=y_perc, sr=sr, hop_length=HOP)
+    hint = TUNING.get("tempo_hint")
     tempo, beat_frames = librosa.beat.beat_track(
-        onset_envelope=onset_env, sr=sr, hop_length=HOP, trim=False
+        onset_envelope=onset_env, sr=sr, hop_length=HOP, trim=False,
+        **({"bpm": float(hint)} if hint else {}),
     )
     tempo = float(np.atleast_1d(tempo)[0])
     if len(beat_frames) < 8:
@@ -705,6 +712,16 @@ def main() -> int:
         if unknown:
             parser.error(f"unknown tuning keys: {sorted(unknown)}")
         TUNING.update(overrides)
+
+    # Per-song settings saved by the app (e.g. a corrected tempo).
+    settings_path = os.path.join(os.path.dirname(os.path.abspath(args.output_path)), "chord_settings.json")
+    if os.path.isfile(settings_path):
+        try:
+            with open(settings_path, encoding="utf-8") as f:
+                saved = json.load(f)
+            TUNING.update({k: v for k, v in saved.items() if k in TUNING})
+        except (OSError, ValueError) as err:
+            print(f"[chord_analyze] ignoring unreadable chord_settings.json: {err}", file=sys.stderr)
 
     base = {
         "version": OUTPUT_VERSION,
