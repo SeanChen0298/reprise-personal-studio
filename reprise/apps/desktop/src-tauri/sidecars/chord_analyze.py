@@ -30,7 +30,7 @@ import sys
 from collections import Counter
 from datetime import datetime, timezone
 
-OUTPUT_VERSION = 7
+OUTPUT_VERSION = 8
 ALTERNATIVES_PER_CHORD = 4
 
 SR = 22050
@@ -56,6 +56,11 @@ PITCH_NAMES_FLAT = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", 
 #                   bass note on its FIRST beat — where the root is played before
 #                   any passing notes. Separates Dmaj7 / F#m7 (shared notes,
 #                   different bass) without adding chord changes. 0 = off.
+#   snap_tolerance  chord changes on a weak beat (2 or 4) move to the nearer
+#                   strong beat (1 or 3) unless that costs more than this much
+#                   fit per moved beat. Pop harmony changes on strong beats; a
+#                   weak-beat change is usually an anticipation or a stray beat.
+#   min_chord_beats chords shorter than this are merged into a neighbour.
 TUNING = {
     "seventh_prior": 0.98,
     "maj7_prior": 0.95,
@@ -65,6 +70,8 @@ TUNING = {
     "bass_weight": 0.0,
     "bass_rerank": 0.25,
     "rerank_min_fit": 0.85,
+    "snap_tolerance": 0.12,
+    "min_chord_beats": 2,
     "temperature": 0.06,
 }
 
@@ -155,7 +162,10 @@ def build_templates():
 
 
 def detect_chords(beat_chroma, beat_bass, beat_times, duration_s, names):
-    """Return a list of chord segments snapped to beats."""
+    """Score every chord on every beat and pick the most likely sequence.
+
+    Returns the per-beat state path and a context for build_segments().
+    """
     import numpy as np
     import librosa
 
@@ -189,6 +199,99 @@ def detect_chords(beat_chroma, beat_bass, beat_times, duration_s, names):
         root, qual = roots[state], quals[state]
         return {"label": names[root] + qual, "root": names[root], "root_pc": root, "quality": qual or "maj"}
 
+    ctx = {
+        "sims": sims, "scores": scores, "probs": probs, "label_for": label_for,
+        "n_templates": len(templates), "roots": roots, "beat_bass": beat_bass,
+        "beat_times": beat_times, "duration_s": duration_s,
+    }
+    return [int(x) for x in path], ctx
+
+
+def regularize_path(path, scores, meter, phase):
+    """Move weak-beat chord changes to strong beats; merge too-short chords.
+
+    `scores` is (n_states, n_beats). A change is moved when doing so costs
+    less than snap_tolerance fit per moved beat (or gains fit).
+    """
+    path = list(path)
+    n = len(path)
+    strong = {0, 2} if meter == 4 else {0}
+    tol = TUNING["snap_tolerance"]
+
+    def pos(i):
+        return (i - phase) % meter
+
+    def run_bounds(i):
+        """Start (inclusive) and end (exclusive) of the run containing beat i."""
+        a = i
+        while a > 0 and path[a - 1] == path[i]:
+            a -= 1
+        b = i
+        while b < n and path[b] == path[i]:
+            b += 1
+        return a, b
+
+    i = 1
+    while i < n:
+        if path[i] != path[i - 1] and pos(i) not in strong:
+            A, B = path[i - 1], path[i]
+            a_start, _ = run_bounds(i - 1)
+            _, b_end = run_bounds(i)
+            p = pos(i)
+            back = p - max(x for x in strong if x <= p)                         # beats to move earlier
+            fwd = min([x for x in strong if x > p] + [meter]) - p                # beats to move later
+            options = []
+            j = i - back
+            if j > a_start:                                                      # A keeps >= 1 beat
+                gain = float(sum(scores[B, j:i] - scores[A, j:i]))
+                options.append((gain / back, "earlier", j))
+            k = i + fwd
+            if k < b_end:                                                        # B keeps >= 1 beat
+                gain = float(sum(scores[A, i:k] - scores[B, i:k]))
+                options.append((gain / fwd, "later", k))
+            if options:
+                gain, how, to = max(options)
+                if gain > -tol:
+                    if how == "earlier":
+                        for x in range(to, i):
+                            path[x] = B
+                    else:
+                        for x in range(i, to):
+                            path[x] = A
+                        i = to
+        i += 1
+
+    # Merge chords shorter than min_chord_beats into the better-fitting neighbour.
+    min_beats = TUNING["min_chord_beats"]
+    changed = True
+    while changed:
+        changed = False
+        i = 0
+        while i < n:
+            a, b = run_bounds(i)
+            if b - a < min_beats and (a > 0 or b < n):
+                candidates = []
+                if a > 0:
+                    candidates.append(path[a - 1])
+                if b < n:
+                    candidates.append(path[b])
+                best = max(candidates, key=lambda st: float(sum(scores[st, a:b])))
+                for x in range(a, b):
+                    path[x] = best
+                changed = True
+            i = b
+    return path
+
+
+def build_segments(path, ctx):
+    """Turn a per-beat state path into chord segments (with alternatives)."""
+    import numpy as np
+
+    sims, probs, label_for = ctx["sims"], ctx["probs"], ctx["label_for"]
+    roots, beat_bass = ctx["roots"], ctx["beat_bass"]
+    beat_times, duration_s = ctx["beat_times"], ctx["duration_s"]
+    n_templates = ctx["n_templates"]
+
     # Beat boundaries: beat i spans beat_times[i] .. beat_times[i+1].
     bounds = list(beat_times) + [duration_s]
     segments = []
@@ -215,7 +318,6 @@ def detect_chords(beat_chroma, beat_bass, beat_times, duration_s, names):
     # Runner-ups: the chords whose templates fit this stretch almost as well
     # (e.g. Dmaj7 vs F#m7, which share three notes). Offered in the app as
     # one-click alternatives when correcting a chord.
-    n_templates = len(templates)
     label_index = {label_for(k)["label"]: k for k in range(n_templates)}
     for seg in segments:
         seg["confidence"] = round(float(np.mean(seg.pop("_conf"))), 3)
@@ -258,7 +360,7 @@ def detect_chords(beat_chroma, beat_bass, beat_times, duration_s, names):
                 ]
                 seg["reranked_from"] = previous
         seg.pop("_first_beat")
-    return segments, path, n_states
+    return segments
 
 
 # ---------------------------------------------------------------------------
@@ -542,10 +644,12 @@ def analyze(audio_path: str) -> dict:
     beat_bass = beat_bass[:, : len(beat_frames)]
 
     key, names = detect_key(chroma.mean(axis=1))
-    chords, path, _ = detect_chords(beat_chroma, beat_bass, beat_times, duration_s, names)
+    path, chord_ctx = detect_chords(beat_chroma, beat_bass, beat_times, duration_s, names)
 
     onset_at_beats = onset_env[np.clip(beat_frames, 0, len(onset_env) - 1)]
     meter, phase = detect_meter(path, onset_at_beats)
+    path = regularize_path(path, chord_ctx["scores"], meter, phase)
+    chords = build_segments(path, chord_ctx)
     bars = build_bars(beat_times, meter, phase, duration_s)
     strumming = detect_strumming(y_perc, sr, beat_times, bars, meter, tempo)
     capo = suggest_capo(chords)
