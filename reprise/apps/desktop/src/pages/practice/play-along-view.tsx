@@ -10,6 +10,7 @@ import {
   CHORD_LABEL_RE, canonicalChord, capoShapeLabel, formatChord, getChordVoicings,
   shapeMidiNotes, soundingLabel, type ChordNotation, type ChordShape,
 } from "../../lib/chord-shapes";
+import { halfBeatTimes } from "../../lib/chord-edits";
 import { buildPicking, PICK_PATTERNS, type PickEvent, type PickPattern } from "../../lib/fingerpicking";
 import {
   loadInstrument, pluck, setInstrument, setSynthVolume, strum, synthNow, type GuitarInstrument,
@@ -269,6 +270,12 @@ function StrumPatternButton({ pattern, activeSlot, onChange }: {
   );
 }
 
+/** 0.5 -> "½", 1.5 -> "1½", 2 -> "2". */
+function beatsText(n: number): string {
+  const whole = Math.floor(n);
+  return n - whole >= 0.5 ? `${whole || ""}½` : `${whole}`;
+}
+
 // ---------------------------------------------------------------------------
 // Chord popover — diagram + sound
 // ---------------------------------------------------------------------------
@@ -301,7 +308,7 @@ type EditorTab = "pick" | "timing";
  * Works in the names on screen: with the capo toggle on you pick the shape
  * you play, and the sounding chord is saved.
  */
-function ChordEditor({ segment, beatsInBar, onPreview, onSelect, onSave, onLength, onRemove, onReset }: {
+function ChordEditor({ segment, beatsInBar, onPreview, onSelect, onSave, onLength, onShift, onRemove, onReset }: {
   segment: ChordSegment;
   /** Beats from this chord's start to the end of its bar. */
   beatsInBar: number;
@@ -310,6 +317,7 @@ function ChordEditor({ segment, beatsInBar, onPreview, onSelect, onSave, onLengt
   onSelect: (shown: string) => void;
   onSave: (soundingLabel: string) => Promise<void>;
   onLength: (length: ChordLength) => Promise<void>;
+  onShift: (dir: -1 | 1) => Promise<void>;
   onRemove: (fill: "next" | "previous") => Promise<void>;
   onReset: () => Promise<void>;
 }) {
@@ -409,21 +417,21 @@ function ChordEditor({ segment, beatsInBar, onPreview, onSelect, onSave, onLengt
         {tab === "timing" && (
           <div className="flex flex-col gap-3">
             <div>
-              <div className={sectionTitle}>Length · now {segment.beats} beat{segment.beats === 1 ? "" : "s"}</div>
+              <div className={sectionTitle}>Length · now {beatsText(segment.beats)} beat{segment.beats === 1 ? "" : "s"}</div>
               <div className="inline-flex p-[2px] rounded-[8px] bg-[var(--bg)] border border-[var(--border)]">
-                {[1, 2, 3, 4].map((n) => (
+                {[0.5, 1, 2, 3, 4].map((n) => (
                   <button
                     key={n}
                     disabled={saving || n === segment.beats}
                     onClick={() => run(() => onLength(n))}
-                    title={n > segment.beats ? `Hold for ${n} beats (replaces what follows)` : n < segment.beats ? `Shorten to ${n}; the next chord starts earlier` : "Current length"}
+                    title={n > segment.beats ? `Hold for ${beatsText(n)} beats (replaces what follows)` : n < segment.beats ? `Shorten to ${beatsText(n)}; the next chord starts earlier` : "Current length"}
                     className={`w-[34px] py-[3px] rounded-[6px] text-[12px] font-medium border-none cursor-pointer transition-all disabled:cursor-default ${
                       n === segment.beats
                         ? "bg-[var(--surface)] text-[var(--text-primary)] shadow-[0_1px_2px_rgba(0,0,0,0.08)]"
                         : "bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                     }`}
                   >
-                    {n}
+                    {beatsText(n)}
                   </button>
                 ))}
                 {beatsInBar > 0 && beatsInBar !== segment.beats && (
@@ -438,6 +446,23 @@ function ChordEditor({ segment, beatsInBar, onPreview, onSelect, onSave, onLengt
                 )}
               </div>
               <div className="text-[10.5px] text-[var(--text-muted)] mt-1">Longer replaces the chords after it; shorter lets the next chord start earlier.</div>
+            </div>
+            <div>
+              <div className={sectionTitle}>Start</div>
+              <div className="inline-flex p-[2px] rounded-[8px] bg-[var(--bg)] border border-[var(--border)]">
+                {([[-1, "½ beat earlier"], [1, "½ beat later"]] as const).map(([dir, label]) => (
+                  <button
+                    key={dir}
+                    disabled={saving}
+                    onClick={() => run(() => onShift(dir))}
+                    title={dir === 1 ? "Start on the & — the chord before holds half a beat longer" : "Start half a beat earlier — takes that half from the chord before"}
+                    className="px-2.5 py-[3px] rounded-[6px] text-[12px] font-medium border-none cursor-pointer bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="text-[10.5px] text-[var(--text-muted)] mt-1">For chords that change on the "&" between beats (a push).</div>
             </div>
             <div>
               <div className={sectionTitle}>Remove this chord</div>
@@ -493,7 +518,7 @@ function ChordEditor({ segment, beatsInBar, onPreview, onSelect, onSave, onLengt
 }
 
 function ChordPopover({
-  label, anchor, segment, fingeringBar, beatsInBar, capoFret, useCapo, onPlay, onEdit, onLength, onRemove, onReset, onClose,
+  label, anchor, segment, fingeringBar, beatsInBar, capoFret, useCapo, onPlay, onEdit, onLength, onShift, onRemove, onReset, onClose,
 }: {
   label: string;
   anchor: DOMRect;
@@ -507,6 +532,7 @@ function ChordPopover({
   onPlay: (label: string, how: "strum" | "arpeggio") => void;
   onEdit: (segment: ChordSegment, label: string) => Promise<void>;
   onLength: (segment: ChordSegment, length: ChordLength) => Promise<void>;
+  onShift: (segment: ChordSegment, dir: -1 | 1) => Promise<void>;
   onRemove: (segment: ChordSegment, fill: "next" | "previous") => Promise<void>;
   onReset: (segment: ChordSegment) => Promise<void>;
   onClose: () => void;
@@ -647,6 +673,7 @@ function ChordPopover({
             onSelect={setSelected}
             onSave={async (l) => { await onEdit(segment, l); onClose(); }}
             onLength={async (n) => { await onLength(segment, n); onClose(); }}
+            onShift={async (d) => { await onShift(segment, d); onClose(); }}
             onRemove={async (fill) => { await onRemove(segment, fill); onClose(); }}
             onReset={async () => { await onReset(segment); onClose(); }}
           />
@@ -723,13 +750,18 @@ function LeadSheetView({ analysis, lines, chords, playhead, isPlaying }: {
 
   const lyrics = useMemo(() => lyricsByBeat(lines, beats), [lines, beats]);
   // Which chord starts on each beat (chord starts sit on beats).
-  const chordStartAtBeat = useMemo(() => {
-    const map = new Map<number, number>();
+  // Which chord starts on each beat, and on each beat's "&".
+  const { chordStartAtBeat, chordStartOnAnd } = useMemo(() => {
+    const onBeat = new Map<number, number>();
+    const onAnd = new Map<number, number>();
     chords.forEach((c, ci) => {
       const b = beatIndexAt(beats, c.start_ms + 40);
-      if (b >= 0 && !map.has(b)) map.set(b, ci);
+      if (b < 0) return;
+      const next = beats[b + 1] ?? c.end_ms;
+      const map = c.start_ms > (beats[b] + next) / 2 - 80 ? onAnd : onBeat;
+      if (!map.has(b)) map.set(b, ci);
     });
-    return map;
+    return { chordStartAtBeat: onBeat, chordStartOnAnd: onAnd };
   }, [chords, beats]);
 
   const rows: typeof bars[] = [];
@@ -768,6 +800,7 @@ function LeadSheetView({ analysis, lines, chords, playhead, isPlaying }: {
                 <div className="grid" style={{ gridTemplateColumns: `repeat(${bar.beats}, minmax(0, 1fr))` }}>
                   {beatIdx.map((b, k) => {
                     const ci = chordStartAtBeat.get(b);
+                    const andCi = chordStartOnAnd.get(b);
                     const t = beats[b];
                     const isCurrentBeat = b === currentBeat;
                     // Clicking an empty beat edits the chord from this beat to the end of the bar.
@@ -775,7 +808,20 @@ function LeadSheetView({ analysis, lines, chords, playhead, isPlaying }: {
                     const scope = { start: t ?? bar.start_ms, end: bar.end_ms };
                     return (
                       <div key={b} className="min-w-0 flex flex-col">
-                        <div className="h-[22px] flex items-end">
+                        <div className={`relative h-[22px] flex items-end ${andCi != null ? "overflow-hidden pr-[50%]" : ""}`}>
+                          {andCi != null && (
+                            <span className="absolute left-1/2 bottom-0 max-w-[50%]" title='Starts on the "&"'>
+                              <ChordName
+                                label={chords[andCi].label}
+                                index={andCi}
+                                scope={{ start: chords[andCi].start_ms, end: bar.end_ms }}
+                                edited={chords[andCi].edited}
+                                className={`text-[14px] font-semibold leading-none whitespace-nowrap ${
+                                  andCi === playhead.chord ? "text-[var(--theme-text)]" : "text-[var(--text-primary)]"
+                                }`}
+                              />
+                            </span>
+                          )}
                           {ci != null ? (
                             <ChordName
                               label={chords[ci].label}
@@ -1271,8 +1317,12 @@ export function PlayAlongView({
   const strumData = useChordData(chordPath, reloadKey, "strum");
   const pickData = useChordData(chordPath, reloadKey, "fingerstyle");
   const {
-    analysis, isLoading, error, editChord, setChordLength, removeChord, resetChord, editCount, undoLastEdit, applySpans,
+    analysis, isLoading, error, editChord, setChordLength, removeChord, shiftChordStart, resetChord, editCount, undoLastEdit, applySpans,
   } = mode === "tab" ? pickData : strumData;
+  const slots = useMemo(
+    () => halfBeatTimes(analysis?.beats_ms ?? [], analysis?.duration_ms ?? 0),
+    [analysis],
+  );
   const enqueue = useTaskQueueStore((s) => s.enqueue);
   const queued = useTaskQueueStore((s) => s.tasks.some((t) => t.songId === song.id && t.type === "chords"));
   const [useCapoShapes, setUseCapoShapes] = useState(false); // capo off by default; one click shows capo shapes
@@ -1567,8 +1617,8 @@ export function PlayAlongView({
     const start = Math.max(whole.start_ms, popover.scope.start);
     const end = Math.min(whole.end_ms, popover.scope.end);
     if (end <= start) return whole;
-    const beatCount = (analysis.beats_ms ?? []).filter((t) => t >= start - 80 && t < end - 80).length;
-    return { ...whole, start_ms: start, end_ms: end, beats: Math.max(1, beatCount) };
+    const halves = slots.filter((t) => t >= start - 80 && t < end - 80).length;
+    return { ...whole, start_ms: start, end_ms: end, beats: Math.max(0.5, halves / 2) };
   })();
 
   return (
@@ -1773,14 +1823,14 @@ export function PlayAlongView({
               const seg = popoverSegment;
               if (!seg) return 0;
               const bar = (analysis.bars ?? []).find((b) => b.start_ms <= seg.start_ms + 80 && seg.start_ms < b.end_ms);
-              const beats = analysis.beats_ms ?? [];
-              return bar ? beats.filter((t) => t >= seg.start_ms - 80 && t < bar.end_ms - 80).length : 0;
+              return bar ? slots.filter((t) => t >= seg.start_ms - 80 && t < bar.end_ms - 80).length / 2 : 0;
             })()}
             capoFret={capoFret}
             useCapo={capoShown > 0}
             onPlay={playChord}
             onEdit={editChord}
             onLength={setChordLength}
+            onShift={shiftChordStart}
             onRemove={removeChord}
             onReset={resetChord}
             onClose={() => setPopover(null)}

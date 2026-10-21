@@ -3,10 +3,10 @@
  *
  * User corrections to the detected chords, stored next to the analysis as
  * chord_edits.json and applied on load. Each edit assigns a chord to a span
- * of beats ([start_ms, end_ms)), which covers renaming a chord, removing it
- * (the previous chord carries on), and changing how many beats it lasts.
- * Spans are snapped to the beat grid, which comes out the same on every
- * re-analysis, so edits survive re-analysing a song.
+ * of half beats ([start_ms, end_ms)), which covers renaming a chord, removing
+ * it (the previous chord carries on), and changing how long it lasts — a chord
+ * can start on a beat or on its "&". Spans are snapped to the beat grid, which
+ * comes out the same on every re-analysis, so edits survive re-analysing a song.
  *
  * Older edits without end_ms rename the detected chord starting at start_ms.
  */
@@ -101,6 +101,17 @@ export async function clearChordEdits(path: string, segment: ChordSegment): Prom
   await writeChordEdits(path, kept);
 }
 
+/** Every beat and the "&" halfway to the next one (the grid chords can start on). */
+export function halfBeatTimes(beats: number[], endMs: number): number[] {
+  const out: number[] = [];
+  beats.forEach((t, i) => {
+    const next = beats[i + 1] ?? endMs;
+    out.push(t);
+    if (next > t) out.push((t + next) / 2);
+  });
+  return out;
+}
+
 function relabel(segment: ChordSegment, label: string): ChordSegment {
   if (label === "N") {
     return { ...segment, label: "N", root: null, root_pc: null, quality: "N" };
@@ -121,10 +132,10 @@ function relabel(segment: ChordSegment, label: string): ChordSegment {
 /** Return a copy of the analysis with the user's corrections applied. */
 export function applyChordEdits(analysis: ChordAnalysis, edits: ChordEdit[]): ChordAnalysis {
   const detected = analysis.chords;
-  const beats = analysis.beats_ms;
-  if (edits.length === 0 || !detected?.length || !beats?.length) return analysis;
+  if (edits.length === 0 || !detected?.length || !analysis.beats_ms?.length) return analysis;
+  const beats = halfBeatTimes(analysis.beats_ms, detected[detected.length - 1].end_ms);
 
-  // One slot per beat: which detected chord covers it, and the label to use.
+  // One slot per half beat: which detected chord covers it, and the label to use.
   const segAt = beats.map((t) => {
     let k = 0;
     while (k + 1 < detected.length && detected[k + 1].start_ms <= t + TOLERANCE_MS / 2) k++;
@@ -167,7 +178,7 @@ export function applyChordEdits(analysis: ChordAnalysis, edits: ChordEdit[]): Ch
     const start = i === 0 ? Math.min(beats[0], detected[0].start_ms) : beats[i];
     const end = j < beats.length ? beats[j] : detected[detected.length - 1].end_ms;
     const anyEdited = edited.slice(i, j).some(Boolean);
-    const seg: ChordSegment = { ...base, start_ms: start, end_ms: end, beats: j - i };
+    const seg: ChordSegment = { ...base, start_ms: start, end_ms: end, beats: (j - i) / 2 };
     chords.push(
       anyEdited && labels[i] !== base.label
         ? { ...relabel(seg, labels[i]), edited: true, detected_label: base.label }

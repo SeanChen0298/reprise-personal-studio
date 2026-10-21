@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { readChordAnalysis, type ChordAnalysis, type ChordSegment } from "../lib/chord-analysis";
 import {
-  applyChordEdits, chordEditsPath, ensureEditSpace, readChordEdits, restoreDetectedSpan, saveChordSpan,
+  applyChordEdits, chordEditsPath, ensureEditSpace, halfBeatTimes, readChordEdits, restoreDetectedSpan, saveChordSpan,
   saveChordSpans, undoLastChordEdit, type EditSpace,
 } from "../lib/chord-edits";
 
-/** How long a chord should last: a number of beats, or to the end of its bar. */
+/** How long a chord should last: a number of beats (in halves), or to the end of its bar. */
 export type ChordLength = number | "bar";
 
 interface UseChordDataReturn {
@@ -21,6 +21,8 @@ interface UseChordDataReturn {
   /** Remove a chord: "next" = the following chord starts here instead;
    *  "previous" = the previous chord carries on through its beats. */
   removeChord: (segment: ChordSegment, fill: "next" | "previous") => Promise<void>;
+  /** Move where a chord starts by half a beat (-1 earlier, +1 later). */
+  shiftChordStart: (segment: ChordSegment, dir: -1 | 1) => Promise<void>;
   /** Put the detected chords back on this chord's beats (one undoable step). */
   resetChord: (segment: ChordSegment) => Promise<void>;
   /** How many corrections this song has. */
@@ -113,9 +115,15 @@ export function useChordData(
     [analysis],
   );
 
+  /** Beats and their "&"s, the grid chords start on. */
+  const slots = useMemo(
+    () => halfBeatTimes(analysis?.beats_ms ?? [], analysis?.duration_ms ?? 0),
+    [analysis],
+  );
+
   const setChordLength = useCallback(
     async (segment: ChordSegment, length: ChordLength) => {
-      const beats = analysis?.beats_ms ?? [];
+      const beats = slots;
       const chords = analysis?.chords ?? [];
       const at = beats.findIndex((t) => Math.abs(t - segment.start_ms) <= TOLERANCE_MS);
       if (at < 0) return;
@@ -124,7 +132,7 @@ export function useChordData(
         const bar = analysis?.bars?.find((b) => b.start_ms <= segment.start_ms + TOLERANCE_MS && segment.start_ms < b.end_ms);
         end = bar?.end_ms ?? segment.end_ms;
       } else {
-        end = beats[at + length] ?? analysis?.duration_ms ?? segment.end_ms;
+        end = beats[at + Math.round(length * 2)] ?? analysis?.duration_ms ?? segment.end_ms;
       }
       const detected = segment.detected_label ?? segment.label;
       if (end >= segment.end_ms - TOLERANCE_MS) {
@@ -136,7 +144,27 @@ export function useChordData(
       }
       void chords;
     },
-    [analysis, span, chordAfter],
+    [analysis, span, chordAfter, slots],
+  );
+
+  /** Move where a chord starts by half a beat (-1 = earlier, +1 = later onto its "&"). */
+  const shiftChordStart = useCallback(
+    async (segment: ChordSegment, dir: -1 | 1) => {
+      const at = slots.findIndex((t) => Math.abs(t - segment.start_ms) <= TOLERANCE_MS);
+      if (at < 0) return;
+      const detected = segment.detected_label ?? segment.label;
+      if (dir === 1) {
+        const to = slots[at + 1];
+        if (to == null || to >= segment.end_ms - TOLERANCE_MS) return;
+        const prev = chordBefore(segment.start_ms);
+        await span(segment.start_ms, to, prev ? prev.label : "N", detected);
+      } else {
+        const from = slots[at - 1];
+        if (from == null) return;
+        await span(from, segment.start_ms, segment.label, detected);
+      }
+    },
+    [slots, span, chordBefore],
   );
 
   const removeChord = useCallback(
@@ -173,6 +201,6 @@ export function useChordData(
   );
 
   return {
-    analysis, isLoading, error, editChord, setChordLength, removeChord, resetChord, editCount, undoLastEdit, applySpans,
+    analysis, isLoading, error, editChord, setChordLength, removeChord, shiftChordStart, resetChord, editCount, undoLastEdit, applySpans,
   };
 }
