@@ -415,33 +415,41 @@ function SheetLine({ segments, chords, isCurrent, playheadChord }: {
   playheadChord: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const { display } = useActions();
+  // Re-run the layout whenever the names shown change (capo toggle, edits).
+  const shownNames = segments.map((s) => (s.chord != null ? display(chords[s.chord].label) : "")).join("|");
 
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+    const GAP = 8;
     const layout = () => {
       const labels = Array.from(el.querySelectorAll<HTMLElement>("[data-chord-label]"));
+      // Read every natural position first, then write all shifts, so the
+      // browser lays out once instead of once per label.
       labels.forEach((l) => { l.style.transform = ""; });
+      const rects = labels.map((l) => l.getBoundingClientRect());
+      const shifts: number[] = [];
       let prevRight = -Infinity;
       let prevTop: number | null = null;
-      for (const l of labels) {
-        const r = l.getBoundingClientRect();
+      rects.forEach((r) => {
         const sameRow = prevTop !== null && Math.abs(r.top - prevTop) < 4;
-        if (sameRow && r.left < prevRight + 8) {
-          const dx = prevRight + 8 - r.left;
-          l.style.transform = `translateX(${dx}px)`;
-          prevRight = r.right + dx;
-        } else {
-          prevRight = r.right;
-        }
+        const dx = sameRow && r.left < prevRight + GAP ? prevRight + GAP - r.left : 0;
+        shifts.push(dx);
+        prevRight = r.right + dx;
         prevTop = r.top;
-      }
+      });
+      labels.forEach((l, i) => { if (shifts[i]) l.style.transform = `translateX(${shifts[i]}px)`; });
     };
     layout();
+    // Labels change width when the web font finishes loading; the line
+    // changes width when the window resizes. Either way, lay out again.
     const observer = new ResizeObserver(layout);
     observer.observe(el);
+    el.querySelectorAll("[data-chord-label]").forEach((l) => observer.observe(l));
+    void document.fonts?.ready.then(layout);
     return () => observer.disconnect();
-  }, [segments]);
+  }, [segments, shownNames]);
 
   return (
     <div ref={ref} className="flex flex-wrap items-end">
