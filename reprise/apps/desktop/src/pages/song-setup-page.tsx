@@ -4,6 +4,7 @@ import { Sidebar } from "../components/sidebar";
 import { useSongStore } from "../stores/song-store";
 import type { PitchStatus, AlignStatus, ChordStatus } from "../types/song";
 import { useTaskQueueStore } from "../stores/task-queue-store";
+import { readChordSettings, saveChordSettings } from "../lib/chord-analysis";
 
 export function SongSetupPage() {
   const { id } = useParams<{ id: string }>();
@@ -16,6 +17,16 @@ export function SongSetupPage() {
   const rawLines = useSongStore((s) => (id ? s.lines[id] : undefined));
 
   const [alignModel, setAlignModel] = useState("medium");
+
+  // Per-song chord analysis option: analyse on separated drums / bass / other.
+  const songFolder = song?.audio_folder;
+  const [separateDrums, setSeparateDrums] = useState(false);
+  useEffect(() => {
+    if (!songFolder) return;
+    let cancelled = false;
+    readChordSettings(songFolder).then((s) => { if (!cancelled) setSeparateDrums(s.use_stems === true); });
+    return () => { cancelled = true; };
+  }, [songFolder]);
 
   useEffect(() => {
     markStaleAnalysesAsFailed();
@@ -412,6 +423,29 @@ export function SongSetupPage() {
                   </span>
                   <div className="flex-1 h-px bg-[var(--border-subtle)]" />
                 </div>
+
+                <label className="flex items-start gap-2.5 mb-3 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={separateDrums}
+                    disabled={chordProcessing || chordQueued || !song.audio_folder}
+                    onChange={async (e) => {
+                      const on = e.target.checked;
+                      setSeparateDrums(on);
+                      await saveChordSettings(`${song.audio_folder}/chords.json`, { use_stems: on });
+                      // Already analysed: re-run so the change takes effect.
+                      if (chordDone || chordError) enqueue(song.id, song.title, "chords");
+                    }}
+                    className="mt-[3px] accent-[var(--theme)]"
+                  />
+                  <span className="text-[12.5px] leading-snug">
+                    Separate drums first
+                    <span className="block text-[11.5px] text-[var(--text-muted)]">
+                      For drum-heavy songs: chords from the instruments, beats from the drums, bass from the bass,
+                      strum pattern from the guitar/keys. First run takes about a minute. Changing it re-analyses.
+                    </span>
+                  </span>
+                </label>
 
                 {chordProcessing ? (
                   <div className="flex items-center gap-3.5 p-4 bg-[#FFFBEB] border border-[#FDE68A] rounded-[var(--radius)]">

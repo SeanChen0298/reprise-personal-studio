@@ -217,3 +217,10 @@ export async function saveChordSettings(chordDataPath: string, patch: ChordSetti
   const { writeTextFile } = await import("@tauri-apps/plugin-fs");
   await writeTextFile(path, JSON.stringify(next, null, 2));
 }
+
+/** Read a song's chord_settings.json from its folder ({} if missing or unreadable). */
+export async function readChordSettings(songFolder: string): Promise<ChordSettings> {
+  const path = `${songFolder}/chord_settings.json`;
+  if (!(await exists(path))) return {};
+  try { return JSON.parse(await readTextFile(path)) as ChordSettings; } catch { return {}; }
+}
