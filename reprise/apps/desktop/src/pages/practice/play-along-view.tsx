@@ -226,7 +226,7 @@ function ChordEditor({ segment, beatsInBar, onPreview, onSelect, onSave, onLengt
   onSelect: (shown: string) => void;
   onSave: (soundingLabel: string) => Promise<void>;
   onLength: (length: ChordLength) => Promise<void>;
-  onRemove: () => Promise<void>;
+  onRemove: (fill: "next" | "previous") => Promise<void>;
   onReset: () => Promise<void>;
 }) {
   const { display, toSounding, capoShown, chooseVoicing, notation } = useActions();
@@ -358,10 +358,10 @@ function ChordEditor({ segment, beatsInBar, onPreview, onSelect, onSave, onLengt
               try { await onReset(); } finally { setSaving(false); }
             }}
             disabled={saving}
-            title={`Back to the detected chord (${shownDetected})`}
+            title={`Remove every change made to this chord's beats (detected: ${shownDetected})`}
             className="h-[28px] px-2.5 rounded-[6px] border-[1.5px] border-[var(--border)] bg-transparent text-[11.5px] font-medium text-[var(--text-secondary)] hover:border-[#888] cursor-pointer"
           >
-            Reset to {shownDetected}
+            Undo changes here
           </button>
         )}
       </div>
@@ -393,13 +393,26 @@ function ChordEditor({ segment, beatsInBar, onPreview, onSelect, onSave, onLengt
               to bar end ({beatsInBar})
             </button>
           )}
+        </div>
+        <div className="text-[10.5px] font-medium uppercase tracking-[0.09em] text-[var(--text-muted)] mt-3 mb-1.5">
+          Remove this chord
+        </div>
+        <div className="flex flex-wrap gap-1">
           <button
             disabled={saving}
-            onClick={async () => { setSaving(true); try { await onRemove(); } finally { setSaving(false); } }}
-            title="Remove this chord; the previous chord keeps playing through its beats"
-            className={`${chip(false)} px-2 ml-auto text-red-500`}
+            onClick={async () => { setSaving(true); try { await onRemove("next"); } finally { setSaving(false); } }}
+            title="The chord after this one starts here instead (e.g. remove the first chord of a bar)"
+            className={`${chip(false)} px-2 text-red-500`}
           >
-            Remove chord
+            Next chord starts here
+          </button>
+          <button
+            disabled={saving}
+            onClick={async () => { setSaving(true); try { await onRemove("previous"); } finally { setSaving(false); } }}
+            title="The chord before this one keeps playing through these beats"
+            className={`${chip(false)} px-2 text-red-500`}
+          >
+            Previous chord carries on
           </button>
         </div>
       </div>
@@ -420,7 +433,7 @@ function ChordPopover({
   onPlay: (label: string, how: "strum" | "arpeggio") => void;
   onEdit: (segment: ChordSegment, label: string) => Promise<void>;
   onLength: (segment: ChordSegment, length: ChordLength) => Promise<void>;
-  onRemove: (segment: ChordSegment) => Promise<void>;
+  onRemove: (segment: ChordSegment, fill: "next" | "previous") => Promise<void>;
   onReset: (segment: ChordSegment) => Promise<void>;
   onClose: () => void;
 }) {
@@ -549,7 +562,7 @@ function ChordPopover({
             onSelect={setSelected}
             onSave={async (l) => { await onEdit(segment, l); onClose(); }}
             onLength={async (n) => { await onLength(segment, n); onClose(); }}
-            onRemove={async () => { await onRemove(segment); onClose(); }}
+            onRemove={async (fill) => { await onRemove(segment, fill); onClose(); }}
             onReset={async () => { await onReset(segment); onClose(); }}
           />
         </div>
@@ -1339,7 +1352,9 @@ function GuideSettings({ prefs, onChange, onClose, anchor }: {
 export function PlayAlongView({
   song, lines, translationLines, audioRef, isPlaying, onTogglePlay, onSeek, modeTabsContainer,
 }: PlayAlongViewProps) {
-  const { analysis, isLoading, error, editChord, setChordLength, removeChord, resetChord } = useChordData(
+  const {
+    analysis, isLoading, error, editChord, setChordLength, removeChord, resetChord, editCount, undoLastEdit,
+  } = useChordData(
     song.chord_status === "done" ? song.chord_data_path : undefined,
     `${song.chord_status}:${song.updated_at}`,
   );
@@ -1675,6 +1690,18 @@ export function PlayAlongView({
                 <><span className="mx-1.5">·</span>{analysis.time_signature.beats_per_bar}/{analysis.time_signature.beat_unit}</>
               )}
             </span>
+            {editCount > 0 && (
+              <button
+                onClick={() => void undoLastEdit()}
+                title={`Undo your most recent chord change (${editCount} change${editCount === 1 ? "" : "s"} in this song)`}
+                className="h-[28px] px-2.5 rounded-[6px] text-[12px] font-medium border-[1.5px] border-[var(--border)] text-[var(--text-secondary)] bg-transparent hover:border-[#888] cursor-pointer flex items-center gap-1 whitespace-nowrap"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 14L4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 010 11H11" />
+                </svg>
+                Undo edit
+              </button>
+            )}
             {capoAvailable && (
               <button
                 onClick={() => setUseCapoShapes((v) => !v)}

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { readChordAnalysis, type ChordAnalysis, type ChordSegment } from "../lib/chord-analysis";
 import {
-  applyChordEdits, chordEditsPath, clearChordEdits, readChordEdits, saveChordSpan,
+  applyChordEdits, chordEditsPath, clearChordEdits, readChordEdits, saveChordSpan, undoLastChordEdit,
 } from "../lib/chord-edits";
 
 /** How long a chord should last: a number of beats, or to the end of its bar. */
@@ -17,10 +17,15 @@ interface UseChordDataReturn {
   /** Make a chord last `length` beats (or to the end of its bar). Longer
    *  overwrites the following chords; shorter hands the freed beats to the next chord. */
   setChordLength: (segment: ChordSegment, length: ChordLength) => Promise<void>;
-  /** Remove a chord: the previous chord carries on through its beats. */
-  removeChord: (segment: ChordSegment) => Promise<void>;
+  /** Remove a chord: "next" = the following chord starts here instead;
+   *  "previous" = the previous chord carries on through its beats. */
+  removeChord: (segment: ChordSegment, fill: "next" | "previous") => Promise<void>;
   /** Drop every correction touching this chord. */
   resetChord: (segment: ChordSegment) => Promise<void>;
+  /** How many corrections this song has. */
+  editCount: number;
+  /** Undo the most recent correction. */
+  undoLastEdit: () => Promise<void>;
 }
 
 const TOLERANCE_MS = 80;
@@ -38,6 +43,7 @@ export function useChordData(
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editsVersion, setEditsVersion] = useState(0);
+  const [editCount, setEditCount] = useState(0);
 
   useEffect(() => {
     if (!chordDataPath) {
@@ -56,6 +62,7 @@ export function useChordData(
           readChordEdits(chordEditsPath(chordDataPath)),
         ]);
         if (cancelled) return;
+        setEditCount(edits.length);
         setAnalysis(data.status === "ok" ? applyChordEdits(data, edits) : null);
         setError(data.status === "error" ? data.message ?? "Chord analysis failed" : null);
       } catch (err) {
@@ -113,14 +120,20 @@ export function useChordData(
   );
 
   const removeChord = useCallback(
-    async (segment: ChordSegment) => {
+    async (segment: ChordSegment, fill: "next" | "previous") => {
       const chords = analysis?.chords ?? [];
       const idx = chords.findIndex((c) => Math.abs(c.start_ms - segment.start_ms) <= TOLERANCE_MS);
-      const neighbour = chords[idx - 1] ?? chords[idx + 1];
+      const preferred = fill === "next" ? chords[idx + 1] : chords[idx - 1];
+      const neighbour = preferred ?? (fill === "next" ? chords[idx - 1] : chords[idx + 1]);
       await span(segment.start_ms, segment.end_ms, neighbour ? neighbour.label : "N", segment.detected_label ?? segment.label);
     },
     [analysis, span],
   );
+
+  const undoLastEdit = useCallback(async () => {
+    if (!chordDataPath) return;
+    if (await undoLastChordEdit(chordEditsPath(chordDataPath))) setEditsVersion((v) => v + 1);
+  }, [chordDataPath]);
 
   const resetChord = useCallback(
     async (segment: ChordSegment) => {
@@ -131,5 +144,5 @@ export function useChordData(
     [chordDataPath],
   );
 
-  return { analysis, isLoading, error, editChord, setChordLength, removeChord, resetChord };
+  return { analysis, isLoading, error, editChord, setChordLength, removeChord, resetChord, editCount, undoLastEdit };
 }

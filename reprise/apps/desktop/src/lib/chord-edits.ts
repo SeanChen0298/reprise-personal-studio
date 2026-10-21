@@ -154,3 +154,12 @@ export function applyChordEdits(analysis: ChordAnalysis, edits: ChordEdit[]): Ch
   }
   return { ...analysis, chords };
 }
+
+/** Remove the most recent edit (undo). Returns false when there was nothing to undo. */
+export async function undoLastChordEdit(path: string): Promise<boolean> {
+  const edits = await readChordEdits(path);
+  if (edits.length === 0) return false;
+  const latest = edits.reduce((a, b) => (a.edited_at >= b.edited_at ? a : b));
+  await writeChordEdits(path, edits.filter((e) => e !== latest));
+  return true;
+}
