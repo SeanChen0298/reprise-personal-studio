@@ -41,6 +41,10 @@ export interface ChordSegment {
   root_pc: number | null;
   quality: "maj" | "m" | "7" | "m7" | "N";
   confidence: number;   // 0–1
+  /** Set when the user corrected this chord (see chord-edits.ts). */
+  edited?: boolean;
+  /** The analysis' original label, when edited. */
+  detected_label?: string;
 }
 
 export interface StrumSection {

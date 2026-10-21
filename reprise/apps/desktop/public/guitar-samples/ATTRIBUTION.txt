@@ -1,0 +1,11 @@
+Guitar samples used by Reprise's play-along guide and chord previews.
+
+steel/  — "Acoustic Guitar (steel)"  (General MIDI program 26)
+nylon/  — "Acoustic Guitar (nylon)"  (General MIDI program 25)
+
+Source: FluidR3_GM soundfont by Frank Wen, as rendered to per-note MP3 files by
+the midi-js-soundfonts project (https://github.com/gleitz/midi-js-soundfonts).
+License: Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)
+
+Files are named by MIDI note number (40 = E2 … 84 = C6). They are unmodified
+apart from the file names.

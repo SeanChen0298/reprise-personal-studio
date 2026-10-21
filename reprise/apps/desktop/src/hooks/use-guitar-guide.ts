@@ -82,10 +82,12 @@ export function useGuitarGuide(options: {
   enabled: boolean;
   mode: "strum" | "fingerstyle";
   volume: number;
+  /** Play this many ms earlier than the detected beat (positive = earlier). */
+  offsetMs: number;
   /** MIDI notes to strum for a chord label (already including any capo). */
   chordNotes: (label: string) => number[];
 }) {
-  const { analysis, audioRef, enabled, mode, volume, chordNotes } = options;
+  const { analysis, audioRef, enabled, mode, volume, offsetMs, chordNotes } = options;
   const events = useMemo(() => (analysis ? buildEvents(analysis, mode) : []), [analysis, mode]);
 
   useEffect(() => {
@@ -118,9 +120,10 @@ export function useGuitarGuide(options: {
       lastAudioMs = t;
 
       const now = synthNow();
-      for (let i = firstAfter(events, scheduledUpTo); i < events.length && events[i].t <= t + LOOKAHEAD_MS; i++) {
+      const horizon = t + LOOKAHEAD_MS + Math.max(0, offsetMs);
+      for (let i = firstAfter(events, scheduledUpTo); i < events.length && events[i].t <= horizon; i++) {
         const ev = events[i];
-        const when = now + Math.max(0, ev.t - t) / 1000 / rate;
+        const when = now + Math.max(0, (ev.t - t) / rate - offsetMs) / 1000;
         if (ev.kind === "strum" && ev.chord) {
           strum(chordNotes(ev.chord), { when, direction: ev.direction });
         } else if (ev.notes) {
@@ -134,5 +137,5 @@ export function useGuitarGuide(options: {
       window.clearInterval(timer);
       damp();
     };
-  }, [enabled, events, audioRef, chordNotes]);
+  }, [enabled, events, audioRef, chordNotes, offsetMs]);
 }

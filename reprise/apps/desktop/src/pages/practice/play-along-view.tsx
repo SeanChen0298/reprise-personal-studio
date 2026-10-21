@@ -5,7 +5,9 @@ import type {
   ChordAnalysis, ChordBar, ChordSegment, FingerstyleEvent, StrumSection,
 } from "../../lib/chord-analysis";
 import { getChordShape, shapeMidiNotes } from "../../lib/chord-shapes";
-import { pluck, strum, synthNow } from "../../lib/guitar-synth";
+import {
+  loadInstrument, pluck, setInstrument, setSynthVolume, strum, synthNow, type GuitarInstrument,
+} from "../../lib/guitar-synth";
 import { useChordData } from "../../hooks/use-chord-data";
 import { useGuitarGuide } from "../../hooks/use-guitar-guide";
 import { useTaskQueueStore } from "../../stores/task-queue-store";
@@ -68,8 +70,8 @@ interface PlayAlongActions {
   seek: (ms: number) => void;
   /** Label as shown (capo shape when the capo toggle is on). */
   display: (label: string) => string;
-  /** Play the chord and open its diagram next to `anchor`. */
-  openChord: (label: string, anchor: HTMLElement) => void;
+  /** Play the chord and open its diagram next to `anchor`. `index` = segment, when known (enables editing). */
+  openChord: (label: string, anchor: HTMLElement, index?: number) => void;
 }
 
 const ActionsContext = createContext<PlayAlongActions | null>(null);
@@ -78,19 +80,27 @@ function useActions() {
 }
 
 /** A chord name you can click to hear it and see how to hold it. */
-function ChordName({ label, className = "" }: { label: string; className?: string }) {
+function ChordName({ label, index, edited, className = "" }: {
+  label: string;
+  /** Index of this chord segment in the song, so it can be corrected. */
+  index?: number;
+  edited?: boolean;
+  className?: string;
+}) {
   const { display, openChord } = useActions();
-  if (label === "N") return <span className={className}>N.C.</span>;
+  const open = (el: HTMLElement) => openChord(label, el, index);
   return (
     <span
       role="button"
       tabIndex={0}
-      onClick={(e) => { e.stopPropagation(); openChord(label, e.currentTarget); }}
+      onClick={(e) => { e.stopPropagation(); open(e.currentTarget); }}
       onKeyDown={(e) => {
-        if (e.key === "Enter") { e.stopPropagation(); openChord(label, e.currentTarget); }
+        if (e.key === "Enter") { e.stopPropagation(); open(e.currentTarget); }
       }}
-      className={`cursor-pointer rounded-[4px] hover:bg-[var(--theme-light)] hover:text-[var(--theme-text)] px-[2px] -mx-[2px] ${className}`}
-      title="Hear it and see the fingering"
+      className={`cursor-pointer rounded-[4px] hover:bg-[var(--theme-light)] hover:text-[var(--theme-text)] px-[2px] -mx-[2px] ${
+        edited ? "underline decoration-dotted decoration-[var(--theme)] underline-offset-[3px]" : ""
+      } ${className}`}
+      title={edited ? "Edited by you · click to hear, see the fingering or change it" : "Click to hear it, see the fingering or change it"}
     >
       {display(label)}
     </span>
@@ -148,14 +158,101 @@ function StrumPattern({ pattern, activeSlot, showCounts = true }: {
 // Chord popover — diagram + sound
 // ---------------------------------------------------------------------------
 
+const PICKER_ROOTS = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
+const PICKER_QUALITIES: { suffix: string; label: string }[] = [
+  { suffix: "", label: "maj" }, { suffix: "m", label: "m" }, { suffix: "7", label: "7" }, { suffix: "m7", label: "m7" },
+];
+
+/** Split a label into picker root + suffix, normalising enharmonics to the picker's spelling. */
+function splitLabel(label: string): { root: string; suffix: string } {
+  const m = /^([A-G][#b]?)(m7|m|7)?$/.exec(label);
+  if (!m) return { root: "C", suffix: "" };
+  const enharmonic: Record<string, string> = { Db: "C#", "D#": "Eb", Gb: "F#", "G#": "Ab", "A#": "Bb" };
+  return { root: enharmonic[m[1]] ?? m[1], suffix: m[2] ?? "" };
+}
+
+function ChordEditor({ segment, onPreview, onSave }: {
+  segment: ChordSegment;
+  onPreview: (label: string) => void;
+  onSave: (label: string) => Promise<void>;
+}) {
+  const initial = segment.label === "N" ? { root: "C", suffix: "" } : splitLabel(segment.label);
+  const [root, setRoot] = useState(initial.root);
+  const [suffix, setSuffix] = useState(initial.suffix);
+  const [noChord, setNoChord] = useState(segment.label === "N");
+  const [saving, setSaving] = useState(false);
+  const chosen = noChord ? "N" : root + suffix;
+  const detected = segment.detected_label ?? segment.label;
+
+  const pick = (nextRoot: string, nextSuffix: string) => {
+    setRoot(nextRoot);
+    setSuffix(nextSuffix);
+    setNoChord(false);
+    onPreview(nextRoot + nextSuffix);
+  };
+  const save = async (label: string) => {
+    setSaving(true);
+    try { await onSave(label); } finally { setSaving(false); }
+  };
+  const chip = (active: boolean) =>
+    `h-[24px] rounded-[5px] text-[11.5px] font-medium cursor-pointer border transition-colors ${
+      active
+        ? "border-[var(--theme)] bg-[var(--theme-light)] text-[var(--theme-text)]"
+        : "border-[var(--border)] bg-transparent text-[var(--text-secondary)] hover:border-[#888]"
+    }`;
+
+  return (
+    <div className="mt-3 pt-3 border-t border-[var(--border-subtle)]">
+      <div className="text-[10.5px] font-medium uppercase tracking-[0.09em] text-[var(--text-muted)] mb-1.5">
+        Wrong chord? Change this one
+      </div>
+      <div className="grid grid-cols-6 gap-1 mb-1.5">
+        {PICKER_ROOTS.map((r) => (
+          <button key={r} onClick={() => pick(r, suffix)} className={chip(!noChord && root === r)}>{r}</button>
+        ))}
+      </div>
+      <div className="grid grid-cols-5 gap-1 mb-2">
+        {PICKER_QUALITIES.map((q) => (
+          <button key={q.label} onClick={() => pick(root, q.suffix)} className={chip(!noChord && suffix === q.suffix)}>
+            {q.label}
+          </button>
+        ))}
+        <button onClick={() => setNoChord(true)} className={chip(noChord)} title="No chord here">N.C.</button>
+      </div>
+      <div className="flex items-center gap-1.5">
+        <button
+          onClick={() => save(chosen)}
+          disabled={saving || chosen === segment.label}
+          className="flex-1 h-[28px] rounded-[6px] bg-[var(--accent)] text-white text-[12px] font-medium border-none cursor-pointer hover:opacity-85 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {chosen === segment.label ? "Current" : `Use ${chosen === "N" ? "N.C." : chosen}`}
+        </button>
+        {segment.edited && (
+          <button
+            onClick={() => save(detected)}
+            disabled={saving}
+            title={`Back to the detected chord (${detected})`}
+            className="h-[28px] px-2.5 rounded-[6px] border-[1.5px] border-[var(--border)] bg-transparent text-[11.5px] font-medium text-[var(--text-secondary)] hover:border-[#888] cursor-pointer"
+          >
+            Reset to {detected === "N" ? "N.C." : detected}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ChordPopover({
-  label, anchor, capoFret, useCapo, onPlay, onClose,
+  label, anchor, segment, capoFret, useCapo, onPlay, onEdit, onClose,
 }: {
   label: string;
   anchor: DOMRect;
+  /** The specific chord in the song, when opened from one (enables editing). */
+  segment?: ChordSegment;
   capoFret: number;
   useCapo: boolean;
   onPlay: (label: string, how: "strum" | "arpeggio") => void;
+  onEdit: (segment: ChordSegment, label: string) => Promise<void>;
   onClose: () => void;
 }) {
   const { display } = useActions();
@@ -176,9 +273,9 @@ function ChordPopover({
     };
   }, [onClose]);
 
-  const width = 196;
+  const width = segment ? 248 : 196;
   const left = Math.min(Math.max(8, anchor.left + anchor.width / 2 - width / 2), window.innerWidth - width - 8);
-  const below = anchor.bottom + 210 < window.innerHeight;
+  const below = anchor.bottom + (segment ? 360 : 210) < window.innerHeight;
   const top = below ? anchor.bottom + 6 : anchor.top - 6;
 
   const smallButton =
@@ -190,11 +287,12 @@ function ChordPopover({
       style={{ left, top, width, transform: below ? undefined : "translateY(-100%)" }}
       className="fixed z-50 p-3 rounded-[10px] border border-[var(--border)] bg-[var(--surface)] shadow-[0_8px_28px_rgba(0,0,0,0.14)]"
     >
-      <div className="flex items-baseline justify-between mb-1">
-        <span className="text-[18px] font-semibold text-[var(--text-primary)]">{shapeLabel}</span>
-        {useCapo && capoFret > 0 && shapeLabel !== label && (
-          <span className="text-[11px] text-[var(--text-muted)]">sounds {label} · capo {capoFret}</span>
-        )}
+      <div className="flex items-baseline justify-between mb-1 gap-2">
+        <span className="text-[18px] font-semibold text-[var(--text-primary)]">{label === "N" ? "N.C." : shapeLabel}</span>
+        <span className="text-[11px] text-[var(--text-muted)] text-right">
+          {useCapo && capoFret > 0 && shapeLabel !== label && <>sounds {label} · capo {capoFret}</>}
+          {segment?.edited && <> · edited (detected {segment.detected_label === "N" ? "N.C." : segment.detected_label})</>}
+        </span>
       </div>
       {shape ? (
         <div className="flex justify-center py-1">
@@ -203,10 +301,20 @@ function ChordPopover({
       ) : (
         <div className="text-[12px] text-[var(--text-muted)] py-4 text-center">No diagram for this chord</div>
       )}
-      <div className="flex gap-1.5 mt-2">
-        <button onClick={() => onPlay(label, "strum")} className={smallButton}>Strum</button>
-        <button onClick={() => onPlay(label, "arpeggio")} className={smallButton}>Note by note</button>
-      </div>
+      {label !== "N" && (
+        <div className="flex gap-1.5 mt-2">
+          <button onClick={() => onPlay(label, "strum")} className={smallButton}>Strum</button>
+          <button onClick={() => onPlay(label, "arpeggio")} className={smallButton}>Note by note</button>
+        </div>
+      )}
+      {segment && (
+        <ChordEditor
+          key={`${segment.start_ms}:${segment.label}`}
+          segment={segment}
+          onPreview={(l) => onPlay(l, "strum")}
+          onSave={async (l) => { await onEdit(segment, l); onClose(); }}
+        />
+      )}
     </div>
   );
 }
@@ -299,7 +407,9 @@ function SheetView({
                         activeChord ? "text-[var(--theme-text)]" : "text-[var(--text-secondary)]"
                       }`}
                     >
-                      {seg.chord != null ? <ChordName label={chords[seg.chord].label} /> : ""}
+                      {seg.chord != null ? (
+                        <ChordName label={chords[seg.chord].label} index={seg.chord} edited={chords[seg.chord].edited} />
+                      ) : ""}
                     </span>
                     <span
                       className={`text-[15px] leading-[22px] whitespace-pre-wrap ${
@@ -373,7 +483,7 @@ function BarsView({ analysis, playhead, isPlaying }: {
         >
           <span className="text-[var(--text-muted)]">Pickup</span>
           {chordsInBar(pickup, chords).map((ci) => (
-            <ChordName key={ci} label={chords[ci].label} className="font-semibold" />
+            <ChordName key={ci} label={chords[ci].label} index={ci} edited={chords[ci].edited} className="font-semibold" />
           ))}
         </div>
       )}
@@ -419,6 +529,8 @@ function BarsView({ analysis, playhead, isPlaying }: {
                         <ChordName
                           key={ci}
                           label={chords[ci].label}
+                          index={ci}
+                          edited={chords[ci].edited}
                           className={`text-[15px] font-semibold leading-tight ${
                             ci === playhead.chord && isCurrent ? "text-[var(--theme-text)]" : "text-[var(--text-primary)]"
                           }`}
@@ -556,7 +668,8 @@ function TabView({ analysis, playhead, isPlaying }: {
         {arrangedBars.map((bar) => {
           const isCurrent = bar.index === playhead.bar;
           const evs = eventsByBar.get(bar.index);
-          const chord = chords[indexAt(chords, bar.start_ms, (c) => c.start_ms)];
+          const chordIndex = indexAt(chords, bar.start_ms, (c) => c.start_ms);
+          const chord = chords[chordIndex];
           return (
             <div
               key={bar.index}
@@ -569,7 +682,7 @@ function TabView({ analysis, playhead, isPlaying }: {
               <div className="flex items-baseline gap-2 mb-1">
                 <span className="text-[9.5px] text-[var(--text-muted)]">{bar.index + 1}</span>
                 {chord && chord.label !== "N" && (
-                  <ChordName label={chord.label} className="text-[12.5px] font-semibold text-[var(--text-secondary)]" />
+                  <ChordName label={chord.label} index={chordIndex} edited={chord.edited} className="text-[12.5px] font-semibold text-[var(--text-secondary)]" />
                 )}
               </div>
               <div className="font-mono text-[12px] leading-[16px]">
@@ -616,21 +729,108 @@ const MODES: { value: Mode; label: string }[] = [
   { value: "tab", label: "Fingerstyle tab" },
 ];
 
-const GUIDE_VOLUME_KEY = "reprise.playAlong.guideVolume";
+// Per-machine guide preferences (conveniences only — fine to lose).
+const GUIDE_PREFS_KEY = "reprise.playAlong.guide";
 
-function readGuideVolume(): number {
+interface GuidePrefs {
+  volume: number;        // 0..1
+  offsetMs: number;      // play this much earlier than the detected beat
+  instrument: GuitarInstrument;
+}
+
+const DEFAULT_GUIDE_PREFS: GuidePrefs = { volume: 0.3, offsetMs: 60, instrument: "steel" };
+
+function readGuidePrefs(): GuidePrefs {
   try {
-    const v = Number(localStorage.getItem(GUIDE_VOLUME_KEY));
-    return Number.isFinite(v) && v > 0 ? Math.min(1, v) : 0.6;
+    const raw = localStorage.getItem(GUIDE_PREFS_KEY);
+    return raw ? { ...DEFAULT_GUIDE_PREFS, ...JSON.parse(raw) } : DEFAULT_GUIDE_PREFS;
   } catch {
-    return 0.6;
+    return DEFAULT_GUIDE_PREFS;
   }
+}
+
+function GuideSettings({ prefs, onChange, onClose, anchor }: {
+  prefs: GuidePrefs;
+  onChange: (p: GuidePrefs) => void;
+  onClose: () => void;
+  anchor: DOMRect;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+  const width = 240;
+  const left = Math.min(anchor.right - width, window.innerWidth - width - 8);
+  const label = "text-[10.5px] font-medium uppercase tracking-[0.09em] text-[var(--text-muted)] mb-1.5";
+
+  return (
+    <div
+      ref={ref}
+      style={{ left, top: anchor.bottom + 6, width }}
+      className="fixed z-50 p-3 rounded-[10px] border border-[var(--border)] bg-[var(--surface)] shadow-[0_8px_28px_rgba(0,0,0,0.14)] flex flex-col gap-3"
+    >
+      <div>
+        <div className={label}>Sound</div>
+        <div className="flex p-[2px] rounded-[8px] bg-[var(--bg)] border border-[var(--border)]">
+          {(["steel", "nylon"] as const).map((inst) => (
+            <button
+              key={inst}
+              onClick={() => onChange({ ...prefs, instrument: inst })}
+              className={`flex-1 px-2 py-[3px] rounded-[6px] text-[12px] font-medium cursor-pointer border-none ${
+                prefs.instrument === inst
+                  ? "bg-[var(--surface)] text-[var(--text-primary)] shadow-[0_1px_2px_rgba(0,0,0,0.08)]"
+                  : "bg-transparent text-[var(--text-muted)]"
+              }`}
+            >
+              {inst === "steel" ? "Steel string" : "Nylon"}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div>
+        <div className={`${label} flex justify-between`}>
+          <span>Volume</span><span className="normal-case tracking-normal">{Math.round(prefs.volume * 100)}%</span>
+        </div>
+        <input
+          type="range" min={0.05} max={1} step={0.05} value={prefs.volume}
+          onChange={(e) => onChange({ ...prefs, volume: Number(e.target.value) })}
+          className="w-full accent-[var(--theme)]"
+        />
+      </div>
+      <div>
+        <div className={`${label} flex justify-between`}>
+          <span>Timing</span>
+          <span className="normal-case tracking-normal">
+            {prefs.offsetMs === 0 ? "on the beat" : `${Math.abs(prefs.offsetMs)} ms ${prefs.offsetMs > 0 ? "earlier" : "later"}`}
+          </span>
+        </div>
+        <input
+          type="range" min={-150} max={300} step={10} value={prefs.offsetMs}
+          onChange={(e) => onChange({ ...prefs, offsetMs: Number(e.target.value) })}
+          className="w-full accent-[var(--theme)]"
+        />
+        <div className="text-[10.5px] text-[var(--text-muted)] leading-snug mt-1">
+          Drag right if the guitar sounds behind the song, left if it rushes ahead.
+        </div>
+      </div>
+      <div className="text-[10px] text-[var(--text-muted)] leading-snug">
+        Guitar samples: FluidR3_GM by Frank Wen (CC BY 3.0)
+      </div>
+    </div>
+  );
 }
 
 export function PlayAlongView({
   song, lines, translationLines, audioRef, isPlaying, onTogglePlay, onSeek,
 }: PlayAlongViewProps) {
-  const { analysis, isLoading, error } = useChordData(
+  const { analysis, isLoading, error, editChord } = useChordData(
     song.chord_status === "done" ? song.chord_data_path : undefined,
     `${song.chord_status}:${song.updated_at}`,
   );
@@ -639,8 +839,9 @@ export function PlayAlongView({
   const [useCapoShapes, setUseCapoShapes] = useState(true);
   const [mode, setMode] = useState<Mode>("sheet");
   const [guideOn, setGuideOn] = useState(false);
-  const [guideVolume, setGuideVolume] = useState(readGuideVolume);
-  const [popover, setPopover] = useState<{ label: string; anchor: DOMRect } | null>(null);
+  const [guidePrefs, setGuidePrefs] = useState<GuidePrefs>(readGuidePrefs);
+  const [guideSettingsAnchor, setGuideSettingsAnchor] = useState<DOMRect | null>(null);
+  const [popover, setPopover] = useState<{ label: string; anchor: DOMRect; index?: number } | null>(null);
   const [playhead, setPlayhead] = useState<Playhead>({ bar: -1, chord: -1, slot: -1, line: -1 });
   const [clock, setClock] = useState({ now: 0, total: 0 });
 
@@ -735,24 +936,32 @@ export function PlayAlongView({
   const actions = useMemo<PlayAlongActions>(() => ({
     seek: onSeek,
     display,
-    openChord: (label, anchor) => {
-      playChord(label);
-      setPopover({ label, anchor: anchor.getBoundingClientRect() });
+    openChord: (label, anchor, index) => {
+      if (label !== "N") playChord(label);
+      setPopover({ label, anchor: anchor.getBoundingClientRect(), index });
     },
   }), [onSeek, display, playChord]);
+
+  // Sound + volume apply to chord previews too, not just the guide.
+  useEffect(() => {
+    setInstrument(guidePrefs.instrument);
+    setSynthVolume(guidePrefs.volume);
+  }, [guidePrefs.instrument, guidePrefs.volume]);
+  useEffect(() => { void loadInstrument(); }, []);
 
   useGuitarGuide({
     analysis,
     audioRef,
     enabled: guideOn,
     mode: mode === "tab" ? "fingerstyle" : "strum",
-    volume: guideVolume,
+    volume: guidePrefs.volume,
+    offsetMs: guidePrefs.offsetMs,
     chordNotes,
   });
 
-  const changeGuideVolume = (v: number) => {
-    setGuideVolume(v);
-    try { localStorage.setItem(GUIDE_VOLUME_KEY, String(v)); } catch { /* per-viewer convenience only */ }
+  const changeGuidePrefs = (p: GuidePrefs) => {
+    setGuidePrefs(p);
+    try { localStorage.setItem(GUIDE_PREFS_KEY, JSON.stringify(p)); } catch { /* per-machine convenience only */ }
   };
 
   const stemsDone = song.stem_status === "done";
@@ -796,8 +1005,9 @@ export function PlayAlongView({
   const chords = analysis.chords ?? [];
   const current = playhead.chord >= 0 ? chords[playhead.chord] : undefined;
   let next: ChordSegment | undefined;
+  let nextIndex = -1;
   for (let i = playhead.chord + 1; i < chords.length; i++) {
-    if (chords[i].label !== "N" && chords[i].label !== current?.label) { next = chords[i]; break; }
+    if (chords[i].label !== "N" && chords[i].label !== current?.label) { next = chords[i]; nextIndex = i; break; }
   }
   const sections = analysis.strumming?.sections ?? [];
   const currentSection =
@@ -835,7 +1045,12 @@ export function PlayAlongView({
 
           <div className="flex items-baseline gap-3 min-w-[140px]">
             {current && current.label !== "N" ? (
-              <ChordName label={current.label} className="text-[30px] font-semibold leading-none text-[var(--theme-text)]" />
+              <ChordName
+                label={current.label}
+                index={playhead.chord}
+                edited={current.edited}
+                className="text-[30px] font-semibold leading-none text-[var(--theme-text)]"
+              />
             ) : (
               <span className="text-[30px] font-semibold leading-none text-[var(--text-muted)]">–</span>
             )}
@@ -844,7 +1059,7 @@ export function PlayAlongView({
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M5 12h14M13 6l6 6-6 6" />
                 </svg>
-                <ChordName label={next.label} className="font-semibold text-[var(--text-secondary)]" />
+                <ChordName label={next.label} index={nextIndex} edited={next.edited} className="font-semibold text-[var(--text-secondary)]" />
               </span>
             )}
           </div>
@@ -905,15 +1120,16 @@ export function PlayAlongView({
                 </svg>
                 Guide guitar
               </button>
-              {guideOn && (
-                <input
-                  type="range" min={0.05} max={1} step={0.05}
-                  value={guideVolume}
-                  onChange={(e) => changeGuideVolume(Number(e.target.value))}
-                  title="Guide guitar volume"
-                  className="w-[70px] accent-[var(--theme)]"
-                />
-              )}
+              <button
+                onClick={(e) => setGuideSettingsAnchor(e.currentTarget.getBoundingClientRect())}
+                title="Guitar sound, volume and timing"
+                className="w-[26px] h-[26px] rounded-[6px] border-[1.5px] border-[var(--border)] bg-transparent text-[var(--text-secondary)] hover:border-[#888] cursor-pointer flex items-center justify-center"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0" />
+                  <circle cx="16" cy="6" r="2" /><circle cx="10" cy="12" r="2" /><circle cx="18" cy="18" r="2" />
+                </svg>
+              </button>
             </div>
             <div className="flex p-[2px] rounded-[8px] bg-[var(--bg)] border border-[var(--border)]">
               {MODES.map(({ value, label }) => (
@@ -961,10 +1177,20 @@ export function PlayAlongView({
           <ChordPopover
             label={popover.label}
             anchor={popover.anchor}
+            segment={popover.index != null && popover.index >= 0 ? chords[popover.index] : undefined}
             capoFret={capoFret}
             useCapo={!!shapes}
             onPlay={playChord}
+            onEdit={editChord}
             onClose={() => setPopover(null)}
+          />
+        )}
+        {guideSettingsAnchor && (
+          <GuideSettings
+            prefs={guidePrefs}
+            onChange={changeGuidePrefs}
+            anchor={guideSettingsAnchor}
+            onClose={() => setGuideSettingsAnchor(null)}
           />
         )}
       </div>

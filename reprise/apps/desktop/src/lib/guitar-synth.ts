@@ -1,81 +1,113 @@
 /**
  * guitar-synth.ts
  *
- * A small offline guitar sound for chord previews and the play-along guide.
- * Each note is synthesised with the Karplus-Strong plucked-string algorithm
- * (a burst of noise fed through a short, slightly lossy delay loop), so no
- * samples or downloads are needed. Rendered notes are cached per pitch.
+ * Guitar sound for chord previews and the play-along guide.
+ *
+ * Plays real acoustic-guitar samples (FluidR3_GM, CC BY 3.0 — see
+ * public/guitar-samples/ATTRIBUTION.txt) bundled with the app, one MP3 per
+ * MIDI note 40–84, so it works offline. Until a note's sample has loaded,
+ * a Karplus-Strong plucked-string synth stands in for it.
  *
  * All scheduling times are AudioContext seconds; callers convert from ms.
  */
 
-const NOTE_SECONDS = 2.2;
-const DECAY = 0.9965;        // loop loss per period; lower = shorter ring
-const BRIGHTNESS = 0.55;     // 0..1, lowpass on the initial pluck noise
+export type GuitarInstrument = "steel" | "nylon";
+
+const SAMPLE_LOW = 40;   // E2
+const SAMPLE_HIGH = 84;  // C6
+const DEFAULT_MASTER = 0.35;
 
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
-const bufferCache = new Map<number, AudioBuffer>();
+let instrument: GuitarInstrument = "steel";
+
+const samples = new Map<string, AudioBuffer>();             // `${instrument}:${midi}`
+const loading = new Map<GuitarInstrument, Promise<void>>();
+const synthCache = new Map<number, AudioBuffer>();
 
 /** One voice per string so a new note damps the previous one, like a real guitar. */
 const ringing = new Map<number, { gain: GainNode; source: AudioBufferSourceNode }>();
 
 function audio(): { ctx: AudioContext; master: GainNode } {
   if (!ctx) {
-    ctx = new AudioContext();
+    ctx = new AudioContext({ latencyHint: "interactive" });
     master = ctx.createGain();
-    master.gain.value = 0.7;
-    // Soften the top end a little; raw Karplus-Strong is quite bright.
-    const tone = ctx.createBiquadFilter();
-    tone.type = "lowpass";
-    tone.frequency.value = 5200;
-    master.connect(tone).connect(ctx.destination);
+    master.gain.value = DEFAULT_MASTER;
+    master.connect(ctx.destination);
   }
   if (ctx.state === "suspended") void ctx.resume();
   return { ctx, master: master! };
 }
 
-function renderNote(midi: number): AudioBuffer {
-  const cached = bufferCache.get(midi);
-  if (cached) return cached;
+/** Fetch and decode every note of an instrument (≈0.9 MB). Safe to call repeatedly. */
+export function loadInstrument(which: GuitarInstrument = instrument): Promise<void> {
+  const existing = loading.get(which);
+  if (existing) return existing;
+  const { ctx } = audio();
+  const task = (async () => {
+    const jobs: Promise<void>[] = [];
+    for (let midi = SAMPLE_LOW; midi <= SAMPLE_HIGH; midi++) {
+      jobs.push(
+        fetch(`/guitar-samples/${which}/${midi}.mp3`)
+          .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`HTTP ${r.status}`))))
+          .then((data) => ctx.decodeAudioData(data))
+          .then((buf) => { samples.set(`${which}:${midi}`, buf); })
+          .catch((err) => console.warn(`[guitar] sample ${which}/${midi} failed:`, err)),
+      );
+    }
+    await Promise.all(jobs);
+  })();
+  loading.set(which, task);
+  return task;
+}
 
+export function setInstrument(which: GuitarInstrument): void {
+  instrument = which;
+  void loadInstrument(which);
+}
+
+/** Karplus-Strong fallback for a note whose sample isn't available. */
+function synthNote(midi: number): AudioBuffer {
+  const cached = synthCache.get(midi);
+  if (cached) return cached;
   const { ctx } = audio();
   const sr = ctx.sampleRate;
-  const freq = 440 * Math.pow(2, (midi - 69) / 12);
-  const period = Math.max(2, Math.round(sr / freq));
-  const length = Math.floor(sr * NOTE_SECONDS);
+  const period = Math.max(2, Math.round(sr / (440 * Math.pow(2, (midi - 69) / 12))));
+  const length = Math.floor(sr * 2);
   const buffer = ctx.createBuffer(1, length, sr);
   const out = buffer.getChannelData(0);
-
-  // Initial pluck: filtered noise, one period long.
   let prev = 0;
   for (let i = 0; i < period; i++) {
-    const noise = Math.random() * 2 - 1;
-    prev = prev + BRIGHTNESS * (noise - prev);
+    prev += 0.5 * (Math.random() * 2 - 1 - prev);
     out[i] = prev;
   }
-  // Delay loop: average neighbouring samples one period back, with a little loss.
   for (let i = period; i < length; i++) {
-    out[i] = DECAY * 0.5 * (out[i - period] + out[Math.max(i - period - 1, 0)]);
+    out[i] = 0.996 * 0.5 * (out[i - period] + out[Math.max(i - period - 1, 0)]);
   }
-  // Remove DC offset and normalise.
-  let mean = 0;
-  for (let i = 0; i < period; i++) mean += out[i];
-  mean /= period;
   let peak = 0;
-  for (let i = 0; i < length; i++) {
-    out[i] -= mean * Math.exp(-i / (sr * 0.05));
-    peak = Math.max(peak, Math.abs(out[i]));
-  }
-  if (peak > 0) for (let i = 0; i < length; i++) out[i] /= peak;
-
-  bufferCache.set(midi, buffer);
+  for (let i = 0; i < length; i++) peak = Math.max(peak, Math.abs(out[i]));
+  if (peak > 0) for (let i = 0; i < length; i++) out[i] *= 0.5 / peak;
+  synthCache.set(midi, buffer);
   return buffer;
+}
+
+/** The buffer for a note and the playback rate needed (for notes outside the sample range). */
+function bufferFor(midi: number): { buffer: AudioBuffer; rate: number } {
+  const nearest = Math.min(SAMPLE_HIGH, Math.max(SAMPLE_LOW, midi));
+  const sample = samples.get(`${instrument}:${nearest}`);
+  if (sample) return { buffer: sample, rate: Math.pow(2, (midi - nearest) / 12) };
+  return { buffer: synthNote(midi), rate: 1 };
 }
 
 /** Current AudioContext time in seconds (creates the context on first use). */
 export function synthNow(): number {
   return audio().ctx.currentTime;
+}
+
+/** Output latency of the guitar's AudioContext in seconds, when the browser reports it. */
+export function synthLatency(): number {
+  const { ctx } = audio();
+  return (ctx.outputLatency || 0) + (ctx.baseLatency || 0);
 }
 
 export function setSynthVolume(volume: number): void {
@@ -89,16 +121,19 @@ export function setSynthVolume(volume: number): void {
  */
 export function pluck(midi: number, stringIndex: number, when: number, velocity = 0.6): void {
   const { ctx, master } = audio();
+  void loadInstrument();
   const start = Math.max(when, ctx.currentTime);
 
   const previous = ringing.get(stringIndex);
   if (previous) {
     previous.gain.gain.setTargetAtTime(0, start, 0.015);
-    previous.source.stop(start + 0.12);
+    try { previous.source.stop(start + 0.12); } catch { /* already stopped */ }
   }
 
+  const { buffer, rate } = bufferFor(midi);
   const source = ctx.createBufferSource();
-  source.buffer = renderNote(midi);
+  source.buffer = buffer;
+  source.playbackRate.value = rate;
   const gain = ctx.createGain();
   gain.gain.value = velocity;
   source.connect(gain).connect(master);
@@ -121,8 +156,8 @@ export function strum(
   const { ctx } = audio();
   const when = options.when ?? ctx.currentTime + 0.01;
   const direction = options.direction ?? "down";
-  const spread = (options.spreadMs ?? 14) / 1000;
-  const velocity = options.velocity ?? (direction === "down" ? 0.55 : 0.4);
+  const spread = (options.spreadMs ?? 12) / 1000;
+  const velocity = options.velocity ?? (direction === "down" ? 0.5 : 0.36);
 
   // Highest note sits on string 1, the next on string 2, and so on.
   const voiced = notes.map((n, i) => ({ n, s: notes.length - i }));
