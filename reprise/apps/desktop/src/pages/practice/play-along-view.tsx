@@ -7,7 +7,9 @@ import type { Line, Song } from "../../types/song";
 import type {
   ChordAnalysis, ChordBar, ChordKey, ChordSegment, FingerstyleEvent, StrumSection,
 } from "../../lib/chord-analysis";
-import { getChordShape, shapeMidiNotes } from "../../lib/chord-shapes";
+import {
+  CHORD_LABEL_RE, QUALITY_SUFFIXES, capoShapeLabel, getChordShape, shapeMidiNotes, soundingLabel,
+} from "../../lib/chord-shapes";
 import {
   loadInstrument, pluck, setInstrument, setSynthVolume, strum, synthNow, type GuitarInstrument,
 } from "../../lib/guitar-synth";
@@ -93,6 +95,10 @@ interface PlayAlongActions {
   seek: (ms: number) => void;
   /** Label as shown (capo shape when the capo toggle is on). */
   display: (label: string) => string;
+  /** Inverse of `display`: the sounding chord for a shown name. */
+  toSounding: (shown: string) => string;
+  /** Capo fret when chord names are shown as capo shapes, else 0. */
+  capoShown: number;
   /** Play the chord and open its diagram next to `anchor`. `index` = segment, when known (enables editing). */
   openChord: (label: string, anchor: HTMLElement, index?: number) => void;
 }
@@ -182,40 +188,45 @@ function StrumPattern({ pattern, activeSlot, showCounts = true }: {
 // ---------------------------------------------------------------------------
 
 const PICKER_ROOTS = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
-const PICKER_QUALITIES: { suffix: string; label: string }[] = [
-  { suffix: "", label: "maj" }, { suffix: "m", label: "m" }, { suffix: "7", label: "7" }, { suffix: "m7", label: "m7" },
-];
+const PICKER_QUALITIES = QUALITY_SUFFIXES.map((suffix) => ({ suffix, label: suffix === "" ? "maj" : suffix }));
 
 /** Split a label into picker root + suffix, normalising enharmonics to the picker's spelling. */
 function splitLabel(label: string): { root: string; suffix: string } {
-  const m = /^([A-G][#b]?)(m7|m|7)?$/.exec(label);
+  const m = CHORD_LABEL_RE.exec(label);
   if (!m) return { root: "C", suffix: "" };
   const enharmonic: Record<string, string> = { Db: "C#", "D#": "Eb", Gb: "F#", "G#": "Ab", "A#": "Bb" };
   return { root: enharmonic[m[1]] ?? m[1], suffix: m[2] ?? "" };
 }
 
+/**
+ * Pick a replacement for one chord. Works in the names on screen: with the
+ * capo toggle on you pick the shape you play, and the sounding chord is saved.
+ */
 function ChordEditor({ segment, onPreview, onSave }: {
   segment: ChordSegment;
-  onPreview: (label: string) => void;
-  onSave: (label: string) => Promise<void>;
+  onPreview: (soundingLabel: string) => void;
+  onSave: (soundingLabel: string) => Promise<void>;
 }) {
-  const initial = segment.label === "N" ? { root: "C", suffix: "" } : splitLabel(segment.label);
+  const { display, toSounding, capoShown } = useActions();
+  const shownCurrent = segment.label === "N" ? "N" : display(segment.label);
+  const initial = shownCurrent === "N" ? { root: "C", suffix: "" } : splitLabel(shownCurrent);
   const [root, setRoot] = useState(initial.root);
   const [suffix, setSuffix] = useState(initial.suffix);
   const [noChord, setNoChord] = useState(segment.label === "N");
   const [saving, setSaving] = useState(false);
   const chosen = noChord ? "N" : root + suffix;
   const detected = segment.detected_label ?? segment.label;
+  const shownDetected = detected === "N" ? "N.C." : display(detected);
 
   const pick = (nextRoot: string, nextSuffix: string) => {
     setRoot(nextRoot);
     setSuffix(nextSuffix);
     setNoChord(false);
-    onPreview(nextRoot + nextSuffix);
+    onPreview(toSounding(nextRoot + nextSuffix));
   };
-  const save = async (label: string) => {
+  const save = async (shown: string) => {
     setSaving(true);
-    try { await onSave(label); } finally { setSaving(false); }
+    try { await onSave(shown === "N" ? "N" : toSounding(shown)); } finally { setSaving(false); }
   };
   const chip = (active: boolean) =>
     `h-[24px] rounded-[5px] text-[11.5px] font-medium cursor-pointer border transition-colors ${
@@ -228,6 +239,7 @@ function ChordEditor({ segment, onPreview, onSave }: {
     <div className="mt-3 pt-3 border-t border-[var(--border-subtle)]">
       <div className="text-[10.5px] font-medium uppercase tracking-[0.09em] text-[var(--text-muted)] mb-1.5">
         Wrong chord? Change this one
+        {capoShown > 0 && <span className="normal-case tracking-normal"> · capo {capoShown} shapes</span>}
       </div>
       <div className="grid grid-cols-6 gap-1 mb-1.5">
         {PICKER_ROOTS.map((r) => (
@@ -245,19 +257,22 @@ function ChordEditor({ segment, onPreview, onSave }: {
       <div className="flex items-center gap-1.5">
         <button
           onClick={() => save(chosen)}
-          disabled={saving || chosen === segment.label}
+          disabled={saving || chosen === shownCurrent}
           className="flex-1 h-[28px] rounded-[6px] bg-[var(--accent)] text-white text-[12px] font-medium border-none cursor-pointer hover:opacity-85 disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          {chosen === segment.label ? "Current" : `Use ${chosen === "N" ? "N.C." : chosen}`}
+          {chosen === shownCurrent ? "Current" : `Use ${chosen === "N" ? "N.C." : chosen}`}
         </button>
         {segment.edited && (
           <button
-            onClick={() => save(detected)}
+            onClick={async () => {
+              setSaving(true);
+              try { await onSave(detected); } finally { setSaving(false); }
+            }}
             disabled={saving}
-            title={`Back to the detected chord (${detected})`}
+            title={`Back to the detected chord (${shownDetected})`}
             className="h-[28px] px-2.5 rounded-[6px] border-[1.5px] border-[var(--border)] bg-transparent text-[11.5px] font-medium text-[var(--text-secondary)] hover:border-[#888] cursor-pointer"
           >
-            Reset to {detected === "N" ? "N.C." : detected}
+            Reset to {shownDetected}
           </button>
         )}
       </div>
@@ -278,7 +293,7 @@ function ChordPopover({
   onEdit: (segment: ChordSegment, label: string) => Promise<void>;
   onClose: () => void;
 }) {
-  const { display } = useActions();
+  const { display, toSounding } = useActions();
   const ref = useRef<HTMLDivElement>(null);
   const shapeLabel = display(label);
   const shape = getChordShape(shapeLabel);
@@ -313,8 +328,8 @@ function ChordPopover({
       <div className="flex items-baseline justify-between mb-1 gap-2">
         <span className="text-[18px] font-semibold text-[var(--text-primary)]">{label === "N" ? "N.C." : shapeLabel}</span>
         <span className="text-[11px] text-[var(--text-muted)] text-right">
-          {useCapo && capoFret > 0 && shapeLabel !== label && <>sounds {label} · capo {capoFret}</>}
-          {segment?.edited && <> · edited (detected {segment.detected_label === "N" ? "N.C." : segment.detected_label})</>}
+          {useCapo && capoFret > 0 && label !== "N" && <>capo {capoFret} · sounds {toSounding(shapeLabel)}</>}
+          {segment?.edited && <>{useCapo ? " · " : ""}edited</>}
         </span>
       </div>
       {shape ? (
@@ -973,21 +988,26 @@ export function PlayAlongView({
   const capo = analysis?.capo;
   const capoFret = capo?.fret ?? 0;
   const capoAvailable = capoFret > 0 && mode !== "tab";
-  const shapes = capoAvailable && useCapoShapes ? capo!.shapes : null;
+  const capoShown = capoAvailable && useCapoShapes ? capoFret : 0;
 
   const songKey = analysis?.key;
   const display = useCallback(
-    (label: string) => (label === "N" ? "N.C." : shapes?.[label] ?? respell(label, songKey)),
-    [shapes, songKey],
+    (label: string) =>
+      label === "N" ? "N.C." : capoShown ? capoShapeLabel(label, capoShown) : respell(label, songKey),
+    [capoShown, songKey],
+  );
+  const toSounding = useCallback(
+    (shown: string) => (capoShown ? respell(soundingLabel(shown, capoShown), songKey) : shown),
+    [capoShown, songKey],
   );
 
   /** Sounding notes for a chord: the shown shape, plus the capo when shapes are capo shapes. */
   const chordNotes = useCallback(
     (label: string) => {
-      const shape = getChordShape(shapes?.[label] ?? label);
-      return shape ? shapeMidiNotes(shape, shapes ? capoFret : 0) : [];
+      const shape = getChordShape(capoShown ? capoShapeLabel(label, capoShown) : label);
+      return shape ? shapeMidiNotes(shape, capoShown) : [];
     },
-    [shapes, capoFret],
+    [capoShown],
   );
 
   const playChord = useCallback(
@@ -1006,11 +1026,13 @@ export function PlayAlongView({
   const actions = useMemo<PlayAlongActions>(() => ({
     seek: onSeek,
     display,
+    toSounding,
+    capoShown,
     openChord: (label, anchor, index) => {
       if (label !== "N") playChord(label);
       setPopover({ label, anchor: anchor.getBoundingClientRect(), index });
     },
-  }), [onSeek, display, playChord]);
+  }), [onSeek, display, toSounding, capoShown, playChord]);
 
   // Sound + volume apply to chord previews too, not just the guide.
   useEffect(() => {
@@ -1260,7 +1282,7 @@ export function PlayAlongView({
             anchor={popover.anchor}
             segment={popover.index != null && popover.index >= 0 ? chords[popover.index] : undefined}
             capoFret={capoFret}
-            useCapo={!!shapes}
+            useCapo={capoShown > 0}
             onPlay={playChord}
             onEdit={editChord}
             onClose={() => setPopover(null)}

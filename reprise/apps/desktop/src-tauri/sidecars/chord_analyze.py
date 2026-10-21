@@ -30,7 +30,7 @@ import sys
 from collections import Counter
 from datetime import datetime, timezone
 
-OUTPUT_VERSION = 4
+OUTPUT_VERSION = 5
 
 SR = 22050
 HOP = 512
@@ -38,15 +38,37 @@ HOP = 512
 PITCH_NAMES_SHARP = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 PITCH_NAMES_FLAT = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
 
-# Chord qualities: (suffix, intervals, weights). 7ths get a slightly lower
-# prior below, because template matching otherwise over-picks them.
+# Tunable settings. Every value can be overridden per run with
+# --tuning '{"seventh_prior": 0.98}' to try changes without editing code.
+#   seventh_prior   <1 favours plain triads over 7th chords (7, m7, maj7, m7b5);
+#                   raise toward 1.0 when real 7ths come out as plain chords.
+#   maj7_prior      separate, because a 4-note maj7 template overlaps both the
+#                   major chord and its relative minor and otherwise wins too often.
+#   dim_prior / sus_prior   same idea for diminished and sus4 chords.
+#   stickiness      chance of staying on the same chord each beat; higher =
+#                   fewer, longer chords, lower = reacts to quick changes.
+#   temperature     how decisively each beat picks its best chord.
+TUNING = {
+    "seventh_prior": 0.98,
+    "maj7_prior": 0.95,
+    "dim_prior": 0.92,
+    "sus_prior": 0.93,
+    "stickiness": 0.82,
+    "temperature": 0.06,
+}
+
+# Chord qualities: (suffix, intervals, template weights, prior key).
+# The 7th / extension tone gets a lower weight than root, third and fifth.
 QUALITIES = [
-    ("",   [0, 4, 7],     [1.0, 0.8, 0.9]),
-    ("m",  [0, 3, 7],     [1.0, 0.8, 0.9]),
-    ("7",  [0, 4, 7, 10], [1.0, 0.8, 0.9, 0.6]),
-    ("m7", [0, 3, 7, 10], [1.0, 0.8, 0.9, 0.6]),
+    ("",     [0, 4, 7],     [1.0, 0.8, 0.9],      None),
+    ("m",    [0, 3, 7],     [1.0, 0.8, 0.9],      None),
+    ("7",    [0, 4, 7, 10], [1.0, 0.8, 0.9, 0.6], "seventh_prior"),
+    ("m7",   [0, 3, 7, 10], [1.0, 0.8, 0.9, 0.6], "seventh_prior"),
+    ("maj7", [0, 4, 7, 11], [1.0, 0.8, 0.9, 0.6], "maj7_prior"),
+    ("m7b5", [0, 3, 6, 10], [1.0, 0.8, 0.9, 0.6], "seventh_prior"),
+    ("dim",  [0, 3, 6],     [1.0, 0.8, 0.9],      "dim_prior"),
+    ("sus4", [0, 5, 7],     [1.0, 0.8, 0.9],      "sus_prior"),
 ]
-SEVENTH_PRIOR = 0.94
 
 # Krumhansl-Kessler key profiles.
 KK_MAJOR = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88]
@@ -108,17 +130,16 @@ def detect_key(chroma_mean):
 def build_templates():
     import numpy as np
 
-    labels, roots, quals, temps, priors = [], [], [], [], []
-    for qi, (suffix, intervals, weights) in enumerate(QUALITIES):
+    roots, quals, temps, priors = [], [], [], []
+    for suffix, intervals, weights, prior_key in QUALITIES:
         for root in range(12):
             t = np.zeros(12)
             for iv, w in zip(intervals, weights):
                 t[(root + iv) % 12] = w
             temps.append(t / np.linalg.norm(t))
-            labels.append(suffix)
             roots.append(root)
             quals.append(suffix)
-            priors.append(SEVENTH_PRIOR if suffix in ("7", "m7") else 1.0)
+            priors.append(TUNING[prior_key] if prior_key else 1.0)
     return np.array(temps), roots, quals, np.array(priors)
 
 
@@ -132,7 +153,7 @@ def detect_chords(beat_chroma, beat_times, duration_s, names):
 
     energy = beat_chroma.sum(axis=0)
     norm = beat_chroma / (np.linalg.norm(beat_chroma, axis=0, keepdims=True) + 1e-9)
-    sims = (templates @ norm) * priors[:, None]           # (48, n_beats)
+    sims = (templates @ norm) * priors[:, None]           # (n_templates, n_beats)
 
     # "No chord" scores high only where the beat is near-silent.
     quiet = energy < (0.08 * np.median(energy) + 1e-9)
@@ -140,10 +161,9 @@ def detect_chords(beat_chroma, beat_times, duration_s, names):
     scores = np.vstack([sims, n_score])
 
     # Turn similarities into probabilities, then smooth over time.
-    temperature = 0.06
-    probs = np.exp((scores - scores.max(axis=0, keepdims=True)) / temperature)
+    probs = np.exp((scores - scores.max(axis=0, keepdims=True)) / TUNING["temperature"])
     probs /= probs.sum(axis=0, keepdims=True)
-    transition = librosa.sequence.transition_loop(n_states, 0.82)
+    transition = librosa.sequence.transition_loop(n_states, TUNING["stickiness"])
     path = librosa.sequence.viterbi(probs, transition)
 
     def label_for(state):
@@ -374,7 +394,10 @@ def detect_strumming(y_perc, sr, beat_times, bars, meter, tempo):
 OPEN_SHAPES = {
     "C", "A", "G", "E", "D", "Am", "Em", "Dm",
     "C7", "A7", "G7", "E7", "D7", "B7", "Am7", "Em7", "Dm7",
+    "Cmaj7", "Amaj7", "Gmaj7", "Emaj7", "Dmaj7", "Fmaj7",
+    "Asus4", "Dsus4", "Esus4",
 }
+SHAPE_NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"]
 MAX_CAPO = 7
 
 
@@ -390,7 +413,7 @@ def suggest_capo(chords):
 
     def shape_name(chord, capo):
         suffix = "" if chord["quality"] == "maj" else chord["quality"]
-        return PITCH_NAMES_SHARP[(chord["root_pc"] - capo) % 12] + suffix
+        return SHAPE_NAMES[(chord["root_pc"] - capo) % 12] + suffix
 
     def barre_share(capo):
         hard = sum(
@@ -496,12 +519,20 @@ def main() -> int:
     parser.add_argument("--output_path", required=True, help="Where to write chords.json")
     parser.add_argument("--pitch_path", help="Vocal pitch.csv from torchcrepe (enables fingerstyle)")
     parser.add_argument("--title", default="", help="Song title for the exported tab")
+    parser.add_argument("--tuning", default="", help='JSON overrides for TUNING, e.g. \'{"stickiness": 0.88}\'')
     args = parser.parse_args()
+    if args.tuning:
+        overrides = json.loads(args.tuning)
+        unknown = set(overrides) - set(TUNING)
+        if unknown:
+            parser.error(f"unknown tuning keys: {sorted(unknown)}")
+        TUNING.update(overrides)
 
     base = {
         "version": OUTPUT_VERSION,
         "analyzed_at": datetime.now(timezone.utc).isoformat(),
         "source_audio": args.audio_path,
+        "tuning": dict(TUNING),
     }
 
     try:

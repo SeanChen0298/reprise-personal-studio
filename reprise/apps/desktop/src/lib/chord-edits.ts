@@ -9,7 +9,7 @@
 
 import { exists, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import type { ChordAnalysis, ChordSegment } from "./chord-analysis";
-import { parseChordLabel } from "./chord-shapes";
+import { CHORD_LABEL_RE, parseChordLabel } from "./chord-shapes";
 
 export interface ChordEdit {
   start_ms: number;   // start of the chord segment being corrected
@@ -64,7 +64,7 @@ function relabel(segment: ChordSegment, label: string): ChordSegment {
   }
   const parsed = parseChordLabel(label);
   if (!parsed) return segment;
-  const root = label.replace(/(m7|m|7)$/, "");
+  const root = CHORD_LABEL_RE.exec(label)?.[1] ?? label;
   return {
     ...segment,
     label,
