@@ -47,6 +47,8 @@ export interface ChordSegment {
   detected_label?: string;
   /** Runner-up chords that fit this stretch almost as well (fit relative to the winner, 0–1). */
   alternatives?: { label: string; fit: number }[];
+  /** Set when the bass check renamed this chord (e.g. F#m7 -> Dmaj7); the original label. */
+  reranked_from?: string;
 }
 
 export interface StrumSection {

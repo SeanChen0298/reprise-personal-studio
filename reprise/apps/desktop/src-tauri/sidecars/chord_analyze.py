@@ -30,7 +30,7 @@ import sys
 from collections import Counter
 from datetime import datetime, timezone
 
-OUTPUT_VERSION = 6
+OUTPUT_VERSION = 7
 ALTERNATIVES_PER_CHORD = 4
 
 SR = 22050
@@ -49,12 +49,22 @@ PITCH_NAMES_FLAT = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", 
 #   stickiness      chance of staying on the same chord each beat; higher =
 #                   fewer, longer chords, lower = reacts to quick changes.
 #   temperature     how decisively each beat picks its best chord.
+#   bass_weight     per-beat bonus for chords whose root is the lowest note.
+#                   Off by default: a walking bass line makes chords flicker.
+#   bass_rerank     after chords are chosen, re-pick each one among its close
+#                   alternatives (fit >= rerank_min_fit of the winner) using the
+#                   bass note on its FIRST beat — where the root is played before
+#                   any passing notes. Separates Dmaj7 / F#m7 (shared notes,
+#                   different bass) without adding chord changes. 0 = off.
 TUNING = {
     "seventh_prior": 0.98,
     "maj7_prior": 0.95,
     "dim_prior": 0.92,
     "sus_prior": 0.93,
     "stickiness": 0.82,
+    "bass_weight": 0.0,
+    "bass_rerank": 0.25,
+    "rerank_min_fit": 0.85,
     "temperature": 0.06,
 }
 
@@ -144,7 +154,7 @@ def build_templates():
     return np.array(temps), roots, quals, np.array(priors)
 
 
-def detect_chords(beat_chroma, beat_times, duration_s, names):
+def detect_chords(beat_chroma, beat_bass, beat_times, duration_s, names):
     """Return a list of chord segments snapped to beats."""
     import numpy as np
     import librosa
@@ -155,6 +165,12 @@ def detect_chords(beat_chroma, beat_times, duration_s, names):
     energy = beat_chroma.sum(axis=0)
     norm = beat_chroma / (np.linalg.norm(beat_chroma, axis=0, keepdims=True) + 1e-9)
     sims = (templates @ norm) * priors[:, None]           # (n_templates, n_beats)
+
+    # Bass: how strongly each chord's root is the lowest note sounding.
+    # Same-root chords get the same bonus, so this only decides between
+    # chords with different roots that share notes (Dmaj7 vs F#m7).
+    bass_share = beat_bass / (beat_bass.max(axis=0, keepdims=True) + 1e-9)   # (12, n_beats), 0..1
+    sims = sims + TUNING["bass_weight"] * bass_share[np.array(roots)]
 
     # "No chord" scores high only where the beat is near-silent.
     quiet = energy < (0.08 * np.median(energy) + 1e-9)
@@ -200,10 +216,13 @@ def detect_chords(beat_chroma, beat_times, duration_s, names):
     # (e.g. Dmaj7 vs F#m7, which share three notes). Offered in the app as
     # one-click alternatives when correcting a chord.
     n_templates = len(templates)
+    label_index = {label_for(k)["label"]: k for k in range(n_templates)}
     for seg in segments:
         seg["confidence"] = round(float(np.mean(seg.pop("_conf"))), 3)
         state = seg.pop("_state")
-        fit = sims[:, seg.pop("_beats")].mean(axis=1)
+        beats_in_seg = seg.pop("_beats")
+        first_beat = beats_in_seg[0]
+        fit = sims[:, beats_in_seg].mean(axis=1)
         best = float(fit.max()) or 1.0
         alternatives = []
         for k in np.argsort(-fit):
@@ -216,6 +235,29 @@ def detect_chords(beat_chroma, beat_times, duration_s, names):
             if len(alternatives) == ALTERNATIVES_PER_CHORD:
                 break
         seg["alternatives"] = alternatives
+        seg["_first_beat"] = first_beat
+
+        # Bass re-rank: does a close alternative have the bass note this
+        # chord starts on as its root?
+        w = TUNING["bass_rerank"]
+        if w > 0 and seg["root_pc"] is not None:
+            bass_first = beat_bass[:, first_beat]
+            bass_first = bass_first / (bass_first.max() + 1e-9)
+            options = [(1.0 + w * bass_first[seg["root_pc"]], None)]
+            for a in alternatives:
+                if a["fit"] < TUNING["rerank_min_fit"]:
+                    continue
+                k = label_index[a["label"]]
+                options.append((a["fit"] + w * bass_first[roots[k]], k))
+            best_score, best_k = max(options, key=lambda o: o[0])
+            if best_k is not None:
+                previous = seg["label"]
+                seg.update(label_for(best_k))
+                seg["alternatives"] = [{"label": previous, "fit": 1.0}] + [
+                    a for a in alternatives if a["label"] != seg["label"]
+                ]
+                seg["reranked_from"] = previous
+        seg.pop("_first_beat")
     return segments, path, n_states
 
 
@@ -490,8 +532,17 @@ def analyze(audio_path: str) -> dict:
         beat_chroma = beat_chroma[:, 1:]
     beat_chroma = beat_chroma[:, : len(beat_frames)]
 
+    # Bass register only (C1–B3): which note is at the bottom of the harmony.
+    bass = librosa.feature.chroma_cqt(
+        y=y_harm, sr=sr, hop_length=HOP, fmin=librosa.note_to_hz("C1"), n_octaves=3,
+    )
+    beat_bass = librosa.util.sync(bass, sync_frames, aggregate=np.median)
+    if beat_bass.shape[1] == len(beat_frames) + 1:
+        beat_bass = beat_bass[:, 1:]
+    beat_bass = beat_bass[:, : len(beat_frames)]
+
     key, names = detect_key(chroma.mean(axis=1))
-    chords, path, _ = detect_chords(beat_chroma, beat_times, duration_s, names)
+    chords, path, _ = detect_chords(beat_chroma, beat_bass, beat_times, duration_s, names)
 
     onset_at_beats = onset_env[np.clip(beat_frames, 0, len(onset_env) - 1)]
     meter, phase = detect_meter(path, onset_at_beats)

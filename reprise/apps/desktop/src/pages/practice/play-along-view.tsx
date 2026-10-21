@@ -268,7 +268,7 @@ function ChordEditor({ segment, onPreview, onSave }: {
     }`;
 
   return (
-    <div className="mt-3 pt-3 border-t border-[var(--border-subtle)]">
+    <div>
       <div className="text-[10.5px] font-medium uppercase tracking-[0.09em] text-[var(--text-muted)] mb-1.5">
         Wrong chord? Change this one
         {capoShown > 0 && <span className="normal-case tracking-normal"> · capo {capoShown} shapes</span>}
@@ -378,10 +378,19 @@ function ChordPopover({
     };
   }, [onClose]);
 
-  const width = segment ? 248 : 196;
+  // Two columns when editing (diagram | editor) so it fits on screen.
+  const width = segment ? 540 : 200;
   const left = Math.min(Math.max(8, anchor.left + anchor.width / 2 - width / 2), window.innerWidth - width - 8);
-  const below = anchor.bottom + (segment ? 470 : 230) < window.innerHeight;
-  const top = below ? anchor.bottom + 6 : anchor.top - 6;
+  // Open below the chord when there's room, else above; then keep it inside
+  // the window once its real height is known.
+  const [top, setTop] = useState(anchor.bottom + 6);
+  useLayoutEffect(() => {
+    const h = ref.current?.offsetHeight ?? 0;
+    const below = anchor.bottom + 6;
+    const above = anchor.top - 6 - h;
+    const preferred = below + h <= window.innerHeight - 8 ? below : above;
+    setTop(Math.max(8, Math.min(preferred, window.innerHeight - h - 8)));
+  }, [anchor, segment, chosen]);
 
   const smallButton =
     "flex-1 px-2 py-[5px] rounded-[6px] border-[1.5px] border-[var(--border)] bg-transparent text-[11.5px] font-medium text-[var(--text-secondary)] hover:border-[var(--theme)] hover:text-[var(--theme-text)] cursor-pointer transition-all";
@@ -389,57 +398,64 @@ function ChordPopover({
   return (
     <div
       ref={ref}
-      style={{ left, top, width, transform: below ? undefined : "translateY(-100%)" }}
-      className="fixed z-50 p-3 rounded-[10px] border border-[var(--border)] bg-[var(--surface)] shadow-[0_8px_28px_rgba(0,0,0,0.14)]"
+      style={{ left, top, width }}
+      className="fixed z-50 p-3 rounded-[10px] border border-[var(--border)] bg-[var(--surface)] shadow-[0_8px_28px_rgba(0,0,0,0.14)] flex gap-4"
     >
-      <div className="flex items-baseline justify-between mb-1 gap-2">
-        <span className="text-[18px] font-semibold text-[var(--text-primary)]">{label === "N" ? "N.C." : shapeLabel}</span>
-        <span className="text-[11px] text-[var(--text-muted)] text-right">
-          {useCapo && capoFret > 0 && label !== "N" && <>capo {capoFret} · sounds {toSounding(shapeLabel)}</>}
-          {segment?.edited && <>{useCapo ? " · " : ""}edited</>}
-        </span>
+      {/* How to play it */}
+      <div className="w-[176px] flex-shrink-0">
+        <div className="flex items-baseline justify-between mb-1 gap-2">
+          <span className="text-[18px] font-semibold text-[var(--text-primary)]">{label === "N" ? "N.C." : shapeLabel}</span>
+          <span className="text-[11px] text-[var(--text-muted)] text-right">
+            {useCapo && capoFret > 0 && label !== "N" && <>capo {capoFret} · sounds {toSounding(shapeLabel)}</>}
+            {segment?.edited && <>{useCapo ? " · " : ""}edited</>}
+          </span>
+        </div>
+        {shape ? (
+          <div className="flex flex-col items-center py-1">
+            <ChordDiagram shape={shape} size={132} />
+            {all.length > 1 && (
+              <div className="flex items-center gap-1.5 mt-1">
+                <button
+                  onClick={() => step(-1)}
+                  title="Previous fingering"
+                  className="w-[24px] h-[22px] rounded-[5px] border border-[var(--border)] bg-transparent text-[var(--text-secondary)] hover:border-[#888] cursor-pointer flex items-center justify-center"
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
+                </button>
+                <span className="text-[10.5px] text-[var(--text-muted)] min-w-[104px] text-center tabular-nums">
+                  {shape.kind}{shape.position > 0 ? ` · fret ${shape.position}` : ""} · {chosen + 1}/{all.length}
+                </span>
+                <button
+                  onClick={() => step(1)}
+                  title="Next fingering"
+                  className="w-[24px] h-[22px] rounded-[5px] border border-[var(--border)] bg-transparent text-[var(--text-secondary)] hover:border-[#888] cursor-pointer flex items-center justify-center"
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6" /></svg>
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="text-[12px] text-[var(--text-muted)] py-4 text-center">No diagram for this chord</div>
+        )}
+        {label !== "N" && (
+          <div className="flex gap-1.5 mt-2">
+            <button onClick={() => onPlay(label, "strum")} className={smallButton}>Strum</button>
+            <button onClick={() => onPlay(label, "arpeggio")} className={smallButton}>Note by note</button>
+          </div>
+        )}
       </div>
-      {shape ? (
-        <div className="flex flex-col items-center py-1">
-          <ChordDiagram shape={shape} size={132} />
-          {all.length > 1 && (
-            <div className="flex items-center gap-2 mt-1">
-              <button
-                onClick={() => step(-1)}
-                title="Previous fingering"
-                className="w-[24px] h-[22px] rounded-[5px] border border-[var(--border)] bg-transparent text-[var(--text-secondary)] hover:border-[#888] cursor-pointer flex items-center justify-center"
-              >
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
-              </button>
-              <span className="text-[11px] text-[var(--text-muted)] min-w-[108px] text-center tabular-nums">
-                {shape.kind}{shape.position > 0 ? ` · fret ${shape.position}` : ""} · {chosen + 1}/{all.length}
-              </span>
-              <button
-                onClick={() => step(1)}
-                title="Next fingering"
-                className="w-[24px] h-[22px] rounded-[5px] border border-[var(--border)] bg-transparent text-[var(--text-secondary)] hover:border-[#888] cursor-pointer flex items-center justify-center"
-              >
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6" /></svg>
-              </button>
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className="text-[12px] text-[var(--text-muted)] py-4 text-center">No diagram for this chord</div>
-      )}
-      {label !== "N" && (
-        <div className="flex gap-1.5 mt-2">
-          <button onClick={() => onPlay(label, "strum")} className={smallButton}>Strum</button>
-          <button onClick={() => onPlay(label, "arpeggio")} className={smallButton}>Note by note</button>
-        </div>
-      )}
+
+      {/* Correct it */}
       {segment && (
-        <ChordEditor
-          key={`${segment.start_ms}:${segment.label}`}
-          segment={segment}
-          onPreview={(l) => onPlay(l, "strum")}
-          onSave={async (l) => { await onEdit(segment, l); onClose(); }}
-        />
+        <div className="flex-1 min-w-0 pl-4 border-l border-[var(--border-subtle)]">
+          <ChordEditor
+            key={`${segment.start_ms}:${segment.label}`}
+            segment={segment}
+            onPreview={(l) => onPlay(l, "strum")}
+            onSave={async (l) => { await onEdit(segment, l); onClose(); }}
+          />
+        </div>
       )}
     </div>
   );
