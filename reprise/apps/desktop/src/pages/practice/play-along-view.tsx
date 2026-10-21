@@ -2,14 +2,15 @@ import {
   createContext, Fragment, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { open } from "@tauri-apps/plugin-shell";
 import type { Line, Song } from "../../types/song";
 import type {
-  ChordAnalysis, ChordBar, ChordKey, ChordSegment, FingerstyleEvent, StrumSection,
+  ChordAnalysis, ChordBar, ChordKey, ChordSegment, StrumSection,
 } from "../../lib/chord-analysis";
 import {
-  CHORD_LABEL_RE, QUALITY_SUFFIXES, capoShapeLabel, getChordShape, shapeMidiNotes, soundingLabel,
+  CHORD_LABEL_RE, QUALITY_SUFFIXES, capoShapeLabel, getChordVoicings, shapeMidiNotes, soundingLabel,
+  type ChordShape,
 } from "../../lib/chord-shapes";
+import { buildPicking, PICK_PATTERNS, type PickEvent, type PickPattern } from "../../lib/fingerpicking";
 import {
   loadInstrument, pluck, setInstrument, setSynthVolume, strum, synthNow, type GuitarInstrument,
 } from "../../lib/guitar-synth";
@@ -99,6 +100,10 @@ interface PlayAlongActions {
   toSounding: (shown: string) => string;
   /** Capo fret when chord names are shown as capo shapes, else 0. */
   capoShown: number;
+  /** All fingerings for a shown chord name, and the one currently chosen. */
+  voicings: (shown: string) => { all: ChordShape[]; chosen: number };
+  /** Remember which fingering to use for a shown chord name. */
+  chooseVoicing: (shown: string, index: number) => void;
   /** Play the chord and open its diagram next to `anchor`. `index` = segment, when known (enables editing). */
   openChord: (label: string, anchor: HTMLElement, index?: number) => void;
 }
@@ -293,10 +298,17 @@ function ChordPopover({
   onEdit: (segment: ChordSegment, label: string) => Promise<void>;
   onClose: () => void;
 }) {
-  const { display, toSounding } = useActions();
+  const { display, toSounding, voicings, chooseVoicing, capoShown } = useActions();
   const ref = useRef<HTMLDivElement>(null);
   const shapeLabel = display(label);
-  const shape = getChordShape(shapeLabel);
+  const { all, chosen } = voicings(shapeLabel);
+  const shape = all[chosen];
+  const step = (delta: number) => {
+    const next = (chosen + delta + all.length) % all.length;
+    chooseVoicing(shapeLabel, next);
+    // Play the newly chosen fingering directly (onPlay still has the old choice).
+    strum(shapeMidiNotes(all[next], capoShown), { direction: "down", spreadMs: 22, velocity: 0.7 });
+  };
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -333,8 +345,29 @@ function ChordPopover({
         </span>
       </div>
       {shape ? (
-        <div className="flex justify-center py-1">
+        <div className="flex flex-col items-center py-1">
           <ChordDiagram shape={shape} size={132} />
+          {all.length > 1 && (
+            <div className="flex items-center gap-2 mt-1">
+              <button
+                onClick={() => step(-1)}
+                title="Previous fingering"
+                className="w-[24px] h-[22px] rounded-[5px] border border-[var(--border)] bg-transparent text-[var(--text-secondary)] hover:border-[#888] cursor-pointer flex items-center justify-center"
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
+              </button>
+              <span className="text-[11px] text-[var(--text-muted)] min-w-[108px] text-center tabular-nums">
+                {shape.kind}{shape.position > 0 ? ` · fret ${shape.position}` : ""} · {chosen + 1}/{all.length}
+              </span>
+              <button
+                onClick={() => step(1)}
+                title="Next fingering"
+                className="w-[24px] h-[22px] rounded-[5px] border border-[var(--border)] bg-transparent text-[var(--text-secondary)] hover:border-[#888] cursor-pointer flex items-center justify-center"
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6" /></svg>
+              </button>
+            </div>
+          )}
         </div>
       ) : (
         <div className="text-[12px] text-[var(--text-muted)] py-4 text-center">No diagram for this chord</div>
@@ -764,7 +797,7 @@ function BarsView({ analysis, playhead, isPlaying }: {
 // ---------------------------------------------------------------------------
 
 function ChartView({ chords, current }: { chords: ChordSegment[]; current?: string }) {
-  const { display, openChord } = useActions();
+  const { display, openChord, voicings } = useActions();
   const unique = useMemo(() => {
     const seen = new Map<string, number>();
     for (const c of chords) {
@@ -778,7 +811,8 @@ function ChartView({ chords, current }: { chords: ChordSegment[]; current?: stri
     <div className="grid grid-cols-[repeat(auto-fill,minmax(128px,1fr))] gap-2">
       {unique.map(({ label, ms }) => {
         const shown = display(label);
-        const shape = getChordShape(shown);
+        const { all, chosen } = voicings(shown);
+        const shape = all[chosen];
         const isCurrent = label === current;
         return (
           <button
@@ -806,71 +840,64 @@ function ChartView({ chords, current }: { chords: ChordSegment[]; current?: stri
 
 const STRING_LABELS = ["e", "B", "G", "D", "A", "E"];
 
-function openFile(path: string) {
-  open(encodeURI(`file:///${path.replace(/^\/+/, "")}`)).catch((err) =>
-    console.error("[PlayAlong] could not open file:", err),
-  );
-}
-
-function TabView({ analysis, playhead, isPlaying }: {
+/** Fingerpicked accompaniment from the chords, shown as tab one bar per card. */
+function PickingView({ analysis, picking, pattern, onPattern, playhead, isPlaying }: {
   analysis: ChordAnalysis;
+  picking: PickEvent[];
+  pattern: PickPattern;
+  onPattern: (p: PickPattern) => void;
   playhead: Playhead;
   isPlaying: boolean;
 }) {
-  const { seek } = useActions();
-  const fs = analysis.fingerstyle;
+  const { seek, capoShown } = useActions();
   const containerRef = useRef<HTMLDivElement>(null);
   const bars = analysis.bars ?? [];
   const chords = analysis.chords ?? [];
+  const meter = analysis.time_signature?.beats_per_bar === 3 ? 3 : 4;
+  const slots = meter * 2;
   useFollow(containerRef, playhead.bar >= 0 ? `[data-tab-bar="${playhead.bar}"]` : null, isPlaying);
 
   const eventsByBar = useMemo(() => {
-    const map = new Map<number, Map<number, FingerstyleEvent>>();
-    if (fs?.status === "ok") {
-      for (const ev of fs.events) {
-        if (!map.has(ev.bar)) map.set(ev.bar, new Map());
-        map.get(ev.bar)!.set(ev.slot, ev);
-      }
+    const map = new Map<number, Map<number, PickEvent>>();
+    for (const ev of picking) {
+      if (!map.has(ev.bar)) map.set(ev.bar, new Map());
+      map.get(ev.bar)!.set(ev.slot, ev);
     }
     return map;
-  }, [fs]);
+  }, [picking]);
 
-  if (!fs || fs.status !== "ok") {
-    return (
-      <div className="max-w-[460px] text-[12.5px] text-[var(--text-muted)] leading-relaxed">
-        {fs?.status === "error" ? (
-          <span className="text-red-500">Fingerstyle arrangement failed: {fs.message}</span>
-        ) : (
-          <>No fingerstyle arrangement yet. It needs the vocal pitch analysis (Audio Setup → Pitch analysis);
-          chords are re-analysed automatically once pitch finishes.</>
-        )}
-      </div>
-    );
-  }
-
-  const slots = fs.slots_per_bar;
-  const arrangedBars = bars.filter((b) => !b.pickup && b.beats * 2 === slots);
-  const fileButton =
-    "px-2.5 py-[3px] rounded-[6px] border-[1.5px] border-[var(--border)] bg-transparent text-[11.5px] font-medium text-[var(--text-secondary)] hover:border-[#888] hover:text-[var(--text-primary)] cursor-pointer transition-all";
+  const pickedBars = bars.filter((b) => !b.pickup && b.beats === meter);
 
   return (
     <div ref={containerRef} className="flex flex-col gap-3">
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex p-[2px] rounded-[8px] bg-[var(--bg)] border border-[var(--border)]">
+          {PICK_PATTERNS.map((p) => (
+            <button
+              key={p.value}
+              onClick={() => onPattern(p.value)}
+              title={p.hint}
+              className={`px-3 py-[3px] rounded-[6px] text-[12px] font-medium cursor-pointer border-none transition-all ${
+                pattern === p.value
+                  ? "bg-[var(--surface)] text-[var(--text-primary)] shadow-[0_1px_2px_rgba(0,0,0,0.08)]"
+                  : "bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
         <span className="text-[11.5px] text-[var(--text-muted)]">
-          Standard tuning · <b className="font-semibold text-[var(--text-primary)]">bold</b> = melody (from the vocals) · bass from the chord roots
+          Fingerpicking the chords{capoShown ? ` · capo ${capoShown}` : ""} · <b className="font-semibold text-[var(--text-primary)]">bold</b> = thumb (bass) ·
+          click a chord name to change its fingering
         </span>
-        <span className="ml-auto" />
-        <button onClick={() => openFile(fs.tab_path)} className={fileButton}>Open .txt</button>
-        <button onClick={() => openFile(fs.musicxml_path)} className={fileButton} title="Opens in MuseScore or Guitar Pro">
-          Open MusicXML
-        </button>
       </div>
       <div className="grid grid-cols-[repeat(auto-fill,minmax(232px,1fr))] gap-1.5">
-        {arrangedBars.map((bar) => {
+        {pickedBars.map((bar) => {
           const isCurrent = bar.index === playhead.bar;
           const evs = eventsByBar.get(bar.index);
-          const chordIndex = indexAt(chords, bar.start_ms, (c) => c.start_ms);
-          const chord = chords[chordIndex];
+          // Chord names in this bar (a change mid-bar shows both).
+          const inBar = Array.from(new Set(Array.from(evs?.values() ?? []).map((e) => e.chord)));
           return (
             <div
               key={bar.index}
@@ -882,9 +909,15 @@ function TabView({ analysis, playhead, isPlaying }: {
             >
               <div className="flex items-baseline gap-2 mb-1">
                 <span className="text-[9.5px] text-[var(--text-muted)]">{bar.index + 1}</span>
-                {chord && chord.label !== "N" && (
-                  <ChordName label={chord.label} index={chordIndex} edited={chord.edited} className="text-[12.5px] font-semibold text-[var(--text-secondary)]" />
-                )}
+                {inBar.map((ci) => (
+                  <ChordName
+                    key={ci}
+                    label={chords[ci].label}
+                    index={ci}
+                    edited={chords[ci].edited}
+                    className="text-[12.5px] font-semibold text-[var(--text-secondary)]"
+                  />
+                ))}
               </div>
               <div className="font-mono text-[12px] leading-[16px]">
                 {STRING_LABELS.map((name, si) => (
@@ -898,7 +931,7 @@ function TabView({ analysis, playhead, isPlaying }: {
                           key={slot}
                           className={`w-[26px] text-center ${active ? "bg-[var(--theme)] text-white rounded-[3px]" : ""} ${
                             note
-                              ? note.role === "melody"
+                              ? note.role === "bass"
                                 ? `font-bold ${active ? "" : "text-[var(--text-primary)]"}`
                                 : active ? "" : "text-[var(--text-secondary)]"
                               : active ? "opacity-60" : "text-[var(--border)]"
@@ -927,7 +960,7 @@ const MODES: { value: Mode; label: string }[] = [
   { value: "sheet", label: "Chord sheet" },
   { value: "bars", label: "Bars" },
   { value: "chart", label: "Chord chart" },
-  { value: "tab", label: "Fingerstyle tab" },
+  { value: "tab", label: "Fingerpicking" },
 ];
 
 // Per-machine guide preferences (conveniences only — fine to lose).
@@ -937,9 +970,14 @@ interface GuidePrefs {
   volume: number;        // 0..1
   offsetMs: number;      // play this much earlier than the detected beat
   instrument: GuitarInstrument;
+  pickPattern: PickPattern;
+  /** Chosen fingering per chord name: "E shape@3" etc. */
+  voicings: Record<string, string>;
 }
 
-const DEFAULT_GUIDE_PREFS: GuidePrefs = { volume: 0.3, offsetMs: 60, instrument: "steel" };
+const DEFAULT_GUIDE_PREFS: GuidePrefs = {
+  volume: 0.3, offsetMs: 60, instrument: "steel", pickPattern: "travis", voicings: {},
+};
 
 function readGuidePrefs(): GuidePrefs {
   try {
@@ -1104,7 +1142,7 @@ export function PlayAlongView({
 
   const capo = analysis?.capo;
   const capoFret = capo?.fret ?? 0;
-  const capoAvailable = capoFret > 0 && mode !== "tab";
+  const capoAvailable = capoFret > 0;
   const capoShown = capoAvailable && useCapoShapes ? capoFret : 0;
 
   const songKey = analysis?.key;
@@ -1118,13 +1156,32 @@ export function PlayAlongView({
     [capoShown, songKey],
   );
 
-  /** Sounding notes for a chord: the shown shape, plus the capo when shapes are capo shapes. */
+  const voicingKey = (v: ChordShape) => `${v.kind}@${v.position}`;
+  const voicings = useCallback(
+    (shown: string) => {
+      const all = getChordVoicings(shown);
+      const want = guidePrefs.voicings[shown];
+      const found = want ? all.findIndex((v) => voicingKey(v) === want) : -1;
+      return { all, chosen: found >= 0 ? found : 0 };
+    },
+    [guidePrefs.voicings],
+  );
+  /** The fingering to use for a chord (as fingered: the capo shape when the capo is shown). */
+  const voicingFor = useCallback(
+    (label: string): ChordShape | null => {
+      const { all, chosen } = voicings(capoShown ? capoShapeLabel(label, capoShown) : label);
+      return all[chosen] ?? null;
+    },
+    [voicings, capoShown],
+  );
+
+  /** Sounding notes for a chord: its chosen fingering, plus the capo when shapes are capo shapes. */
   const chordNotes = useCallback(
     (label: string) => {
-      const shape = getChordShape(capoShown ? capoShapeLabel(label, capoShown) : label);
+      const shape = voicingFor(label);
       return shape ? shapeMidiNotes(shape, capoShown) : [];
     },
-    [capoShown],
+    [voicingFor, capoShown],
   );
 
   const playChord = useCallback(
@@ -1145,11 +1202,26 @@ export function PlayAlongView({
     display,
     toSounding,
     capoShown,
+    voicings,
+    chooseVoicing: (shown, index) => {
+      const v = getChordVoicings(shown)[index];
+      if (!v) return;
+      setGuidePrefs((prev) => {
+        const next = { ...prev, voicings: { ...prev.voicings, [shown]: voicingKey(v) } };
+        try { localStorage.setItem(GUIDE_PREFS_KEY, JSON.stringify(next)); } catch { /* convenience only */ }
+        return next;
+      });
+    },
     openChord: (label, anchor, index) => {
       if (label !== "N") playChord(label);
       setPopover({ label, anchor: anchor.getBoundingClientRect(), index });
     },
-  }), [onSeek, display, toSounding, capoShown, playChord]);
+  }), [onSeek, display, toSounding, capoShown, voicings, playChord]);
+
+  const picking = useMemo(
+    () => (analysis ? buildPicking(analysis, guidePrefs.pickPattern, voicingFor, capoShown) : []),
+    [analysis, guidePrefs.pickPattern, voicingFor, capoShown],
+  );
 
   // Sound + volume apply to chord previews too, not just the guide.
   useEffect(() => {
@@ -1166,6 +1238,7 @@ export function PlayAlongView({
     volume: guidePrefs.volume,
     offsetMs: guidePrefs.offsetMs,
     chordNotes,
+    picking,
   });
 
   const changeGuidePrefs = (p: GuidePrefs) => {
@@ -1227,8 +1300,7 @@ export function PlayAlongView({
     analysis.tempo_bpm ? `${Math.round(analysis.tempo_bpm)} BPM` : null,
     analysis.time_signature ? `${analysis.time_signature.beats_per_bar}/${analysis.time_signature.beat_unit}` : null,
   ].filter(Boolean);
-  const fingerstyleReady = analysis.fingerstyle?.status === "ok";
-  const guideDisabled = mode === "tab" && !fingerstyleReady;
+  const guideDisabled = false;
 
   return (
     <ActionsContext.Provider value={actions}>
@@ -1330,7 +1402,7 @@ export function PlayAlongView({
                 onClick={() => setGuideOn((v) => !v)}
                 disabled={guideDisabled}
                 title={mode === "tab"
-                  ? "Play the fingerstyle arrangement along with the song"
+                  ? "Fingerpick the chords along with the song"
                   : "Strum the chords along with the song, using the strum pattern"}
                 className={`h-[25px] flex items-center gap-1.5 px-2.5 text-[12px] font-medium border-none cursor-pointer transition-all whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed ${
                   guideOn
@@ -1390,7 +1462,16 @@ export function PlayAlongView({
           )}
           {mode === "bars" && <BarsView analysis={analysis} playhead={playhead} isPlaying={isPlaying} />}
           {mode === "chart" && <ChartView chords={chords} current={current?.label} />}
-          {mode === "tab" && <TabView analysis={analysis} playhead={playhead} isPlaying={isPlaying} />}
+          {mode === "tab" && (
+            <PickingView
+              analysis={analysis}
+              picking={picking}
+              pattern={guidePrefs.pickPattern}
+              onPattern={(p) => changeGuidePrefs({ ...guidePrefs, pickPattern: p })}
+              playhead={playhead}
+              isPlaying={isPlaying}
+            />
+          )}
         </div>
 
         {popover && (

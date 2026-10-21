@@ -7,7 +7,7 @@ import { damp, pluck, setSynthVolume, strum, synthNow } from "../lib/guitar-synt
  *
  * - "strum": the detected strum pattern on every eighth note, using the
  *   chord sounding at that moment.
- * - "fingerstyle": the notes of the generated fingerstyle arrangement.
+ * - "fingerstyle": the fingerpicked accompaniment (see fingerpicking.ts).
  *
  * Timing follows the <audio> element, so it stays in sync at slower
  * practice speeds and after seeking. Uses the standard look-ahead pattern:
@@ -26,16 +26,18 @@ interface GuideEvent {
 const TICK_MS = 25;
 const LOOKAHEAD_MS = 150;
 
-function buildEvents(analysis: ChordAnalysis, mode: "strum" | "fingerstyle"): GuideEvent[] {
+function buildEvents(
+  analysis: ChordAnalysis,
+  mode: "strum" | "fingerstyle",
+  picking: { t: number; notes: { midi: number; string: number }[] }[],
+): GuideEvent[] {
   const events: GuideEvent[] = [];
 
   if (mode === "fingerstyle") {
-    const fs = analysis.fingerstyle;
-    if (fs?.status !== "ok") return events;
-    for (const ev of fs.events) {
-      events.push({ t: ev.t_ms, kind: "notes", notes: ev.notes.map((n) => ({ midi: n.midi, string: n.string })) });
+    for (const ev of picking) {
+      events.push({ t: ev.t, kind: "notes", notes: ev.notes.map((n) => ({ midi: n.midi, string: n.string })) });
     }
-    return events.sort((a, b) => a.t - b.t);
+    return events;
   }
 
   const bars = analysis.bars ?? [];
@@ -86,9 +88,14 @@ export function useGuitarGuide(options: {
   offsetMs: number;
   /** MIDI notes to strum for a chord label (already including any capo). */
   chordNotes: (label: string) => number[];
+  /** The fingerpicked part, used in "fingerstyle" mode. */
+  picking: { t: number; notes: { midi: number; string: number }[] }[];
 }) {
-  const { analysis, audioRef, enabled, mode, volume, offsetMs, chordNotes } = options;
-  const events = useMemo(() => (analysis ? buildEvents(analysis, mode) : []), [analysis, mode]);
+  const { analysis, audioRef, enabled, mode, volume, offsetMs, chordNotes, picking } = options;
+  const events = useMemo(
+    () => (analysis ? buildEvents(analysis, mode, picking) : []),
+    [analysis, mode, picking],
+  );
 
   useEffect(() => {
     if (enabled) setSynthVolume(volume);

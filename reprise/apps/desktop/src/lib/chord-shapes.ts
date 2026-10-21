@@ -2,9 +2,10 @@
  * chord-shapes.ts
  *
  * Guitar voicings for the chord vocabulary the analysis produces
- * (maj, m, 7, m7, maj7, m7b5, dim, sus4). Common open-position shapes come
- * from a table; every other chord uses a movable shape (E-shape rooted on
- * string 6, or A-shape rooted on string 5 — whichever sits lower on the neck).
+ * (maj, m, 7, m7, maj7, m7b5, dim, sus4). Each chord has several ways to
+ * play it: the open-position shape (from a table, where one exists) plus
+ * movable shapes rooted on string 6 ("E shape"), string 5 ("A shape") and
+ * string 4 ("D shape"). getChordVoicings lists them, lowest position first.
  *
  * Arrays run string 6 (low E) → string 1 (high E). `null` = muted string,
  * 0 = open string. Finger numbers: 1 index … 4 pinky, 0 = none.
@@ -14,6 +15,10 @@ export type Fret = number | null;
 
 export interface ChordShape {
   name: string;
+  /** Which family of shape, e.g. "Open", "E shape". */
+  kind: string;
+  /** Root position on the neck (0 = open position). */
+  position: number;
   frets: Fret[];       // absolute frets, string 6 → 1
   fingers: number[];   // string 6 → 1
   barre?: { fret: number; fromString: number; toString: number }; // strings numbered 6..1
@@ -89,6 +94,16 @@ const A_SHAPE: Record<Quality, Movable> = {
   sus4: { frets: [null, 0, 2, 2, 3, 0], fingers: [0, 1, 2, 3, 4, 1], barre: true },
 };
 
+// Root on string 4; at position 0 these are the open D-family chords.
+const D_SHAPE: Partial<Record<Quality, Movable>> = {
+  "":   { frets: [null, null, 0, 2, 3, 2], fingers: [0, 0, 1, 2, 4, 3], barre: false },
+  m:    { frets: [null, null, 0, 2, 3, 1], fingers: [0, 0, 1, 3, 4, 2], barre: false },
+  "7":  { frets: [null, null, 0, 2, 1, 2], fingers: [0, 0, 1, 3, 2, 4], barre: false },
+  m7:   { frets: [null, null, 0, 2, 1, 1], fingers: [0, 0, 1, 3, 2, 2], barre: false },
+  maj7: { frets: [null, null, 0, 2, 2, 2], fingers: [0, 0, 1, 3, 3, 3], barre: false },
+  sus4: { frets: [null, null, 0, 2, 3, 3], fingers: [0, 0, 1, 2, 3, 4], barre: false },
+};
+
 /** Split "F#m7" into root pitch class and quality. Returns null for "N" or unknown labels. */
 export function parseChordLabel(label: string): { pc: number; quality: Quality } | null {
   const m = CHORD_LABEL_RE.exec(label);
@@ -98,37 +113,73 @@ export function parseChordLabel(label: string): { pc: number; quality: Quality }
 
 const SHARP_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
-/** The voicing to show and play for a chord label, or null if it has none (e.g. "N"). */
-export function getChordShape(label: string): ChordShape | null {
-  const parsed = parseChordLabel(label);
-  if (!parsed) return null;
-  const { pc, quality } = parsed;
-
-  const open = OPEN_SHAPES[SHARP_NAMES[pc] + quality];
-  if (open) return { name: label, ...open };
-
-  // Root fret on string 6 (E-shape) and on string 5 (A-shape); use the lower
-  // one. Qualities without a good E-shape always use the A-shape.
-  const eShape = E_SHAPE[quality];
-  const aShape = A_SHAPE[quality];
-  // A barre shape can't sit at fret 0, so move it up an octave; open-capable
-  // shapes (no barre) may use the open position.
-  const eFret = (pc - 4 + 12) % 12 || 12;
-  const aFret = (pc - 9 + 12) % 12 || (aShape.barre ? 12 : 0);
-  const useE = !!eShape && eFret <= aFret;
-  const base = useE ? eFret : aFret;
-  const template = useE ? eShape! : aShape;
+/** Place a movable template with its root at `base` on `rootString` (6, 5 or 4). */
+function placeMovable(label: string, kind: string, template: Movable, base: number, rootString: number): ChordShape {
   const frets = template.frets.map((f) => (f == null ? null : f + base));
+  // An open string needs no finger.
+  const fingers = template.fingers.map((finger, i) => (frets[i] === 0 ? 0 : finger));
   // The barre runs from the root string to the highest string that sounds.
   const mutedOnTop = [...frets].reverse().findIndex((f) => f != null);
   return {
     name: label,
+    kind,
+    position: base,
     frets,
-    fingers: template.fingers,
+    fingers,
     barre: template.barre && base > 0
-      ? { fret: base, fromString: useE ? 6 : 5, toString: 1 + Math.max(0, mutedOnTop) }
+      ? { fret: base, fromString: rootString, toString: 1 + Math.max(0, mutedOnTop) }
       : undefined,
   };
+}
+
+/**
+ * Every way we know to play a chord: open position first (if any), then the
+ * movable shapes from lowest to highest on the neck. Empty for "N" / unknown.
+ */
+export function getChordVoicings(label: string): ChordShape[] {
+  const parsed = parseChordLabel(label);
+  if (!parsed) return [];
+  const { pc, quality } = parsed;
+  const out: ChordShape[] = [];
+
+  const open = OPEN_SHAPES[SHARP_NAMES[pc] + quality];
+  if (open) {
+    const fretted = open.frets.filter((f): f is number => f != null && f > 0);
+    out.push({ name: label, kind: "Open", position: fretted.length ? Math.min(...fretted) : 0, ...open });
+  }
+
+  const movable: ShapeCandidate[] = [];
+  const eShape = E_SHAPE[quality];
+  if (eShape) movable.push({ kind: "E shape", template: eShape, string: 6, base: (pc - 4 + 12) % 12 });
+  movable.push({ kind: "A shape", template: A_SHAPE[quality], string: 5, base: (pc - 9 + 12) % 12 });
+  const dShape = D_SHAPE[quality];
+  if (dShape) movable.push({ kind: "D shape", template: dShape, string: 4, base: (pc - 2 + 12) % 12 });
+
+  for (const c of movable) {
+    // A barre can't sit at fret 0, so it moves up an octave there.
+    const base = c.base === 0 && c.template.barre ? 12 : c.base;
+    out.push(placeMovable(label, base === 0 ? "Open" : c.kind, c.template, base, c.string));
+  }
+
+  // Drop duplicates (e.g. the open D shape is also the table's open D).
+  const seen = new Set<string>();
+  const unique = out.filter((v) => {
+    const key = JSON.stringify(v.frets);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const [first, ...rest] = unique;
+  return first?.kind === "Open"
+    ? [first, ...rest.sort((a, b) => a.position - b.position)]
+    : unique.sort((a, b) => a.position - b.position);
+}
+
+interface ShapeCandidate { kind: string; template: Movable; string: number; base: number }
+
+/** The default voicing for a chord label, or null if it has none (e.g. "N"). */
+export function getChordShape(label: string): ChordShape | null {
+  return getChordVoicings(label)[0] ?? null;
 }
 
 const SHAPE_NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
