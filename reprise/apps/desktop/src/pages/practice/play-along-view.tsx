@@ -1081,14 +1081,17 @@ const MODES: { value: Mode; label: string }[] = [
 ];
 
 /**
- * The song's tempo, with a menu to fix half / double-time detection. The
- * choice is saved per song and the chords are re-analysed on that beat grid.
+ * The song's tempo, with a menu of per-song analysis fixes: half / double
+ * time, and analysing on separated instruments. Choices are saved per song
+ * and the chords are re-analysed with them.
  */
-function TempoButton({ bpm, corrected, busy, onSet }: {
+function TempoButton({ bpm, corrected, busy, onSet, stems, onStems }: {
   bpm: number;
   corrected: boolean;
   busy: boolean;
   onSet: (hint: number | null) => void;
+  stems: boolean;
+  onStems: (on: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLSpanElement>(null);
@@ -1127,6 +1130,25 @@ function TempoButton({ bpm, corrected, busy, onSet }: {
               Back to automatic detection
             </button>
           )}
+          <div className="my-1 h-px bg-[var(--border-subtle)]" />
+          <button
+            onClick={() => { setOpen(false); onStems(!stems); }}
+            className={`${item} flex items-start gap-2`}
+          >
+            <span className={`mt-[2px] w-[13px] h-[13px] rounded-[3px] border flex-shrink-0 flex items-center justify-center ${
+              stems ? "bg-[var(--theme)] border-[var(--theme)] text-white" : "border-[var(--border)]"
+            }`}>
+              {stems && (
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+              )}
+            </span>
+            <span className="leading-snug">
+              Separate drums first
+              <span className="block text-[10.5px] text-[var(--text-muted)]">
+                For drum-heavy songs: chords from the instruments, beats from the drums, bass from the bass. First run takes about a minute.
+              </span>
+            </span>
+          </button>
         </div>
       )}
     </span>
@@ -1498,6 +1520,12 @@ export function PlayAlongView({
     await saveChordSettings(song.chord_data_path, { tempo_hint: hint });
     enqueue(song.id, song.title, "chords");
   };
+  const usingStems = analysis.tuning?.use_stems === true;
+  const setUseStems = async (on: boolean) => {
+    if (!song.chord_data_path) return;
+    await saveChordSettings(song.chord_data_path, { use_stems: on });
+    enqueue(song.id, song.title, "chords");
+  };
   const guideDisabled = false;
 
   return (
@@ -1581,6 +1609,8 @@ export function PlayAlongView({
                   corrected={tempoCorrected}
                   busy={queued || processing}
                   onSet={setTempoHint}
+                  stems={usingStems}
+                  onStems={setUseStems}
                 />
               )}
               {analysis.time_signature && (

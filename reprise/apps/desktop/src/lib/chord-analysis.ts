@@ -94,9 +94,11 @@ export interface ChordAnalysis {
   bars?: ChordBar[];
   chords?: ChordSegment[];
   /** Settings the analysis ran with (incl. tempo_hint when the tempo was corrected). */
-  tuning?: { tempo_hint?: number | null } & Record<string, unknown>;
+  tuning?: { tempo_hint?: number | null; use_stems?: boolean } & Record<string, unknown>;
   strumming?: StrummingSheet;
   capo?: CapoSuggestion;
+  /** Which audio each part of the analysis used (stems when available). */
+  sources?: { beats: string; chords: string; bass: string; strumming: string };
   fingerstyle?: FingerstyleArrangement;
 }
 
@@ -143,6 +145,8 @@ export async function analyzeChords(
   songFolder: string,
   pitchPath?: string,
   title?: string,
+  /** The original song audio; lets the analysis split drums / bass / other. */
+  mixPath?: string,
 ): Promise<string> {
   // Resolve bundled Python script (src-tauri/sidecars/chord_analyze.py);
   // it imports fingerstyle_arrange.py from the same folder.
@@ -156,6 +160,7 @@ export async function analyzeChords(
   ];
   if (pitchPath) args.push("--pitch_path", pitchPath);
   if (title) args.push("--title", title);
+  if (mixPath) args.push("--mix_path", mixPath);
 
   const command = Command.create("python", args);
 
@@ -192,6 +197,8 @@ export async function readChordAnalysis(path: string): Promise<ChordAnalysis> {
 export interface ChordSettings {
   /** Force the beat grid to this BPM (fixes half / double-time detection). */
   tempo_hint?: number | null;
+  /** Analyse on separated drums / bass / other stems (for drum-heavy songs). */
+  use_stems?: boolean;
 }
 
 function settingsPath(chordDataPath: string): string {

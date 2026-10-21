@@ -30,7 +30,7 @@ import sys
 from collections import Counter
 from datetime import datetime, timezone
 
-OUTPUT_VERSION = 10
+OUTPUT_VERSION = 11
 ALTERNATIVES_PER_CHORD = 4
 
 SR = 22050
@@ -63,6 +63,10 @@ PITCH_NAMES_FLAT = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", 
 #   min_chord_beats chords shorter than this are merged into a neighbour.
 #                   1 = keep everything (default): 2 removed a real one-beat
 #                   passing chord (C7 -> Bm) on Kaerou.
+#   use_stems       split drums / bass / other (Demucs 4-stem) and analyse each
+#                   job on the part that suits it. Off by default (helps drum-heavy
+#                   songs like Tabiji, slightly hurt Kaerou); set per song in
+#                   chord_settings.json from the app.
 #   tempo_hint      force the beat grid to this BPM. Set per song (from the
 #                   app's Half / Double tempo buttons) in chord_settings.json
 #                   next to chords.json, because the audio alone can't tell a
@@ -80,6 +84,7 @@ TUNING = {
     "snap_tolerance": 0.12,
     "min_chord_beats": 1,
     "tempo_hint": None,
+    "use_stems": False,
     "temperature": 0.06,
 }
 
@@ -609,10 +614,56 @@ def suggest_capo(chords):
 
 
 # ---------------------------------------------------------------------------
+# Four-stem separation (drums / bass / other / vocals)
+# ---------------------------------------------------------------------------
+
+STEM_NAMES = ("drums", "bass", "other")
+
+
+def ensure_stems(mix_path, instrumental_path):
+    """Paths of the drums / bass / other stems next to the instrumental.
+
+    The app's stem step only splits vocals from the rest. If the 4-stem files
+    aren't there yet, run the same Demucs model (already downloaded) without
+    --two-stems to get them. Returns None when that isn't possible; the
+    analysis then falls back to the whole instrumental.
+    """
+    import subprocess
+
+    stems_dir = os.path.dirname(os.path.abspath(instrumental_path))
+    paths = {name: os.path.join(stems_dir, f"{name}.wav") for name in STEM_NAMES}
+    if all(os.path.isfile(p) for p in paths.values()):
+        return paths
+    if not mix_path or not os.path.isfile(mix_path):
+        return None
+
+    # Demucs writes to <out_root>/htdemucs/<mix file name>/, which is where
+    # the app's 2-stem files already live.
+    out_root = os.path.dirname(os.path.dirname(stems_dir))
+    print("[chord_analyze] separating drums / bass / other (one-time, a few minutes)...", flush=True)
+    result = subprocess.run(
+        [sys.executable, "-m", "demucs", "-n", "htdemucs", "-o", out_root, mix_path],
+        capture_output=True, text=True,
+    )
+    produced_dir = os.path.join(out_root, "htdemucs", os.path.splitext(os.path.basename(mix_path))[0])
+    paths = {name: os.path.join(produced_dir, f"{name}.wav") for name in STEM_NAMES}
+    if result.returncode != 0 or not all(os.path.isfile(p) for p in paths.values()):
+        tail = (result.stderr or "").strip().splitlines()[-1:] or ["unknown error"]
+        print(f"[chord_analyze] 4-stem separation failed, using the instrumental: {tail[0]}", file=sys.stderr)
+        return None
+    return paths
+
+
+# ---------------------------------------------------------------------------
 # Main analysis
 # ---------------------------------------------------------------------------
 
-def analyze(audio_path: str) -> dict:
+def analyze(audio_path: str, stems=None) -> dict:
+    """Analyse the instrumental. With `stems` (drums / bass / other paths),
+    each job uses the part that suits it: beats from the drums, chords from
+    the harmonic instruments ("other"), the bass note from the bass, and the
+    strum pattern from when the guitar / keys strike — not from drum hits.
+    """
     import numpy as np
     import librosa
 
@@ -621,10 +672,29 @@ def analyze(audio_path: str) -> dict:
     if duration_s < 5:
         raise ValueError("Audio is too short to analyse (under 5 seconds)")
 
-    y_harm, y_perc = librosa.effects.hpss(y)
+    def load_stem(name):
+        s_y, _ = librosa.load(stems[name], sr=SR, mono=True)
+        out = np.zeros(len(y), dtype=np.float32)
+        out[: min(len(y), len(s_y))] = s_y[: len(y)]
+        return out
+
+    if stems:
+        y_drums, y_bass, y_other = load_stem("drums"), load_stem("bass"), load_stem("other")
+        y_harm = librosa.effects.harmonic(y_other)         # chords: no drums, no strum clicks
+        y_strum = librosa.effects.percussive(y_other)      # strums / plucks of the harmony instruments
+        drums_audible = float(np.sqrt(np.mean(y_drums ** 2))) > 0.01
+        y_beat = y_drums if drums_audible else librosa.effects.percussive(y)
+        y_low = y_bass
+        sources = {"beats": "drums" if drums_audible else "instrumental", "chords": "other",
+                   "bass": "bass", "strumming": "other"}
+    else:
+        y_harm, y_perc = librosa.effects.hpss(y)
+        y_beat, y_strum, y_low = y_perc, y_perc, y_harm
+        sources = {"beats": "instrumental", "chords": "instrumental",
+                   "bass": "instrumental", "strumming": "instrumental"}
 
     # Beats
-    onset_env = librosa.onset.onset_strength(y=y_perc, sr=sr, hop_length=HOP)
+    onset_env = librosa.onset.onset_strength(y=y_beat, sr=sr, hop_length=HOP)
     hint = TUNING.get("tempo_hint")
     tempo, beat_frames = librosa.beat.beat_track(
         onset_envelope=onset_env, sr=sr, hop_length=HOP, trim=False,
@@ -646,7 +716,7 @@ def analyze(audio_path: str) -> dict:
 
     # Bass register only (C1–B3): which note is at the bottom of the harmony.
     bass = librosa.feature.chroma_cqt(
-        y=y_harm, sr=sr, hop_length=HOP, fmin=librosa.note_to_hz("C1"), n_octaves=3,
+        y=y_low, sr=sr, hop_length=HOP, fmin=librosa.note_to_hz("C1"), n_octaves=3,
     )
     beat_bass = librosa.util.sync(bass, sync_frames, aggregate=np.median)
     if beat_bass.shape[1] == len(beat_frames) + 1:
@@ -661,7 +731,7 @@ def analyze(audio_path: str) -> dict:
     path = regularize_path(path, chord_ctx["scores"], meter, phase)
     chords = build_segments(path, chord_ctx)
     bars = build_bars(beat_times, meter, phase, duration_s)
-    strumming = detect_strumming(y_perc, sr, beat_times, bars, meter, tempo)
+    strumming = detect_strumming(y_strum, sr, beat_times, bars, meter, tempo)
     capo = suggest_capo(chords)
 
     return {
@@ -674,6 +744,7 @@ def analyze(audio_path: str) -> dict:
         "chords": chords,
         "strumming": strumming,
         "capo": capo,
+        "sources": sources,
     }
 
 
@@ -703,6 +774,7 @@ def main() -> int:
     parser.add_argument("--audio_path", required=True, help="Instrumental stem (no_vocals.wav)")
     parser.add_argument("--output_path", required=True, help="Where to write chords.json")
     parser.add_argument("--pitch_path", help="Vocal pitch.csv from torchcrepe (enables fingerstyle)")
+    parser.add_argument("--mix_path", help="Original song audio; enables the drums / bass / other split")
     parser.add_argument("--title", default="", help="Song title for the exported tab")
     parser.add_argument("--tuning", default="", help='JSON overrides for TUNING, e.g. \'{"stickiness": 0.88}\'')
     args = parser.parse_args()
@@ -733,7 +805,8 @@ def main() -> int:
     try:
         if not os.path.isfile(args.audio_path):
             raise FileNotFoundError(f"Audio file not found: {args.audio_path}")
-        result = analyze(args.audio_path)
+        stems = ensure_stems(args.mix_path, args.audio_path) if TUNING["use_stems"] else None
+        result = analyze(args.audio_path, stems)
         add_fingerstyle(result, args.pitch_path, args.output_path, args.title or "Reprise arrangement")
         write_output(args.output_path, {**base, "status": "ok", **result})
         fs = result["fingerstyle"]

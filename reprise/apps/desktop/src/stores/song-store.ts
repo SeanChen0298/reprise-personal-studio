@@ -417,6 +417,7 @@ export const useSongStore = create<SongStore>()((set, get) => ({
         song.audio_folder,
         pitchPath,
         song.artist ? `${song.title} — ${song.artist}` : song.title,
+        song.audio_path,
       );
       await get().updateSong(id, { chord_status: "done", chord_data_path: chordDataPath });
     } catch (err) {

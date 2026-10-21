@@ -426,7 +426,7 @@ export function SongSetupPage() {
                       <div className="h-1 bg-[#FDE68A] rounded-sm overflow-hidden">
                         <div className="h-full w-[65%] bg-gradient-to-r from-[#F59E0B] to-[#D97706] rounded-sm animate-pulse" />
                       </div>
-                      <div className="text-[11px] text-[#B45309] mt-1.5">Running on the instrumental track.</div>
+                      <div className="text-[11px] text-[#B45309] mt-1.5">Reading chords from the instrumental (or separated instruments, if turned on for this song).</div>
                     </div>
                   </div>
                 ) : chordDone ? (
