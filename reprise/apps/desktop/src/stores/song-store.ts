@@ -457,7 +457,7 @@ export const useSongStore = create<SongStore>()((set, get) => ({
       const updatedLines = allLines.map((line) => {
         const aligned = alignMap.get(line.order);
         if (!aligned) return line;
-        return { ...line, start_ms: aligned.start_ms, end_ms: aligned.end_ms };
+        return { ...line, start_ms: aligned.start_ms, end_ms: aligned.end_ms, syllable_times: aligned.tokens };
       });
 
       await get().setLines(id, updatedLines);
@@ -1120,6 +1120,7 @@ function dbRowToLine(row: Record<string, unknown>): Line {
     order: row.order as number,
     start_ms: row.start_ms as number | undefined,
     end_ms: row.end_ms as number | undefined,
+    syllable_times: (row.syllable_times as [number, number, number][] | null) ?? undefined,
     status: row.status as LineStatus,
     play_count: (row.play_count as number | undefined) ?? 0,
     furigana_html: (row.furigana_html as string | undefined) ?? undefined,
@@ -1141,6 +1142,7 @@ function lineToDbRow(line: Line, userId: string): Record<string, unknown> {
     order: line.order,
     start_ms: line.start_ms ?? null,
     end_ms: line.end_ms ?? null,
+    syllable_times: line.syllable_times ?? null,
     status: line.status,
     play_count: line.play_count ?? 0,
     furigana_html: line.furigana_html ?? null,

@@ -189,11 +189,20 @@ def map_lines_to_timestamps(lines: list, segments: list, language: str) -> tuple
         start_ms = round(flat[start_idx]["start"] * 1000)
         end_ms = round(flat[end_idx - 1]["end"] * 1000)
 
+        # Per-token timing inside the line ([start_ms, end_ms, characters]) so
+        # the lead sheet can put each syllable under the beat it's sung on.
+        tokens = []
+        for tok in flat[start_idx:end_idx]:
+            n = len(normalize_text(tok["text"], language))
+            if n:
+                tokens.append([round(tok["start"] * 1000), round(tok["end"] * 1000), n])
+
         matched.append({
             "order": line["order"],
             "start_ms": start_ms,
             "end_ms": end_ms,
             "confidence": round(score, 3),
+            "tokens": tokens,
         })
         cursor = end_idx  # advance past matched tokens
 

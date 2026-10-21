@@ -1,5 +1,5 @@
 import {
-  createContext, Fragment, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState,
+  createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState,
 } from "react";
 import { createPortal } from "react-dom";
 import type { Line, Song } from "../../types/song";
@@ -583,277 +583,176 @@ function ChordPopover({
 }
 
 // ---------------------------------------------------------------------------
-// Chord sheet — chords sit above the syllable where they change
+// Lead sheet — bars in rows, chords above the beat they start on, lyrics
+// under the beat they're sung on
 // ---------------------------------------------------------------------------
 
-interface SheetSegment {
-  chord: number | null;  // index into chords
-  text: string;
+const BARS_PER_ROW = 4;
+
+/** Index of the beat whose span [beats[i], beats[i+1]) contains t (-1 before the first). */
+function beatIndexAt(beats: number[], t: number): number {
+  return indexAt(beats, t, (b) => b);
 }
 
 /**
- * Split a timed line into segments that each start at a chord change.
- * Time within the line is mapped to a character position, so a chord that
- * changes halfway through the line sits above the middle character.
+ * When each character of a lyric line is sung. Uses the aligned syllable
+ * timing when it still matches the line (it goes stale if the line's times
+ * were edited by hand); otherwise spreads the line evenly over its start–end.
+ * The aligned tokens are in reading form (kana), so display characters are
+ * mapped by their relative position in the line.
  */
-function sheetSegments(
-  line: Line,
-  chords: ChordSegment[],
-  window: { from: number; to: number },
-  lead?: number,
-): SheetSegment[] {
-  const chars = Array.from(line.custom_text ?? line.text);
-  if (line.start_ms == null || line.end_ms == null || line.end_ms <= line.start_ms || chords.length === 0) {
-    return [{ chord: null, text: chars.join("") }];
-  }
-  const start = line.start_ms, dur = line.end_ms - start;
-
-  // The lead-in chord (sounding as the line begins) opens the line; after it,
-  // only chords that START in this line's window. A chord still ringing on
-  // from the previous line isn't repeated.
-  const marks: { ci: number; idx: number }[] = lead != null ? [{ ci: lead, idx: 0 }] : [];
-  for (let i = Math.max(indexAt(chords, window.from - 1, (c) => c.start_ms) + 1, 0);
-    i < chords.length && chords[i].start_ms < window.to; i++) {
-    if (i === lead) continue;
-    const prev = marks[marks.length - 1];
-    if (prev && chords[prev.ci].label === chords[i].label) continue;
-    const frac = (Math.max(chords[i].start_ms, start) - start) / dur;
-    let idx = Math.round(frac * chars.length);
-    if (prev && idx <= prev.idx) idx = prev.idx + 1;   // never stack two chords on one character
-    marks.push({ ci: i, idx });                        // idx past the end = trailing chord, no text
-  }
-
-  const segments: SheetSegment[] = [];
-  if (marks.length === 0 || marks[0].idx > 0) {
-    segments.push({ chord: null, text: chars.slice(0, marks[0]?.idx ?? chars.length).join("") });
-  }
-  marks.forEach((m, k) => {
-    const nextIdx = marks[k + 1]?.idx ?? chars.length;
-    segments.push({ chord: m.ci, text: chars.slice(m.idx, Math.max(nextIdx, m.idx)).join("") });
+function characterTimes(line: Line, count: number): number[] {
+  const start = line.start_ms!, end = line.end_ms!;
+  const tokens = line.syllable_times;
+  const fits = tokens && tokens.length > 0 &&
+    Math.abs(tokens[0][0] - start) < 400 && Math.abs(tokens[tokens.length - 1][1] - end) < 3500;
+  if (!fits) return Array.from({ length: count }, (_, k) => start + ((k + 0.5) / count) * (end - start));
+  const total = tokens!.reduce((n, t) => n + t[2], 0);
+  return Array.from({ length: count }, (_, k) => {
+    let pos = ((k + 0.5) / count) * total;
+    for (const [ts, te, n] of tokens!) {
+      if (pos <= n) return ts + (pos / n) * (te - ts);
+      pos -= n;
+    }
+    return tokens![tokens!.length - 1][1];
   });
-  return segments;
 }
 
-/** Chord-only row for music without lyrics: intro, interludes, outro. */
-function InstrumentalRow({ label, chordIdx, chords, playheadChord }: {
-  label: string;
-  chordIdx: number[];
-  chords: ChordSegment[];
-  playheadChord: number;
-}) {
-  const { seek } = useActions();
-  const active = chordIdx.includes(playheadChord);
-  return (
-    <div
-      onClick={() => seek(chords[chordIdx[0]].start_ms)}
-      className={`flex items-baseline gap-3 px-4 py-1.5 rounded-[8px] cursor-pointer transition-colors ${
-        active ? "bg-[var(--theme-light)]" : "hover:bg-[var(--surface)]"
-      }`}
-    >
-      <span className="text-[10.5px] font-medium uppercase tracking-[0.09em] text-[var(--text-muted)] w-[64px] flex-shrink-0">
-        {label}
-      </span>
-      <span className="flex flex-wrap gap-x-3 gap-y-0.5">
-        {chordIdx.map((ci) => (
-          <ChordName
-            key={ci}
-            label={chords[ci].label}
-            index={ci}
-            edited={chords[ci].edited}
-            className={`text-[12.5px] font-semibold ${
-              ci === playheadChord ? "text-[var(--theme-text)]" : "text-[var(--text-secondary)]"
-            }`}
-          />
-        ))}
-      </span>
-    </div>
-  );
+/** Lyric characters per beat, each under the beat it's sung on. */
+function lyricsByBeat(lines: Line[], beats: number[]): Map<number, string> {
+  const cells = new Map<number, string>();
+  for (const line of lines) {
+    if (line.start_ms == null || line.end_ms == null || line.end_ms <= line.start_ms) continue;
+    const chars = Array.from(line.custom_text ?? line.text);
+    const times = characterTimes(line, chars.length);
+    chars.forEach((ch, k) => {
+      const b = beatIndexAt(beats, times[k]);
+      if (b < 0) return;
+      cells.set(b, (cells.get(b) ?? "") + ch);
+    });
+  }
+  return cells;
 }
 
-/**
- * One lyric line with chord names floating above it. Names take no width in
- * the text, so the lyric stays continuous; after layout, any name that would
- * overlap the previous one is nudged right.
- */
-function SheetLine({ segments, chords, isCurrent, playheadChord }: {
-  segments: SheetSegment[];
-  chords: ChordSegment[];
-  isCurrent: boolean;
-  playheadChord: number;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const { display } = useActions();
-  // Re-run the layout whenever the names shown change (capo toggle, edits).
-  const shownNames = segments.map((s) => (s.chord != null ? display(chords[s.chord].label) : "")).join("|");
-
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const GAP = 8;
-    const layout = () => {
-      const labels = Array.from(el.querySelectorAll<HTMLElement>("[data-chord-label]"));
-      // Read every natural position first, then write all shifts, so the
-      // browser lays out once instead of once per label.
-      labels.forEach((l) => { l.style.transform = ""; });
-      const rects = labels.map((l) => l.getBoundingClientRect());
-      const shifts: number[] = [];
-      let prevRight = -Infinity;
-      let prevTop: number | null = null;
-      rects.forEach((r) => {
-        const sameRow = prevTop !== null && Math.abs(r.top - prevTop) < 4;
-        const dx = sameRow && r.left < prevRight + GAP ? prevRight + GAP - r.left : 0;
-        shifts.push(dx);
-        prevRight = r.right + dx;
-        prevTop = r.top;
-      });
-      labels.forEach((l, i) => { if (shifts[i]) l.style.transform = `translateX(${shifts[i]}px)`; });
-    };
-    layout();
-    // Labels change width when the web font finishes loading; the line
-    // changes width when the window resizes. Either way, lay out again.
-    const observer = new ResizeObserver(layout);
-    observer.observe(el);
-    el.querySelectorAll("[data-chord-label]").forEach((l) => observer.observe(l));
-    void document.fonts?.ready.then(layout);
-    return () => observer.disconnect();
-  }, [segments, shownNames]);
-
-  return (
-    <div ref={ref} className="flex flex-wrap items-end">
-      {segments.map((seg, si) => {
-        const activeChord = seg.chord != null && seg.chord === playheadChord && isCurrent;
-        return (
-          <span key={si} className="relative inline-block pt-[19px]">
-            {seg.chord != null && (
-              <span
-                data-chord-label
-                className={`absolute left-0 top-0 h-[18px] leading-[18px] text-[12.5px] font-semibold whitespace-nowrap ${
-                  activeChord ? "text-[var(--theme-text)]" : "text-[var(--text-secondary)]"
-                }`}
-              >
-                <ChordName label={chords[seg.chord].label} index={seg.chord} edited={chords[seg.chord].edited} />
-              </span>
-            )}
-            <span
-              className={`text-[15px] leading-[22px] whitespace-pre-wrap ${
-                isCurrent ? "text-[var(--text-primary)] font-medium" : "text-[var(--text-secondary)]"
-              }`}
-            >
-              {seg.text || "\u00a0"}
-            </span>
-          </span>
-        );
-      })}
-    </div>
-  );
-}
-
-function SheetView({
-  lines, translationLines, chords, playhead, isPlaying,
-}: {
+function LeadSheetView({ analysis, lines, chords, playhead, isPlaying }: {
+  analysis: ChordAnalysis;
   lines: Line[];
-  translationLines: Line[];
   chords: ChordSegment[];
   playhead: Playhead;
   isPlaying: boolean;
 }) {
-  const { seek } = useActions();
+  const { seek, openChord } = useActions();
   const containerRef = useRef<HTMLDivElement>(null);
-  const translationByOrder = useMemo(
-    () => new Map(translationLines.map((l) => [l.order, l.custom_text ?? l.text])),
-    [translationLines],
-  );
-  const sheet = useMemo(() => {
-    /*
-     * Each chord appears once.
-     * - A line opens with its lead-in chord: the one sounding when the
-     *   singing starts, if it began after the previous line ended.
-     * - Chords starting within the line (or up to SNAP_MS before it — lyric
-     *   timing is loose) sit above it.
-     * - Other chords between lines: a short breath tags them onto the end of
-     *   the previous line; a longer gap (intro, interlude, outro) gets its
-     *   own chord-only row instead of being piled onto the next line.
-     */
-    const SNAP_MS = 250;
-    const LONG_GAP_MS = 3000;
-    const timed = lines
-      .map((l, i) => ({ l, i }))
-      .filter(({ l }) => l.start_ms != null && l.end_ms != null && l.end_ms > l.start_ms);
+  const bars = analysis.bars ?? [];
+  const beats = analysis.beats_ms ?? [];
+  useFollow(containerRef, playhead.bar >= 0 ? `[data-sheet-bar="${playhead.bar}"]` : null, isPlaying, "center");
 
-    const chordsStartingIn = (from: number, to: number) => {
-      const out: number[] = [];
-      for (let k = Math.max(indexAt(chords, from - 1, (c) => c.start_ms) + 1, 0);
-        k < chords.length && chords[k].start_ms < to; k++) {
-        if (chords[k].label === "N") continue;
-        if (out.length && chords[out[out.length - 1]].label === chords[k].label) continue;
-        out.push(k);
-      }
-      return out;
-    };
-
-    const info = timed.map(({ l }, t) => {
-      const prevEnd = t > 0 ? timed[t - 1].l.end_ms! : -Infinity;
-      const cutoff = l.start_ms! - SNAP_MS;
-      const sounding = indexAt(chords, l.start_ms!, (c) => c.start_ms);
-      const lead = sounding >= 0 && chords[sounding].start_ms >= prevEnd && chords[sounding].start_ms < cutoff
-        && chords[sounding].label !== "N" ? sounding : undefined;
-      const longGap = t === 0 || cutoff - prevEnd >= LONG_GAP_MS;
-      return { prevEnd, cutoff, lead, longGap };
+  const lyrics = useMemo(() => lyricsByBeat(lines, beats), [lines, beats]);
+  // Which chord starts on each beat (chord starts sit on beats).
+  const chordStartAtBeat = useMemo(() => {
+    const map = new Map<number, number>();
+    chords.forEach((c, ci) => {
+      const b = beatIndexAt(beats, c.start_ms + 40);
+      if (b >= 0 && !map.has(b)) map.set(b, ci);
     });
+    return map;
+  }, [chords, beats]);
 
-    const segments: SheetSegment[][] = lines.map((l) => [{ chord: null, text: l.custom_text ?? l.text }]);
-    const before: { label: string; chordIdx: number[] }[][] = lines.map(() => []);
-
-    timed.forEach(({ l, i }, t) => {
-      const me = info[t];
-      const next = info[t + 1];
-      // Short breath before the next line: this line keeps the chords in it.
-      const to = !next
-        ? l.end_ms!
-        : next.longGap
-          ? l.end_ms!
-          : next.lead != null ? chords[next.lead].start_ms : next.cutoff;
-      segments[i] = sheetSegments(l, chords, { from: me.cutoff, to: Math.max(to, me.cutoff) }, me.lead);
-      if (me.longGap) {
-        const gap = chordsStartingIn(me.prevEnd, me.cutoff).filter((k) => k !== me.lead);
-        if (gap.length) before[i].push({ label: t === 0 ? "Intro" : "Interlude", chordIdx: gap });
-      }
-    });
-
-    const last = timed[timed.length - 1];
-    const outro = last ? chordsStartingIn(last.l.end_ms!, Number.POSITIVE_INFINITY) : [];
-    return { segments, before, outro };
-  }, [lines, chords]);
-  useFollow(containerRef, playhead.line >= 0 ? `[data-line="${playhead.line}"]` : null, isPlaying, "center");
+  const rows: typeof bars[] = [];
+  for (let i = 0; i < bars.length; i += BARS_PER_ROW) rows.push(bars.slice(i, i + BARS_PER_ROW));
+  const currentBeat = playhead.bar >= 0 && bars[playhead.bar]
+    ? bars[playhead.bar].first_beat + Math.floor(Math.max(0, playhead.slot) / 2)
+    : -1;
 
   return (
-    <div ref={containerRef} className="max-w-[820px] flex flex-col gap-1">
-      {lines.map((line, li) => {
-        const isCurrent = li === playhead.line;
-        const translation = translationByOrder.get(line.order);
-        return (
-          <Fragment key={line.id}>
-          {sheet.before[li].map((row, ri) => (
-            <InstrumentalRow key={ri} label={row.label} chordIdx={row.chordIdx} chords={chords} playheadChord={playhead.chord} />
-          ))}
-          <div
-            data-line={li}
-            onClick={() => line.start_ms != null && seek(line.start_ms)}
-            className={`px-4 py-2 rounded-[8px] transition-colors cursor-pointer ${
-              isCurrent ? "bg-[var(--theme-light)]" : "hover:bg-[var(--surface)]"
-            }`}
-          >
-            <SheetLine segments={sheet.segments[li]} chords={chords} isCurrent={isCurrent} playheadChord={playhead.chord} />
-            {translation && (
-              <div className="text-[12px] text-[var(--text-muted)] leading-snug mt-1">{translation}</div>
-            )}
-          </div>
-          </Fragment>
-        );
-      })}
-      {sheet.outro.length > 0 && (
-        <InstrumentalRow label="Outro" chordIdx={sheet.outro} chords={chords} playheadChord={playhead.chord} />
-      )}
+    <div ref={containerRef} className="flex flex-col gap-3 max-w-[1100px]">
+      {rows.map((row, ri) => (
+        <div key={ri} className="grid gap-0" style={{ gridTemplateColumns: `repeat(${BARS_PER_ROW}, minmax(0, 1fr))` }}>
+          {row.map((bar) => {
+            const isCurrentBar = bar.index === playhead.bar;
+            const beatIdx = Array.from({ length: bar.beats }, (_, k) => bar.first_beat + k);
+            // A chord that started before this bar and is still sounding.
+            const carried = !chordStartAtBeat.has(bar.first_beat)
+              ? indexAt(chords, bar.start_ms + 40, (c) => c.start_ms)
+              : -1;
+            return (
+              <div
+                key={bar.index}
+                data-sheet-bar={bar.index}
+                className={`relative border-l border-[var(--border)] pl-1 pr-1 pt-4 pb-2 ${
+                  bar.free ? "bg-[repeating-linear-gradient(135deg,transparent,transparent_6px,var(--bg)_6px,var(--bg)_12px)]" : ""
+                } ${isCurrentBar ? "bg-[var(--theme-light)]" : ""}`}
+              >
+                <button
+                  onClick={() => seek(bar.start_ms)}
+                  title="Play from this bar"
+                  className="absolute top-0 left-1 text-[9.5px] text-[var(--text-muted)] bg-transparent border-none p-0 cursor-pointer hover:text-[var(--text-primary)]"
+                >
+                  {bar.pickup ? "pickup" : bar.index + 1}{bar.free ? " · free time" : ""}
+                  {!bar.pickup && !bar.free && bar.beats !== (analysis.time_signature?.beats_per_bar ?? 4) ? ` · ${bar.beats}/4` : ""}
+                </button>
+                <div className="grid" style={{ gridTemplateColumns: `repeat(${bar.beats}, minmax(0, 1fr))` }}>
+                  {beatIdx.map((b, k) => {
+                    const ci = chordStartAtBeat.get(b);
+                    const t = beats[b];
+                    const isCurrentBeat = b === currentBeat;
+                    // Clicking an empty beat edits the chord from this beat to the end of the bar.
+                    const sounding = ci ?? indexAt(chords, (t ?? bar.start_ms) + 40, (c) => c.start_ms);
+                    const scope = { start: t ?? bar.start_ms, end: bar.end_ms };
+                    return (
+                      <div key={b} className="min-w-0 flex flex-col">
+                        <div className="h-[22px] flex items-end">
+                          {ci != null ? (
+                            <ChordName
+                              label={chords[ci].label}
+                              index={ci}
+                              scope={scope}
+                              edited={chords[ci].edited}
+                              className={`text-[14px] font-semibold leading-none whitespace-nowrap ${
+                                ci === playhead.chord ? "text-[var(--theme-text)]" : "text-[var(--text-primary)]"
+                              }`}
+                            />
+                          ) : k === 0 && carried >= 0 && chords[carried]?.label !== "N" ? (
+                            <ChordName
+                              label={chords[carried].label}
+                              index={carried}
+                              scope={scope}
+                              className="text-[12px] leading-none whitespace-nowrap text-[var(--text-muted)] opacity-70"
+                            />
+                          ) : sounding >= 0 ? (
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              title="Start a new chord on this beat"
+                              onClick={(e) => openChord(chords[sounding].label, e.currentTarget, sounding, scope)}
+                              className="w-full h-[18px] rounded-[3px] cursor-pointer text-[11px] text-transparent hover:text-[var(--text-muted)] hover:bg-[var(--bg)] leading-[18px] text-center"
+                            >
+                              +
+                            </span>
+                          ) : null}
+                        </div>
+                        <div
+                          onClick={() => t != null && seek(t)}
+                          className={`mt-1 h-[3px] rounded-full ${isCurrentBeat ? "bg-[var(--theme)]" : "bg-[var(--border-subtle)]"}`}
+                        />
+                        <div
+                          onClick={() => t != null && seek(t)}
+                          className="mt-1 min-h-[20px] text-[13.5px] leading-[20px] text-[var(--text-secondary)] break-all cursor-pointer"
+                        >
+                          {lyrics.get(b) ?? ""}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+      <div className="text-[11px] text-[var(--text-muted)] mt-1">
+        Click a chord to hear or change it · click an empty beat (+) to start a chord there · click a bar number to play from it.
+      </div>
     </div>
   );
 }
@@ -1289,7 +1188,7 @@ function GuideSettings({ prefs, onChange, onClose, anchor }: {
 }
 
 export function PlayAlongView({
-  song, lines, translationLines, audioRef, isPlaying, onTogglePlay, onSeek, modeTabsContainer,
+  song, lines, audioRef, isPlaying, onTogglePlay, onSeek, modeTabsContainer,
 }: PlayAlongViewProps) {
   const [mode, setMode] = useState<Mode>("sheet");
   // Strumming and fingerpicking keep separate chord edits and fingering picks.
@@ -1769,7 +1668,7 @@ export function PlayAlongView({
         {/* One scrolling area for whichever view is selected */}
         <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5">
           {mode === "sheet" && (
-            <SheetView lines={lines} translationLines={translationLines} chords={chords} playhead={playhead} isPlaying={isPlaying} />
+            <LeadSheetView analysis={analysis} lines={lines} chords={chords} playhead={playhead} isPlaying={isPlaying} />
           )}
           {mode === "tab" && (
             <PickingView

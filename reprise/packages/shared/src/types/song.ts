@@ -61,6 +61,8 @@ export interface Line {
   order: number;
   start_ms?: number;
   end_ms?: number;
+  /** Timing of the sung tokens in the line from alignment: [start_ms, end_ms, characters]. */
+  syllable_times?: [number, number, number][];
   status: LineStatus;
   play_count?: number;
   furigana_html?: string; // HTML with <ruby> tags for line.text, auto-generated for language === "ja"

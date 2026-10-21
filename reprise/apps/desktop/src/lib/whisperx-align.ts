@@ -22,6 +22,8 @@ export interface AlignedLineResult {
   start_ms: number;
   end_ms: number;
   confidence: number;
+  /** Sung tokens inside the line: [start_ms, end_ms, characters]. */
+  tokens?: [number, number, number][];
 }
 
 export interface AlignOutput {
