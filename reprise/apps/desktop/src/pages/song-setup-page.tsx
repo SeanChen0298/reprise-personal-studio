@@ -443,7 +443,7 @@ export function SongSetupPage() {
                 <ConfirmDialog
                   open={confirmStartOver}
                   title="Start this song's chords over?"
-                  message="Your chord corrections, fingering picks and analysis options for this song are moved to a backup folder inside the song folder (nothing is deleted), and the chords are analysed again from scratch."
+                  message="Your chord corrections, fingering picks, tab note edits and analysis options for this song are moved to a backup folder inside the song folder (nothing is deleted), and the chords are analysed again from scratch."
                   confirmLabel="Start over"
                   onCancel={() => setConfirmStartOver(false)}
                   onConfirm={async () => {

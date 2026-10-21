@@ -247,7 +247,7 @@ export async function readChordSettings(songFolder: string): Promise<ChordSettin
 const CHORD_WORK_FILES = [
   "chord_edits.json", "chord_edits.fingerstyle.json",
   "chord_fingerings.json", "chord_fingerings.fingerstyle.json",
-  "chord_settings.json",
+  "chord_settings.json", "fingerstyle_tab_edits.json",
 ];
 
 /**
