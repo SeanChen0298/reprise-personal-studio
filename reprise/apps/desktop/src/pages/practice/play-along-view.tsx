@@ -375,6 +375,7 @@ function sheetSegments(
   line: Line,
   chords: ChordSegment[],
   window: { from: number; to: number },
+  lead?: number,
 ): SheetSegment[] {
   const chars = Array.from(line.custom_text ?? line.text);
   if (line.start_ms == null || line.end_ms == null || line.end_ms <= line.start_ms || chords.length === 0) {
@@ -382,19 +383,19 @@ function sheetSegments(
   }
   const start = line.start_ms, dur = line.end_ms - start;
 
-  // Only chords that START in this line's window; a chord still ringing on
-  // from the previous line isn't repeated here.
-  const marks: { ci: number; idx: number }[] = [];
+  // The lead-in chord (sounding as the line begins) opens the line; after it,
+  // only chords that START in this line's window. A chord still ringing on
+  // from the previous line isn't repeated.
+  const marks: { ci: number; idx: number }[] = lead != null ? [{ ci: lead, idx: 0 }] : [];
   for (let i = Math.max(indexAt(chords, window.from - 1, (c) => c.start_ms) + 1, 0);
     i < chords.length && chords[i].start_ms < window.to; i++) {
+    if (i === lead) continue;
     const prev = marks[marks.length - 1];
     if (prev && chords[prev.ci].label === chords[i].label) continue;
     const frac = (Math.max(chords[i].start_ms, start) - start) / dur;
     let idx = Math.round(frac * chars.length);
     if (prev && idx <= prev.idx) idx = prev.idx + 1;   // never stack two chords on one character
-    if (idx > chars.length) idx = chars.length;
-    if (prev && idx === prev.idx) continue;
-    marks.push({ ci: i, idx });
+    marks.push({ ci: i, idx });                        // idx past the end = trailing chord, no text
   }
 
   const segments: SheetSegment[] = [];
@@ -403,9 +404,45 @@ function sheetSegments(
   }
   marks.forEach((m, k) => {
     const nextIdx = marks[k + 1]?.idx ?? chars.length;
-    segments.push({ chord: m.ci, text: chars.slice(m.idx, nextIdx).join("") });
+    segments.push({ chord: m.ci, text: chars.slice(m.idx, Math.max(nextIdx, m.idx)).join("") });
   });
   return segments;
+}
+
+/** Chord-only row for music without lyrics: intro, interludes, outro. */
+function InstrumentalRow({ label, chordIdx, chords, playheadChord }: {
+  label: string;
+  chordIdx: number[];
+  chords: ChordSegment[];
+  playheadChord: number;
+}) {
+  const { seek } = useActions();
+  const active = chordIdx.includes(playheadChord);
+  return (
+    <div
+      onClick={() => seek(chords[chordIdx[0]].start_ms)}
+      className={`flex items-baseline gap-3 px-4 py-1.5 rounded-[8px] cursor-pointer transition-colors ${
+        active ? "bg-[var(--theme-light)]" : "hover:bg-[var(--surface)]"
+      }`}
+    >
+      <span className="text-[10.5px] font-medium uppercase tracking-[0.09em] text-[var(--text-muted)] w-[64px] flex-shrink-0">
+        {label}
+      </span>
+      <span className="flex flex-wrap gap-x-3 gap-y-0.5">
+        {chordIdx.map((ci) => (
+          <ChordName
+            key={ci}
+            label={chords[ci].label}
+            index={ci}
+            edited={chords[ci].edited}
+            className={`text-[12.5px] font-semibold ${
+              ci === playheadChord ? "text-[var(--theme-text)]" : "text-[var(--text-secondary)]"
+            }`}
+          />
+        ))}
+      </span>
+    </div>
+  );
 }
 
 /**
@@ -501,21 +538,66 @@ function SheetView({
     () => new Map(translationLines.map((l) => [l.order, l.custom_text ?? l.text])),
     [translationLines],
   );
-  const segmentsByLine = useMemo(() => {
-    // Each chord belongs to exactly one line: the one it starts in. A chord
-    // that starts in the gap between two lines, or just before a line
-    // (lyric timing is loose), opens the next line.
+  const sheet = useMemo(() => {
+    /*
+     * Each chord appears once.
+     * - A line opens with its lead-in chord: the one sounding when the
+     *   singing starts, if it began after the previous line ended.
+     * - Chords starting within the line (or up to SNAP_MS before it — lyric
+     *   timing is loose) sit above it.
+     * - Other chords between lines: a short breath tags them onto the end of
+     *   the previous line; a longer gap (intro, interlude, outro) gets its
+     *   own chord-only row instead of being piled onto the next line.
+     */
     const SNAP_MS = 250;
-    const from = lines.map((l, i) => {
-      if (l.start_ms == null) return Number.POSITIVE_INFINITY;
-      const prevEnd = i > 0 ? lines[i - 1].end_ms ?? -Infinity : -Infinity;
-      return i === 0 ? -Infinity : Math.min(prevEnd, l.start_ms - SNAP_MS);
+    const LONG_GAP_MS = 3000;
+    const timed = lines
+      .map((l, i) => ({ l, i }))
+      .filter(({ l }) => l.start_ms != null && l.end_ms != null && l.end_ms > l.start_ms);
+
+    const chordsStartingIn = (from: number, to: number) => {
+      const out: number[] = [];
+      for (let k = Math.max(indexAt(chords, from - 1, (c) => c.start_ms) + 1, 0);
+        k < chords.length && chords[k].start_ms < to; k++) {
+        if (chords[k].label === "N") continue;
+        if (out.length && chords[out[out.length - 1]].label === chords[k].label) continue;
+        out.push(k);
+      }
+      return out;
+    };
+
+    const info = timed.map(({ l }, t) => {
+      const prevEnd = t > 0 ? timed[t - 1].l.end_ms! : -Infinity;
+      const cutoff = l.start_ms! - SNAP_MS;
+      const sounding = indexAt(chords, l.start_ms!, (c) => c.start_ms);
+      const lead = sounding >= 0 && chords[sounding].start_ms >= prevEnd && chords[sounding].start_ms < cutoff
+        && chords[sounding].label !== "N" ? sounding : undefined;
+      const longGap = t === 0 || cutoff - prevEnd >= LONG_GAP_MS;
+      return { prevEnd, cutoff, lead, longGap };
     });
-    return lines.map((l, i) => {
-      const nextFrom = from.slice(i + 1).find((f) => Number.isFinite(f));
-      const to = nextFrom ?? Number.POSITIVE_INFINITY;
-      return sheetSegments(l, chords, { from: from[i], to: Math.max(to, from[i]) });
+
+    const segments: SheetSegment[][] = lines.map((l) => [{ chord: null, text: l.custom_text ?? l.text }]);
+    const before: { label: string; chordIdx: number[] }[][] = lines.map(() => []);
+
+    timed.forEach(({ l, i }, t) => {
+      const me = info[t];
+      const next = info[t + 1];
+      // Short breath before the next line: this line keeps the chords in it.
+      const to = !next
+        ? l.end_ms!
+        : next.longGap
+          ? l.end_ms!
+          : next.lead != null ? chords[next.lead].start_ms : next.cutoff;
+      segments[i] = sheetSegments(l, chords, { from: me.cutoff, to: Math.max(to, me.cutoff) }, me.lead);
+      if (me.longGap) {
+        const gap = chordsStartingIn(me.prevEnd, me.cutoff).filter((k) => k !== me.lead);
+        if (gap.length) before[i].push({ label: t === 0 ? "Intro" : "Interlude", chordIdx: gap });
+      }
     });
+
+    const last = timed[timed.length - 1];
+    const outro = last ? chordsStartingIn(last.l.end_ms!, Number.POSITIVE_INFINITY) : [];
+    return { segments, before, outro };
   }, [lines, chords]);
   useFollow(containerRef, playhead.line >= 0 ? `[data-line="${playhead.line}"]` : null, isPlaying, "center");
 
@@ -525,21 +607,28 @@ function SheetView({
         const isCurrent = li === playhead.line;
         const translation = translationByOrder.get(line.order);
         return (
+          <Fragment key={line.id}>
+          {sheet.before[li].map((row, ri) => (
+            <InstrumentalRow key={ri} label={row.label} chordIdx={row.chordIdx} chords={chords} playheadChord={playhead.chord} />
+          ))}
           <div
-            key={line.id}
             data-line={li}
             onClick={() => line.start_ms != null && seek(line.start_ms)}
             className={`px-4 py-2 rounded-[8px] transition-colors cursor-pointer ${
               isCurrent ? "bg-[var(--theme-light)]" : "hover:bg-[var(--surface)]"
             }`}
           >
-            <SheetLine segments={segmentsByLine[li]} chords={chords} isCurrent={isCurrent} playheadChord={playhead.chord} />
+            <SheetLine segments={sheet.segments[li]} chords={chords} isCurrent={isCurrent} playheadChord={playhead.chord} />
             {translation && (
               <div className="text-[12px] text-[var(--text-muted)] leading-snug mt-1">{translation}</div>
             )}
           </div>
+          </Fragment>
         );
       })}
+      {sheet.outro.length > 0 && (
+        <InstrumentalRow label="Outro" chordIdx={sheet.outro} chords={chords} playheadChord={playhead.chord} />
+      )}
     </div>
   );
 }
@@ -948,7 +1037,7 @@ export function PlayAlongView({
   );
   const enqueue = useTaskQueueStore((s) => s.enqueue);
   const queued = useTaskQueueStore((s) => s.tasks.some((t) => t.songId === song.id && t.type === "chords"));
-  const [useCapoShapes, setUseCapoShapes] = useState(true);
+  const [useCapoShapes, setUseCapoShapes] = useState(false); // capo off by default; one click shows capo shapes
   const [mode, setMode] = useState<Mode>("sheet");
   const [guideOn, setGuideOn] = useState(false);
   const [guidePrefs, setGuidePrefs] = useState<GuidePrefs>(readGuidePrefs);
