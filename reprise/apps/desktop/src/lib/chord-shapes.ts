@@ -173,109 +173,142 @@ export function parseChordLabel(label: string): { pc: number; quality: Quality }
 const SHARP_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
 const STRING_OPEN_PC = [4, 9, 2, 7, 11, 4]; // string 6 … 1 open notes as pitch classes
+const PC_NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
+const MAX_SEARCHED = 14;
 
 /**
- * Search the neck for playable voicings of any chord: root as the lowest note
- * on string 6, 5 or 4; every chord tone except (optionally) the 5th present;
- * within a 4-fret span using at most four fingers (a barre on the lowest
- * fret counts as one). Returns the best voicing for each root string and
- * octave, best first.
+ * Search the neck for playable voicings of a chord. Covers:
+ *  - root in the bass on string 6, 5 or 4, at every position up to fret ~12,
+ *  - inversions (3rd or 5th in the bass, e.g. C/E, C/G),
+ *  - small grips on the top strings (3–4 notes, lowest string 4 or 3).
+ * A voicing must contain every chord tone except (optionally) the 5th, fit a
+ * 4-fret span, need at most four fingers (a barre counts as one, and only
+ * where every string under it is fretted), and avoid more than one muted
+ * string between sounding ones. The best voicing per bass string, bass note
+ * and neck position is kept.
  */
 function searchVoicings(label: string, pc: number, quality: Quality): ChordShape[] {
   const intervals = QUALITY_INTERVALS[quality];
   const tones = intervals.map((iv) => (pc + iv) % 12);
   const fifth = (pc + 7) % 12;
   const required = tones.filter((t) => t !== fifth || !intervals.includes(7) || tones.length <= 3);
-  const found: { shape: ChordShape; score: number }[] = [];
+  const third = intervals.find((iv) => iv === 3 || iv === 4);
+  const bassOptions: { pc: number; kind: (s: number) => string; penalty: number }[] = [
+    { pc, kind: (s) => `Root on ${s}th`, penalty: 0 },
+  ];
+  if (third != null) {
+    const tpc = (pc + third) % 12;
+    bassOptions.push({ pc: tpc, kind: () => `${PC_NAMES[tpc]} in bass`, penalty: 2.5 });
+  }
+  if (intervals.includes(7)) bassOptions.push({ pc: fifth, kind: () => `${PC_NAMES[fifth]} in bass`, penalty: 3 });
 
-  for (const rootIdx of [0, 1, 2]) {                       // string 6, 5, 4
-    const baseFret = (pc - STRING_OPEN_PC[rootIdx] + 12) % 12;
-    for (const rootFret of [baseFret, baseFret + 12]) {
-      if (rootFret > 14) continue;
-      const lo = Math.max(0, rootFret - 2), hi = rootFret + 3;
-      // Options per higher string: muted, or any fret in the window (or open) that's a chord tone.
-      const options: (number | null)[][] = [];
-      for (let i = rootIdx + 1; i < 6; i++) {
-        const opts: (number | null)[] = [null];
-        for (let f = lo; f <= hi; f++) {
-          if (tones.includes((STRING_OPEN_PC[i] + f) % 12)) opts.push(f);
-        }
-        if (lo > 0 && tones.includes(STRING_OPEN_PC[i])) opts.push(0);
-        options.push(opts);
+  const found: { shape: ChordShape; score: number; bucket: string }[] = [];
+
+  const consider = (frets: Fret[], kind: string, penalty: number, lowIdx: number) => {
+    const sounding = frets.filter((f): f is number => f != null);
+    const minNotes = lowIdx >= 2 ? 3 : tones.length > 3 ? 4 : 3;
+    if (sounding.length < minNotes) return;
+    const pcs = frets.map((f, k) => (f == null ? null : (STRING_OPEN_PC[k] + f) % 12));
+    if (!required.every((t) => pcs.includes(t))) return;
+    const fretted = sounding.filter((f) => f > 0);
+    if (fretted.length && Math.max(...fretted) - Math.min(...fretted) > 3) return;
+    if (sounding.includes(0) && fretted.some((f) => f > 5)) return;
+    const minF = fretted.length ? Math.min(...fretted) : 0;
+    const minIdx = frets.map((f, k) => (f === minF && minF > 0 ? k : -1)).filter((k) => k >= 0);
+    const barreOk = minIdx.length > 1 && frets
+      .slice(minIdx[0], minIdx[minIdx.length - 1] + 1)
+      .every((f) => f != null && f >= minF);
+    const fingersNeeded = fretted.length - (barreOk ? minIdx.length - 1 : 0);
+    if (fingersNeeded > 4) return;
+    let inner = 0;
+    for (let k = lowIdx + 1; k < 6; k++) {
+      if (frets[k] == null && frets.slice(k + 1).some((x) => x != null)) inner++;
+    }
+    if (inner > 1) return;
+
+    const score = sounding.length * 2 - inner * 3 - penalty
+      - (fretted.length ? (Math.max(...fretted) - Math.min(...fretted)) * 0.2 : 0)
+      - (minF > 9 ? 1 : 0) - (barreOk ? 0.3 : 0);
+
+    // Fingers: barre (1) on the lowest fret when allowed, then 2–4 by fret.
+    const fingers = frets.map(() => 0);
+    const byFret = new Map<number, number[]>();
+    frets.forEach((f, k) => {
+      if (f == null || f === 0) return;
+      if (!byFret.has(f)) byFret.set(f, []);
+      byFret.get(f)!.push(k);
+    });
+    let next = 1;
+    for (const f of [...byFret.keys()].sort((a, b) => a - b)) {
+      const strings = byFret.get(f)!;
+      if (f === minF && barreOk) {
+        strings.forEach((k) => { fingers[k] = 1; });
+        next = 2;
+      } else {
+        strings.forEach((k) => { fingers[k] = Math.min(4, next++); });
       }
-      const walk = (i: number, acc: (number | null)[]) => {
-        if (i === options.length) {
-          const frets: Fret[] = [...Array(rootIdx).fill(null), rootFret, ...acc];
-          const sounding = frets.filter((f): f is number => f != null);
-          if (sounding.length < 4 && tones.length > 3) return;
-          if (sounding.length < 3) return;
-          const pcs = frets.map((f, k) => (f == null ? null : (STRING_OPEN_PC[k] + f) % 12));
-          if (!required.every((t) => pcs.includes(t))) return;
-          const fretted = sounding.filter((f) => f > 0);
-          if (fretted.length && Math.max(...fretted) - Math.min(...fretted) > 3) return;
-          const minF = fretted.length ? Math.min(...fretted) : 0;
-          const minIdx = frets.map((f, k) => (f === minF && minF > 0 ? k : -1)).filter((k) => k >= 0);
-          // A barre lies flat across every string between its ends, so it can
-          // only replace separate fingers if none of those strings is open or muted.
-          const barreOk = minIdx.length > 1 && frets
-            .slice(minIdx[0], minIdx[minIdx.length - 1] + 1)
-            .every((f) => f != null && f >= minF);
-          const fingersNeeded = fretted.length - (barreOk ? minIdx.length - 1 : 0);
-          if (fingersNeeded > 4) return;
-          // Muted strings between sounding ones are hard to play cleanly.
-          const firstIdx = frets.findIndex((f) => f != null);
-          const inner = frets.slice(firstIdx).reduceRight<number>(
-            (n, f, k, arr) => (f == null && arr.slice(0, k).some((x) => x != null) && arr.slice(k + 1).some((x) => x != null) ? n + 1 : n), 0);
-          if (inner > 1) return;
-          const score = sounding.length * 2 - inner * 3 - (Math.max(...sounding) - Math.min(...sounding)) * 0.2
-            - (rootFret > 9 ? 1 : 0);
-          // Fingers: barre (1) on the lowest fret if several strings share it, then 2-4 by fret.
-          const order = [...new Set(fretted)].sort((a, b) => a - b);
-          let next = 1;
-          const fingerForFret = new Map<number, number[]>();
-          const fingers = frets.map(() => 0);
-          frets.forEach((f, k) => {
-            if (f == null || f === 0) return;
-            if (!fingerForFret.has(f)) fingerForFret.set(f, []);
-            fingerForFret.get(f)!.push(k);
-          });
-          for (const f of order) {
-            const strings = fingerForFret.get(f)!;
-            if (f === minF && barreOk) {
-              strings.forEach((k) => { fingers[k] = 1; });
-              next = 2;
-            } else {
-              strings.forEach((k) => { fingers[k] = Math.min(4, next++); });
-            }
-          }
-          const barreStrings = barreOk ? minIdx : [];
-          found.push({
-            score,
-            shape: {
-              name: label,
-              kind: `Root on ${6 - rootIdx}th`,
-              position: minF || rootFret,
-              frets,
-              fingers,
-              barre: barreStrings.length > 1
-                ? { fret: minF, fromString: 6 - Math.min(...barreStrings), toString: 6 - Math.max(...barreStrings) }
-                : undefined,
-            },
-          });
-          return;
+    }
+    const position = minF;
+    found.push({
+      score,
+      bucket: `${kind}|${Math.floor(position / 3)}`,
+      shape: {
+        name: label,
+        kind,
+        position,
+        frets,
+        fingers,
+        barre: barreOk ? { fret: minF, fromString: 6 - minIdx[0], toString: 6 - minIdx[minIdx.length - 1] } : undefined,
+      },
+    });
+  };
+
+  // Lowest sounding string 6 / 5 / 4 (full voicings) and 4 / 3 (top-string grips).
+  for (const lowIdx of [0, 1, 2, 3]) {
+    const options = lowIdx === 3
+      ? [{ pc: -1, kind: () => "Top strings", penalty: 1 }]
+      : bassOptions;
+    for (const bass of options) {
+      // Bass fret: the bass note on the lowest string (any chord tone for top grips).
+      const bassFrets: number[] = [];
+      for (let f = 0; f <= 14; f++) {
+        const note = (STRING_OPEN_PC[lowIdx] + f) % 12;
+        if (bass.pc === -1 ? tones.includes(note) : note === bass.pc) bassFrets.push(f);
+      }
+      for (const bassFret of bassFrets) {
+        const lo = Math.max(0, bassFret - 3), hi = bassFret + 3;
+        const options2: (number | null)[][] = [];
+        for (let i = lowIdx + 1; i < 6; i++) {
+          const opts: (number | null)[] = [null];
+          for (let f = lo; f <= hi; f++) if (tones.includes((STRING_OPEN_PC[i] + f) % 12)) opts.push(f);
+          // Open strings only near the nut; mixing them with high frets gives
+          // playable-but-odd hybrids nobody uses.
+          if (lo > 0 && hi <= 5 && tones.includes(STRING_OPEN_PC[i])) opts.push(0);
+          options2.push(opts);
         }
-        for (const o of options[i]) walk(i + 1, [...acc, o]);
-      };
-      walk(0, []);
+        const kind = bass.kind(6 - lowIdx);
+        const walk = (i: number, acc: (number | null)[]) => {
+          if (i === options2.length) {
+            consider([...Array(lowIdx).fill(null), bassFret, ...acc], kind, bass.penalty, lowIdx);
+            return;
+          }
+          for (const o of options2[i]) walk(i + 1, [...acc, o]);
+        };
+        walk(0, []);
+      }
     }
   }
-  // Best per root string + octave, best first.
+
+  // Best per (kind, neck region), then the best of those overall.
   const best = new Map<string, { shape: ChordShape; score: number }>();
   for (const f of found) {
-    const key = `${f.shape.kind}@${f.shape.frets.find((x) => x != null)! >= 12 ? "hi" : "lo"}`;
-    if (!best.has(key) || best.get(key)!.score < f.score) best.set(key, f);
+    const cur = best.get(f.bucket);
+    if (!cur || cur.score < f.score) best.set(f.bucket, f);
   }
-  return [...best.values()].sort((a, b) => b.score - a.score).map((f) => f.shape);
+  return [...best.values()]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, MAX_SEARCHED)
+    .map((f) => f.shape);
 }
 
 /** Place a movable template with its root at `base` on `rootString` (6, 5 or 4). */
@@ -301,10 +334,14 @@ function placeMovable(label: string, kind: string, template: Movable, base: numb
  * Every way we know to play a chord: open position first (if any), then the
  * movable shapes from lowest to highest on the neck. Empty for "N" / unknown.
  */
+const voicingCache = new Map<string, ChordShape[]>();
+
 export function getChordVoicings(label: string): ChordShape[] {
   const parsed = parseChordLabel(label);
   if (!parsed) return [];
   label = canonicalChord(label);
+  const cached = voicingCache.get(label);
+  if (cached) return cached;
   const { pc, quality } = parsed;
   const out: ChordShape[] = [];
 
@@ -328,9 +365,9 @@ export function getChordVoicings(label: string): ChordShape[] {
     out.push(placeMovable(label, base === 0 ? "Open" : c.kind, c.template, base, c.string));
   }
 
-  // Chords without hand-made shapes (9ths, 6ths, sus2 …) get searched voicings;
-  // others get them too as extra options after their standard shapes.
-  out.push(...searchVoicings(label, pc, quality).slice(0, out.length ? 2 : 6));
+  // Searched voicings: other positions, inversions and top-string grips —
+  // and the only source for chords without hand-made shapes (9ths, 6ths …).
+  out.push(...searchVoicings(label, pc, quality));
 
   // Drop duplicates (e.g. the open D shape is also the table's open D).
   const seen = new Set<string>();
@@ -340,10 +377,14 @@ export function getChordVoicings(label: string): ChordShape[] {
     seen.add(key);
     return true;
   });
-  const [first, ...rest] = unique;
-  return first?.kind === "Open"
-    ? [first, ...rest.sort((a, b) => a.position - b.position)]
-    : unique.sort((a, b) => a.position - b.position);
+  // Standard shapes first (the hand-made ones), then the rest by neck position.
+  const standard = unique
+    .filter((v) => ["Open", "E shape", "A shape", "D shape"].includes(v.kind))
+    .sort((a, b) => (a.kind === "Open" ? -1 : 0) - (b.kind === "Open" ? -1 : 0) || a.position - b.position);
+  const others = unique.filter((v) => !standard.includes(v)).sort((a, b) => a.position - b.position);
+  const result = [...standard, ...others];
+  voicingCache.set(label, result);
+  return result;
 }
 
 interface ShapeCandidate { kind: string; template: Movable; string: number; base: number }

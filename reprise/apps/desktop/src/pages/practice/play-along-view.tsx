@@ -16,6 +16,7 @@ import {
 } from "../../lib/guitar-synth";
 import { useChordData, type ChordLength } from "../../hooks/use-chord-data";
 import { useFingerings } from "../../hooks/use-fingerings";
+import { planFingerings } from "../../lib/smooth-fingerings";
 import { saveChordSettings } from "../../lib/chord-analysis";
 import { useGuitarGuide } from "../../hooks/use-guitar-guide";
 import { useTaskQueueStore } from "../../stores/task-queue-store";
@@ -104,9 +105,12 @@ interface PlayAlongActions {
   capoShown: number;
   /** Chord-name style for labels built outside `display` (e.g. in the picker). */
   notation: ChordNotation;
-  /** All fingerings for a shown chord name, and the one currently chosen. */
   /** Fingerings for a shown chord name, and the one chosen (at a spot in the song if given). */
-  voicings: (shown: string, atMs?: number) => { all: ChordShape[]; chosen: number; songWide: number };
+  voicings: (shown: string, atMs?: number) => {
+    all: ChordShape[]; chosen: number; songWide: number;
+    /** True when the fingering was picked automatically to flow with the neighbouring chords. */
+    auto: boolean;
+  };
   /** Remember which fingering to use for a shown chord name (0 = back to the default). */
   /** Choose a fingering at one spot (`atMs`) or for every chord of that name (no `atMs`).
    *  `index` null = drop the choice (back to the song-wide one, or the default). */
@@ -453,7 +457,7 @@ function ChordPopover({
   // Opened from a chord in the song: fingering choices apply to that spot.
   // Opened from the chord chart: they apply to every chord of that name.
   const at = fingeringAt ?? segment?.start_ms;
-  const { all, chosen, songWide } = voicings(shapeLabel, at);
+  const { all, chosen, songWide, auto } = voicings(shapeLabel, at);
   const shape = all[chosen];
   const playShape = (v: ChordShape | undefined) => {
     if (v) strum(shapeMidiNotes(v, capoShown), { direction: "down", spreadMs: 22, velocity: 0.7 });
@@ -556,7 +560,7 @@ function ChordPopover({
               )}
               {at != null && (
                 <span className="text-[9.5px] text-[var(--text-muted)]">
-                  {chosen === songWide ? "fingering for this whole song" : "fingering for this spot only"}
+                  {auto ? "picked to flow from the chords around it" : chosen === songWide ? "fingering for this whole song" : "fingering for this spot only"}
                 </span>
               )}
             </div>
@@ -1253,6 +1257,8 @@ interface GuidePrefs {
   instrument: GuitarInstrument;
   /** Chord-name style: Dmaj9 (standard) or DM7(9) (J-pop charts). */
   notation: ChordNotation;
+  /** Choose fingerings for the whole progression (least hand movement). */
+  smoothFingerings: boolean;
   pickPattern: PickPattern;
   /** Chosen fingering per chord name: "E shape@3" etc. */
   voicings: Record<string, string>;
@@ -1260,7 +1266,7 @@ interface GuidePrefs {
 }
 
 const DEFAULT_GUIDE_PREFS: GuidePrefs = {
-  volume: 0.3, offsetMs: 0, instrument: "steel", notation: "standard", pickPattern: "travis", voicings: {},
+  volume: 0.3, offsetMs: 0, instrument: "steel", notation: "standard", smoothFingerings: true, pickPattern: "travis", voicings: {},
 };
 
 function readGuidePrefs(): GuidePrefs {
@@ -1305,6 +1311,20 @@ function GuideSettings({ prefs, onChange, onClose, anchor }: {
       style={{ left, top: anchor.bottom + 6, width }}
       className="fixed z-50 p-3 rounded-[10px] border border-[var(--border)] bg-[var(--surface)] shadow-[0_8px_28px_rgba(0,0,0,0.14)] flex flex-col gap-3"
     >
+      <label className="flex items-start gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={prefs.smoothFingerings}
+          onChange={(e) => onChange({ ...prefs, smoothFingerings: e.target.checked })}
+          className="mt-[3px] accent-[var(--theme)]"
+        />
+        <span className="text-[12px] leading-snug text-[var(--text-primary)]">
+          Smooth fingerings
+          <span className="block text-[10.5px] text-[var(--text-muted)]">
+            Pick each chord's fingering so the hand moves as little as possible between chords. Your own choices stay as they are.
+          </span>
+        </span>
+      </label>
       <div>
         <div className={label}>Chord names</div>
         <div className="flex p-[2px] rounded-[8px] bg-[var(--bg)] border border-[var(--border)]">
@@ -1474,16 +1494,37 @@ export function PlayAlongView({
   // Fingering choices, saved per song (one spot, or every chord of a name).
   const fingerings = useFingerings(song.audio_folder);
   const voicingKey = (v: ChordShape) => `${v.kind}@${v.position}`;
+  const shapeOf = useCallback(
+    (label: string) => (capoShown ? capoShapeLabel(label, capoShown) : label),
+    [capoShown],
+  );
+  const indexOfKey = (all: ChordShape[], key: string | undefined) => {
+    const i = key ? all.findIndex((v) => voicingKey(v) === key) : -1;
+    return i >= 0 ? i : undefined;
+  };
+  // Smooth fingerings: one plan for the whole song (spots / chords the player
+  // chose by hand are fixed and the path goes around them).
+  const smoothPlan = useMemo(() => {
+    if (!guidePrefs.smoothFingerings || !analysis?.chords) return null;
+    const items = analysis.chords
+      .filter((c) => c.label !== "N")
+      .map((c) => ({ at: c.start_ms, shown: shapeOf(c.label) }));
+    return planFingerings(items, getChordVoicings, (item) =>
+      indexOfKey(getChordVoicings(item.shown), fingerings.lookup(item.shown, item.at)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guidePrefs.smoothFingerings, analysis, shapeOf, fingerings]);
+
   const voicings = useCallback(
     (shown: string, atMs?: number) => {
       const all = getChordVoicings(shown);
-      const indexOf = (key: string | undefined) => {
-        const i = key ? all.findIndex((v) => voicingKey(v) === key) : -1;
-        return i >= 0 ? i : 0;
-      };
-      return { all, chosen: indexOf(fingerings.lookup(shown, atMs)), songWide: indexOf(fingerings.lookup(shown)) };
+      const explicit = indexOfKey(all, fingerings.lookup(shown, atMs));
+      const songWide = indexOfKey(all, fingerings.lookup(shown)) ?? 0;
+      const planned = atMs != null && explicit == null ? smoothPlan?.get(atMs) : undefined;
+      const chosen = explicit ?? planned ?? 0;
+      return { all, chosen: Math.min(chosen, Math.max(0, all.length - 1)), songWide, auto: explicit == null && planned != null };
     },
-    [fingerings],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [fingerings, smoothPlan],
   );
   /** The fingering to use for a chord at a spot (as fingered: the capo shape when the capo is shown). */
   const voicingFor = useCallback(
