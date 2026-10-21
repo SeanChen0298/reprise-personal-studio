@@ -45,6 +45,8 @@ export interface UseLinePlayerReturn {
   nextLine: () => void;
   prevLine: () => void;
   seekWithinLine: (fraction: number) => void;
+  /** Jump to any song position and make the line playing there current (no snap to line start). */
+  seekTo: (ms: number) => void;
   /** Suspend auto-advance (line index won't change) while true. Time still tracks. */
   setAdvancePaused: (v: boolean) => void;
 }
@@ -396,6 +398,28 @@ export function useLinePlayer(opts: Options): UseLinePlayerReturn {
     [hasTimestamps, lineStartSec, lineDuration]
   );
 
+  const seekTo = useCallback(
+    (ms: number) => {
+      const audio = audioRef.current;
+      if (!audio) return;
+      audio.currentTime = ms / 1000;
+      setCurrentTime(ms / 1000);
+      wasAtEndRef.current = false;
+      // Line playing at `ms`: the last one that starts at or before it.
+      let idx = -1;
+      lines.forEach((l, i) => {
+        if (l.start_ms != null && l.start_ms <= ms) idx = i;
+      });
+      if (idx >= 0 && idx !== stateRef.current.currentLineIndex) {
+        skipSeekRef.current = true; // we already seeked; don't snap to the line start
+        setCurrentLineIndex(idx);
+        setLoopCount(1);
+        onLineChange?.(idx);
+      }
+    },
+    [lines, onLineChange]
+  );
+
   const setAdvancePaused = useCallback((v: boolean) => {
     stateRef.current.pauseAdvance = v;
   }, []);
@@ -449,6 +473,7 @@ export function useLinePlayer(opts: Options): UseLinePlayerReturn {
     nextLine,
     prevLine,
     seekWithinLine,
+    seekTo,
     setAdvancePaused,
   };
 }

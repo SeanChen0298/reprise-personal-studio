@@ -40,13 +40,15 @@ interface Props {
   skipCountdown?: boolean;
   recordThrough?: boolean;
   onEditModeChange?: (editing: boolean) => void;
+  /** False while another view (e.g. guitar play-along) is on screen. */
+  isActive?: boolean;
 }
 
 export function PracticeCenter({
   lines, translationLines, activeLineIndex, player, songId, songFolder, bpm, inputDeviceId,
   pitchDataPath, canAnalyzePitch, activeSection, recordingSection,
   loopRange, skipCountdown, recordThrough,
-  onEditModeChange,
+  onEditModeChange, isActive = true,
 }: Props) {
   const updateLineCustomText = useSongStore((s) => s.updateLineCustomText);
   const updateLineAnnotations = useSongStore((s) => s.updateLineAnnotations);
@@ -620,8 +622,9 @@ export function PracticeCenter({
     startCountdownThenRecord(startLine.id, startIdx, actualEnd, recordingSection);
   }, [recordingSection, recorder.isRecording, countdownActive, lines, startCountdownThenRecord]);
 
-  // Keyboard shortcut: R to record
+  // Keyboard shortcut: R to record (only while this view is the one on screen)
   useEffect(() => {
+    if (!isActive) return;
     const handler = (e: KeyboardEvent) => {
       if (editMode) return;
       const tag = (e.target as HTMLElement)?.tagName;
@@ -642,7 +645,7 @@ export function PracticeCenter({
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [editMode, recorder.isRecording, saveRecording, handleRecord, handleRetryWithDelete, lastRecordingFilePath, lastRecordingScope, countdownActive]);
+  }, [isActive, editMode, recorder.isRecording, saveRecording, handleRecord, handleRetryWithDelete, lastRecordingFilePath, lastRecordingScope, countdownActive]);
 
   if (!currentLine) {
     return (

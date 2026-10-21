@@ -274,6 +274,8 @@ export function PracticePage() {
             translationLines={translationLines}
             audioRef={player.audioRef}
             isPlaying={player.isPlaying}
+            onTogglePlay={player.togglePlay}
+            onSeek={player.seekTo}
           />
         )}
         {/* Kept mounted while hidden so recording/edit state survives a view switch */}
@@ -295,6 +297,7 @@ export function PracticePage() {
           skipCountdown={skipCountdown}
           recordThrough={recordThrough}
           onEditModeChange={setIsEditing}
+          isActive={view === "practice"}
         />
         </div>
         <RecordingsBar
