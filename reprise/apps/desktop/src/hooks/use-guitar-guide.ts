@@ -48,7 +48,7 @@ function buildEvents(
   const fallback = analysis.strumming?.main_pattern ?? "D-DU-UDU";
   let ci = 0;
   for (const bar of bars) {
-    if (bar.pickup) continue;
+    if (bar.pickup || bar.free) continue;   // no steady pulse to strum along to
     const pattern = sections.find((s) => bar.index >= s.start_bar && bar.index <= s.end_bar)?.pattern ?? fallback;
     for (let k = 0; k < bar.beats; k++) {
       const b = bar.first_beat + k;

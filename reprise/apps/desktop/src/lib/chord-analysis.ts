@@ -30,6 +30,8 @@ export interface ChordBar {
   first_beat: number;   // index into beats_ms
   beats: number;
   pickup: boolean;      // partial bar before the first downbeat
+  /** No steady pulse here (intro, outro, pause): placeholder bar, not played along. */
+  free?: boolean;
 }
 
 export interface ChordSegment {
@@ -97,6 +99,8 @@ export interface ChordAnalysis {
   tuning?: { tempo_hint?: number | null; use_stems?: boolean } & Record<string, unknown>;
   strumming?: StrummingSheet;
   capo?: CapoSuggestion;
+  /** Stretches without a steady pulse, [start, end] in ms. */
+  free_ranges_ms?: [number, number][];
   /** Which audio each part of the analysis used (stems when available). */
   sources?: { beats: string; chords: string; bass: string; strumming: string };
   fingerstyle?: FingerstyleArrangement;
@@ -223,4 +227,31 @@ export async function readChordSettings(songFolder: string): Promise<ChordSettin
   const path = `${songFolder}/chord_settings.json`;
   if (!(await exists(path))) return {};
   try { return JSON.parse(await readTextFile(path)) as ChordSettings; } catch { return {}; }
+}
+
+/** Files holding a song's chord work (corrections, fingering picks, analysis options). */
+const CHORD_WORK_FILES = [
+  "chord_edits.json", "chord_edits.fingerstyle.json",
+  "chord_fingerings.json", "chord_fingerings.fingerstyle.json",
+  "chord_settings.json",
+];
+
+/**
+ * Start a song's chords over: move its chord work into
+ * backup/chords-<date>/ in the song folder (nothing is deleted), so the next
+ * analysis starts clean. Returns how many files were moved.
+ */
+export async function backUpAndClearChordWork(songFolder: string): Promise<number> {
+  const { mkdir, rename } = await import("@tauri-apps/plugin-fs");
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const backupDir = `${songFolder}/backup/chords-${stamp}`;
+  let moved = 0;
+  for (const name of CHORD_WORK_FILES) {
+    const path = `${songFolder}/${name}`;
+    if (!(await exists(path))) continue;
+    if (moved === 0) await mkdir(backupDir, { recursive: true });
+    await rename(path, `${backupDir}/${name}`);
+    moved++;
+  }
+  return moved;
 }

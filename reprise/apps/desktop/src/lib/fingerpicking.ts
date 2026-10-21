@@ -99,7 +99,7 @@ export function buildPicking(
   let ci = 0;
 
   for (const bar of bars) {
-    if (bar.pickup || bar.beats !== meter) continue;
+    if (bar.pickup || bar.free || bar.beats !== meter) continue;
     let patternStart = 0;   // slot where the current chord's pattern began in this bar
     let lastChord = -1;
     for (let k = 0; k < bar.beats; k++) {

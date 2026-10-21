@@ -4,7 +4,8 @@ import { Sidebar } from "../components/sidebar";
 import { useSongStore } from "../stores/song-store";
 import type { PitchStatus, AlignStatus, ChordStatus } from "../types/song";
 import { useTaskQueueStore } from "../stores/task-queue-store";
-import { readChordSettings, saveChordSettings } from "../lib/chord-analysis";
+import { backUpAndClearChordWork, readChordSettings, saveChordSettings } from "../lib/chord-analysis";
+import { ConfirmDialog } from "../components/confirm-dialog";
 
 export function SongSetupPage() {
   const { id } = useParams<{ id: string }>();
@@ -21,6 +22,7 @@ export function SongSetupPage() {
   // Per-song chord analysis option: analyse on separated drums / bass / other.
   const songFolder = song?.audio_folder;
   const [separateDrums, setSeparateDrums] = useState(false);
+  const [confirmStartOver, setConfirmStartOver] = useState(false);
   useEffect(() => {
     if (!songFolder) return;
     let cancelled = false;
@@ -423,6 +425,35 @@ export function SongSetupPage() {
                   </span>
                   <div className="flex-1 h-px bg-[var(--border-subtle)]" />
                 </div>
+
+                {(chordDone || chordError) && (
+                  <div className="flex items-center justify-between gap-3 mb-3 px-3 py-2 rounded-[8px] bg-[var(--bg)] border border-[var(--border-subtle)]">
+                    <span className="text-[11.5px] text-[var(--text-muted)] leading-snug">
+                      Start over: back up this song's chord corrections and fingering picks, then analyse again from scratch.
+                    </span>
+                    <button
+                      onClick={() => setConfirmStartOver(true)}
+                      disabled={chordProcessing || chordQueued}
+                      className="flex-shrink-0 px-3 py-[5px] rounded-[6px] border-[1.5px] border-[var(--border)] bg-transparent text-[12px] font-medium text-[var(--text-secondary)] hover:border-[#888] hover:text-[var(--text-primary)] transition-all disabled:opacity-50 cursor-pointer"
+                    >
+                      Start over
+                    </button>
+                  </div>
+                )}
+                <ConfirmDialog
+                  open={confirmStartOver}
+                  title="Start this song's chords over?"
+                  message="Your chord corrections, fingering picks and analysis options for this song are moved to a backup folder inside the song folder (nothing is deleted), and the chords are analysed again from scratch."
+                  confirmLabel="Start over"
+                  onCancel={() => setConfirmStartOver(false)}
+                  onConfirm={async () => {
+                    setConfirmStartOver(false);
+                    if (!song.audio_folder) return;
+                    await backUpAndClearChordWork(song.audio_folder);
+                    setSeparateDrums(false);
+                    enqueue(song.id, song.title, "chords");
+                  }}
+                />
 
                 <label className="flex items-start gap-2.5 mb-3 cursor-pointer select-none">
                   <input

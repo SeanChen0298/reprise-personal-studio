@@ -30,7 +30,7 @@ import sys
 from collections import Counter
 from datetime import datetime, timezone
 
-OUTPUT_VERSION = 12
+OUTPUT_VERSION = 13
 ALTERNATIVES_PER_CHORD = 4
 
 SR = 22050
@@ -71,6 +71,11 @@ PITCH_NAMES_FLAT = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", 
 #                   attack within this many seconds, smoothed over this many
 #                   beats (0 = off). Keeps the grid on the music when the
 #                   tracker's phase drifts between sections.
+#   beat_tracker    "beat_this" (trained beat + downbeat model, MIT; tracks each
+#                   beat so tempo can drift, gives real bar lines and per-bar
+#                   beat counts, leaves gaps where there is no steady pulse) or
+#                   "librosa" (the older single-tempo tracker; also the fallback
+#                   when beat_this isn't installed).
 #   tempo_hint      force the beat grid to this BPM. Set per song (from the
 #                   app's Half / Double tempo buttons) in chord_settings.json
 #                   next to chords.json, because the audio alone can't tell a
@@ -89,6 +94,7 @@ TUNING = {
     "min_chord_beats": 1,
     "tempo_hint": None,
     "use_stems": False,
+    "beat_tracker": "beat_this",
     "beat_align_window": 0.07,
     "beat_align_smooth": 9,
     "temperature": 0.06,
@@ -620,6 +626,135 @@ def suggest_capo(chords):
 
 
 # ---------------------------------------------------------------------------
+# Beats and bars with beat_this
+# ---------------------------------------------------------------------------
+
+def track_with_beat_this(y, sr):
+    """Beats and downbeats (seconds) from the beat_this model, or None if unavailable."""
+    import numpy as np
+    try:
+        from beat_this.inference import Audio2Beats
+    except ImportError:
+        return None
+    try:
+        a2b = Audio2Beats(checkpoint_path="final0", device="cpu", dbn=False)
+        beats, downbeats = a2b(y, sr)
+    except Exception as err:  # model missing, etc. — fall back to librosa
+        print(f"[chord_analyze] beat_this failed, using librosa: {type(err).__name__}: {err}", file=sys.stderr)
+        return None
+    beats, downbeats = np.asarray(beats, dtype=float), np.asarray(downbeats, dtype=float)
+    if len(beats) < 8:
+        return None
+    return beats, downbeats
+
+
+def apply_tempo_hint(beats, hint):
+    """Halve or double the beat grid when the player said the tempo is half / double."""
+    import numpy as np
+    if not hint or len(beats) < 4:
+        return beats
+    bpm = 60.0 / float(np.median(np.diff(beats)))
+    ratio = float(hint) / bpm
+    if 1.8 < ratio < 2.2:                     # twice as fast: add a beat between each pair
+        mids = (beats[:-1] + beats[1:]) / 2
+        return np.sort(np.concatenate([beats, mids]))
+    if 0.45 < ratio < 0.55:                   # half as fast: keep every other beat
+        return beats[::2]
+    return beats
+
+
+def fill_free_time(beats, duration_s):
+    """Fill stretches without a steady pulse (intro, outro, pauses) with evenly
+    spaced placeholder beats so chords can still be read there, and return
+    those stretches so the lead sheet can show them as free time."""
+    import numpy as np
+    step = float(np.median(np.diff(beats)))
+    out, free = [], []
+
+    def fill(a, b):
+        n = int(round((b - a) / step))
+        return [a + k * (b - a) / n for k in range(1, n)] if n > 1 else []
+
+    if beats[0] > 1.5 * step:                 # before the first beat
+        pad = list(np.arange(beats[0] - step, 0, -step))[::-1]
+        if pad:
+            out += pad
+            free.append((0.0, float(beats[0])))
+    for i, b in enumerate(beats):
+        out.append(float(b))
+        if i + 1 < len(beats) and beats[i + 1] - b > 1.8 * step:
+            out += fill(float(b), float(beats[i + 1]))
+            free.append((float(b), float(beats[i + 1])))
+    if duration_s - beats[-1] > 1.5 * step:   # after the last beat
+        tail = list(np.arange(beats[-1] + step, duration_s - 0.5 * step, step))
+        if tail:
+            out += tail
+            free.append((float(beats[-1]), float(duration_s)))
+    return np.array(out), free
+
+
+def bars_from_downbeats(beat_times, downbeats, free, duration_s):
+    """Bars from the model's bar lines. Two short neighbouring bars that add up
+    to the song's usual bar length (e.g. 2 + 2 in a 4/4 song) are one bar with
+    a stray bar line. Free-time stretches get placeholder bars of the usual length."""
+    import numpy as np
+    from collections import Counter
+
+    def nearest_beat(t):
+        return int(np.argmin(np.abs(beat_times - t)))
+
+    starts = sorted({nearest_beat(d) for d in downbeats})
+    counts = [b - a for a, b in zip(starts[:-1], starts[1:])]
+    meter = Counter(counts).most_common(1)[0][0] if counts else 4
+    meter = meter if meter in (2, 3, 4, 5, 6, 7) else 4
+
+    # Merge stray bar lines: 2 + 2 -> 4 (when 4 is the usual bar length).
+    cleaned = [starts[0]] if starts else []
+    i = 1
+    while i < len(starts):
+        prev = cleaned[-1]
+        this_len = starts[i] - prev
+        next_len = (starts[i + 1] - starts[i]) if i + 1 < len(starts) else None
+        if this_len < meter and next_len is not None and this_len + next_len == meter:
+            i += 1                              # drop the stray bar line at starts[i]
+            continue
+        cleaned.append(starts[i])
+        i += 1
+
+    def in_free(t):
+        return any(a - 0.05 <= t < b - 0.05 for a, b in free)
+
+    # Placeholder bar lines inside free time (every `meter` beats).
+    lines = set(cleaned)
+    for a, b in free:
+        first = int(np.searchsorted(beat_times, a))
+        last = int(np.searchsorted(beat_times, b))
+        for k in range(first, last, meter):
+            lines.add(k)
+    lines = sorted(lines)
+
+    bars = []
+    if lines and lines[0] > 0:
+        lines = [0] + lines
+        pickup_first = True
+    else:
+        pickup_first = False
+    for bi, b in enumerate(lines):
+        nxt = lines[bi + 1] if bi + 1 < len(lines) else len(beat_times)
+        end_s = beat_times[nxt] if nxt < len(beat_times) else duration_s
+        bars.append({
+            "index": bi,
+            "start_ms": to_ms(beat_times[b]),
+            "end_ms": to_ms(end_s),
+            "first_beat": int(b),
+            "beats": int(nxt - b),
+            "pickup": bool(pickup_first and bi == 0),
+            "free": bool(in_free(beat_times[b])),
+        })
+    return bars, meter
+
+
+# ---------------------------------------------------------------------------
 # Beat alignment
 # ---------------------------------------------------------------------------
 
@@ -709,7 +844,7 @@ def ensure_stems(mix_path, instrumental_path):
 # Main analysis
 # ---------------------------------------------------------------------------
 
-def analyze(audio_path: str, stems=None) -> dict:
+def analyze(audio_path: str, stems=None, mix_path=None) -> dict:
     """Analyse the instrumental. With `stems` (drums / bass / other paths),
     each job uses the part that suits it: beats from the drums, chords from
     the harmonic instruments ("other"), the bass note from the bass, and the
@@ -747,15 +882,31 @@ def analyze(audio_path: str, stems=None) -> dict:
     # Beats
     onset_env = librosa.onset.onset_strength(y=y_beat, sr=sr, hop_length=HOP)
     hint = TUNING.get("tempo_hint")
-    tempo, beat_frames = librosa.beat.beat_track(
-        onset_envelope=onset_env, sr=sr, hop_length=HOP, trim=False,
-        **({"bpm": float(hint)} if hint else {}),
-    )
-    tempo = float(np.atleast_1d(tempo)[0])
-    if len(beat_frames) < 8:
-        raise ValueError("Could not find a steady beat in this song")
-    beat_times = librosa.frames_to_time(beat_frames, sr=sr, hop_length=HOP)
-    beat_times = align_beats_to_onsets(beat_times, onset_env, sr)
+    tracked = None
+    if TUNING["beat_tracker"] == "beat_this":
+        y_for_beats = y
+        if mix_path and os.path.isfile(mix_path):
+            y_for_beats, _ = librosa.load(mix_path, sr=SR, mono=True)   # the model is trained on full mixes
+        tracked = track_with_beat_this(y_for_beats, sr)
+
+    free_ranges = []
+    downbeats = None
+    if tracked is not None:
+        real_beats, downbeats = tracked
+        real_beats = apply_tempo_hint(real_beats, hint)
+        tempo = 60.0 / float(np.median(np.diff(real_beats)))
+        beat_times, free_ranges = fill_free_time(real_beats, duration_s)
+        sources["beats"] = "beat_this"
+    else:
+        tempo, beat_frames = librosa.beat.beat_track(
+            onset_envelope=onset_env, sr=sr, hop_length=HOP, trim=False,
+            **({"bpm": float(hint)} if hint else {}),
+        )
+        tempo = float(np.atleast_1d(tempo)[0])
+        if len(beat_frames) < 8:
+            raise ValueError("Could not find a steady beat in this song")
+        beat_times = librosa.frames_to_time(beat_frames, sr=sr, hop_length=HOP)
+        beat_times = align_beats_to_onsets(beat_times, onset_env, sr)
     beat_frames = librosa.time_to_frames(beat_times, sr=sr, hop_length=HOP)
 
     # Chroma, one vector per beat
@@ -780,10 +931,14 @@ def analyze(audio_path: str, stems=None) -> dict:
     path, chord_ctx = detect_chords(beat_chroma, beat_bass, beat_times, duration_s, names)
 
     onset_at_beats = onset_env[np.clip(beat_frames, 0, len(onset_env) - 1)]
-    meter, phase = detect_meter(path, onset_at_beats)
+    if downbeats is not None:
+        bars, meter = bars_from_downbeats(beat_times, downbeats, free_ranges, duration_s)
+        phase = 0
+    else:
+        meter, phase = detect_meter(path, onset_at_beats)
+        bars = build_bars(beat_times, meter, phase, duration_s)
     path = regularize_path(path, chord_ctx["scores"], meter, phase)
     chords = build_segments(path, chord_ctx)
-    bars = build_bars(beat_times, meter, phase, duration_s)
     strumming = detect_strumming(y_strum, sr, beat_times, bars, meter, tempo)
     capo = suggest_capo(chords)
 
@@ -798,6 +953,7 @@ def analyze(audio_path: str, stems=None) -> dict:
         "strumming": strumming,
         "capo": capo,
         "sources": sources,
+        "free_ranges_ms": [[to_ms(a), to_ms(b)] for a, b in free_ranges],
     }
 
 
@@ -859,7 +1015,7 @@ def main() -> int:
         if not os.path.isfile(args.audio_path):
             raise FileNotFoundError(f"Audio file not found: {args.audio_path}")
         stems = ensure_stems(args.mix_path, args.audio_path) if TUNING["use_stems"] else None
-        result = analyze(args.audio_path, stems)
+        result = analyze(args.audio_path, stems, args.mix_path)
         add_fingerstyle(result, args.pitch_path, args.output_path, args.title or "Reprise arrangement")
         write_output(args.output_path, {**base, "status": "ok", **result})
         fs = result["fingerstyle"]

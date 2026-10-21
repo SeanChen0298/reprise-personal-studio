@@ -890,7 +890,7 @@ function PickingView({ analysis, picking, pattern, onPattern, playhead, isPlayin
     return map;
   }, [picking]);
 
-  const pickedBars = bars.filter((b) => !b.pickup && b.beats === meter);
+  const pickedBars = bars.filter((b) => !b.pickup && !b.free && b.beats === meter);
 
   return (
     <div ref={containerRef} className="flex flex-col gap-3">

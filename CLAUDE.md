@@ -184,6 +184,19 @@ python -m torchcrepe --audio_files vocals.wav --output_files pitch.csv \
 
 ---
 
+## beat_this (Beats, Bar Lines, Time Signature)
+
+Chord analysis (`src-tauri/sidecars/chord_analyze.py`) gets beats and downbeats from the
+**beat_this** model (MIT, CPJKU) when installed; it falls back to librosa's tracker otherwise.
+`pip install beat-this` (no other changes to the env). The `final0` checkpoint (~81 MB) is cached
+at `~/.cache/torch/hub/checkpoints/beat_this-final0.ckpt`. Note: the official download host
+(cloud.cp.jku.at) served an expired TLS certificate in Oct 2026 — the checkpoint was fetched
+from the official URL with certificate checking off and loads in `weights_only` mode.
+
+Bars come from the model's downbeats (per-bar beat counts, stray 2+2 bar lines merged);
+stretches with no steady pulse (intro/outro) become `free` placeholder bars that the guide
+guitar and fingerpicking skip.
+
 ## Furigana
 
 Auto-generated via `kuroshiro` + `kuromoji` analyzer. Output is `<ruby>` HTML stored in `furigana_html` / `custom_furigana_html` on Line rows. Never manually edit furigana HTML — regenerate via `generateFurigana()` in `packages/shared/src/lib/furigana.ts`. The kuromoji dictionary (~17 MB) is bundled at `apps/desktop/public/kuromoji/dict` and served from the app origin, so it works fully offline.
