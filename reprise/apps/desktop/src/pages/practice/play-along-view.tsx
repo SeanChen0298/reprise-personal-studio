@@ -17,7 +17,7 @@ import {
 import { useChordData, type ChordLength } from "../../hooks/use-chord-data";
 import { useFingerings } from "../../hooks/use-fingerings";
 import { placeChart } from "../../lib/chord-chart";
-import { saveChordSettings } from "../../lib/chord-analysis";
+import { DEFAULT_STRUM_PATTERN, readChordSettings, saveChordSettings, STRUM_PRESETS } from "../../lib/chord-analysis";
 import { useGuitarGuide } from "../../hooks/use-guitar-guide";
 import { useTaskQueueStore } from "../../stores/task-queue-store";
 import { ChordDiagram } from "../../components/chord-diagram";
@@ -191,6 +191,80 @@ function StrumPattern({ pattern, activeSlot, showCounts = true }: {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * The strum pattern in the header, as a button: opens a small editor with
+ * common patterns and the 8 eighth notes to click (down → up → rest).
+ */
+function StrumPatternButton({ pattern, activeSlot, onChange }: {
+  pattern: string;
+  activeSlot?: number;
+  onChange: (pattern: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+  const cycle = (i: number) => {
+    const next = { D: "U", U: "-", "-": "D" }[pattern[i] as "D" | "U" | "-"] ?? "D";
+    onChange(pattern.slice(0, i) + next + pattern.slice(i + 1));
+  };
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title="Change the strum pattern"
+        className="flex items-center bg-transparent border-none p-1 -m-1 rounded-[6px] cursor-pointer hover:bg-[var(--bg)]"
+      >
+        <StrumPattern pattern={pattern} activeSlot={activeSlot} />
+      </button>
+      {open && (
+        <div className="absolute left-0 top-[46px] z-50 w-[280px] p-3 rounded-[8px] border border-[var(--border)] bg-[var(--surface)] shadow-[0_8px_28px_rgba(0,0,0,0.14)]">
+          <div className="text-[11px] text-[var(--text-muted)] mb-2 leading-snug">
+            Click a beat to switch it: down → up → rest. The guide guitar strums this in every bar.
+          </div>
+          <div className="flex mb-3">
+            {pattern.split("").map((ch, i) => (
+              <button
+                key={i}
+                onClick={() => cycle(i)}
+                className={`flex flex-col items-center w-[30px] bg-transparent border-none p-0 cursor-pointer ${i % 2 === 0 && i > 0 ? "ml-[4px]" : ""}`}
+              >
+                <span className={`w-[26px] h-[28px] rounded-[5px] flex items-center justify-center ${
+                  ch === "-"
+                    ? "border border-dashed border-[var(--border)] text-[var(--border)] hover:border-[var(--text-muted)]"
+                    : "bg-[var(--theme-light)] text-[var(--theme-text)] hover:opacity-80"
+                }`}>
+                  {ch === "-" ? <span className="w-[4px] h-[4px] rounded-full bg-current" /> : <StrokeArrow down={ch === "D"} />}
+                </span>
+                <span className="text-[9.5px] leading-[12px] mt-[2px] text-[var(--text-muted)]">{i % 2 === 0 ? i / 2 + 1 : "&"}</span>
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-col">
+            {STRUM_PRESETS.map((p) => (
+              <button
+                key={p.pattern}
+                onClick={() => onChange(p.pattern)}
+                className={`flex items-center justify-between gap-2 px-2 py-1.5 rounded-[6px] text-[12px] border-none cursor-pointer text-left ${
+                  p.pattern === pattern ? "bg-[var(--theme-light)] text-[var(--theme-text)]" : "bg-transparent text-[var(--text-primary)] hover:bg-[var(--bg)]"
+                }`}
+              >
+                <span>{p.name}</span>
+                <span className="font-mono text-[11px] text-[var(--text-muted)] tracking-[0.12em]">{p.pattern.replace(/-/g, "·")}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1206,6 +1280,22 @@ export function PlayAlongView({
   const [guidePrefs, setGuidePrefs] = useState<GuidePrefs>(readGuidePrefs);
   const [guideSettingsAnchor, setGuideSettingsAnchor] = useState<DOMRect | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  // The strum pattern is the user's choice per song (chord_settings.json).
+  const [strumPattern, setStrumPattern] = useState(DEFAULT_STRUM_PATTERN);
+  useEffect(() => {
+    let cancelled = false;
+    setStrumPattern(DEFAULT_STRUM_PATTERN);
+    if (song.audio_folder) {
+      void readChordSettings(song.audio_folder).then((s) => {
+        if (!cancelled && s.strum_pattern && /^[DU-]{8}$/.test(s.strum_pattern)) setStrumPattern(s.strum_pattern);
+      });
+    }
+    return () => { cancelled = true; };
+  }, [song.id, song.audio_folder]);
+  const changeStrumPattern = (p: string) => {
+    setStrumPattern(p);
+    if (song.chord_data_path) void saveChordSettings(song.chord_data_path, { strum_pattern: p });
+  };
   const [popover, setPopover] = useState<{
     label: string; anchor: DOMRect; index?: number; scope?: { start: number; end: number };
   } | null>(null);
@@ -1400,6 +1490,7 @@ export function PlayAlongView({
     offsetMs: guidePrefs.offsetMs,
     chordNotes,
     picking,
+    strumPattern,
   });
 
   const changeGuidePrefs = (p: GuidePrefs) => {
@@ -1452,10 +1543,6 @@ export function PlayAlongView({
   for (let i = playhead.chord + 1; i < chords.length; i++) {
     if (chords[i].label !== "N" && chords[i].label !== current?.label) { next = chords[i]; nextIndex = i; break; }
   }
-  const sections = analysis.strumming?.sections ?? [];
-  const currentSection =
-    sections.find((s) => playhead.bar >= s.start_bar && playhead.bar <= s.end_bar) ?? sections[0];
-  const pattern = currentSection?.pattern ?? analysis.strumming?.main_pattern;
   const tempoCorrected = analysis.tuning?.tempo_hint != null;
   const setTempoHint = async (hint: number | null) => {
     if (!song.chord_data_path) return;
@@ -1542,18 +1629,12 @@ export function PlayAlongView({
             )}
           </div>
 
-          {mode !== "tab" && pattern && (
-            <div
-              className="flex items-center gap-2"
-              title={currentSection?.source === "suggested"
-                ? "Suggested pattern: the rhythm here was too unclear to read"
-                : "Strum pattern read from the instrumental's rhythm"}
-            >
-              <StrumPattern pattern={pattern} activeSlot={currentSection && playhead.bar >= 0 ? playhead.slot : undefined} />
-              {currentSection?.source === "suggested" && (
-                <span className="text-[10.5px] text-[var(--text-muted)] self-start mt-[3px]">suggested</span>
-              )}
-            </div>
+          {mode !== "tab" && (
+            <StrumPatternButton
+              pattern={strumPattern}
+              activeSlot={playhead.bar >= 0 && playhead.slot >= 0 ? playhead.slot % strumPattern.length : undefined}
+              onChange={changeStrumPattern}
+            />
           )}
 
           <div className="flex items-center gap-2 ml-auto">

@@ -5,8 +5,8 @@ import { damp, pluck, setSynthVolume, strum, synthNow } from "../lib/guitar-synt
 /**
  * Play a guide guitar part in time with the song.
  *
- * - "strum": the detected strum pattern on every eighth note, using the
- *   chord sounding at that moment.
+ * - "strum": the song's strum pattern (chosen by the user) in every bar,
+ *   using the chord sounding at that moment.
  * - "fingerstyle": the fingerpicked accompaniment (see fingerpicking.ts).
  *
  * Timing follows the <audio> element, so it stays in sync at slower
@@ -31,6 +31,7 @@ function buildEvents(
   analysis: ChordAnalysis,
   mode: "strum" | "fingerstyle",
   picking: { t: number; notes: { midi: number; string: number }[] }[],
+  pattern: string,
 ): GuideEvent[] {
   const events: GuideEvent[] = [];
 
@@ -44,19 +45,16 @@ function buildEvents(
   const bars = analysis.bars ?? [];
   const beats = analysis.beats_ms ?? [];
   const chords = analysis.chords ?? [];
-  const sections = analysis.strumming?.sections ?? [];
-  const fallback = analysis.strumming?.main_pattern ?? "D-DU-UDU";
   let ci = 0;
   for (const bar of bars) {
     if (bar.pickup || bar.free) continue;   // no steady pulse to strum along to
-    const pattern = sections.find((s) => bar.index >= s.start_bar && bar.index <= s.end_bar)?.pattern ?? fallback;
     for (let k = 0; k < bar.beats; k++) {
       const b = bar.first_beat + k;
       const t0 = beats[b];
       if (t0 == null) continue;
       const t1 = beats[b + 1] ?? bar.end_ms;
       for (let half = 0; half < 2; half++) {
-        const stroke = pattern[k * 2 + half];
+        const stroke = pattern[(k * 2 + half) % pattern.length];
         if (stroke !== "D" && stroke !== "U") continue;
         const t = half === 0 ? t0 : (t0 + t1) / 2;
         while (ci + 1 < chords.length && chords[ci + 1].start_ms <= t) ci++;
@@ -93,11 +91,13 @@ export function useGuitarGuide(options: {
   chordNotes: (label: string, atMs?: number) => number[];
   /** The fingerpicked part, used in "fingerstyle" mode. */
   picking: { t: number; notes: { midi: number; string: number }[] }[];
+  /** Strum pattern for "strum" mode: eighth notes, "D" / "U" / "-". */
+  strumPattern: string;
 }) {
-  const { analysis, audioRef, enabled, mode, volume, offsetMs, chordNotes, picking } = options;
+  const { analysis, audioRef, enabled, mode, volume, offsetMs, chordNotes, picking, strumPattern } = options;
   const events = useMemo(
-    () => (analysis ? buildEvents(analysis, mode, picking) : []),
-    [analysis, mode, picking],
+    () => (analysis ? buildEvents(analysis, mode, picking, strumPattern) : []),
+    [analysis, mode, picking, strumPattern],
   );
 
   useEffect(() => {

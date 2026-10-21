@@ -197,6 +197,19 @@ Bars come from the model's downbeats (per-bar beat counts, stray 2+2 bar lines m
 stretches with no steady pulse (intro/outro) become `free` placeholder bars that the guide
 guitar and fingerpicking skip.
 
+## BTC (Chord Recognition)
+
+Chords come from **BTC** (Bi-directional Transformer for Chord recognition, ISMIR 2019; 170-chord
+vocabulary incl. 7ths, maj7, m7b5, sus, 6ths). Code (MIT) is cloned to
+`~/.cache/reprise-models/BTC-ISMIR19` (override with `REPRISE_BTC_DIR`); weights are
+`test/btc_model_large_voca.pt` in that repo (**non-commercial licence** — fine for personal use).
+Shims in `chord_analyze.py`: `np.float = float`, YAML via `safe_load`.
+
+Per-beat probabilities are averaged over the full mix and the instrumental, then smoothed
+(Viterbi, `btc_stickiness` 0.85). If BTC is missing it falls back to the chroma template detector
+(`TUNING["chord_model"] = "templates"`). The strum pattern the guide plays is the user's choice per
+song (`strum_pattern` in `chord_settings.json`), not detected.
+
 ## Furigana
 
 Auto-generated via `kuroshiro` + `kuromoji` analyzer. Output is `<ruby>` HTML stored in `furigana_html` / `custom_furigana_html` on Line rows. Never manually edit furigana HTML — regenerate via `generateFurigana()` in `packages/shared/src/lib/furigana.ts`. The kuromoji dictionary (~17 MB) is bundled at `apps/desktop/public/kuromoji/dict` and served from the app origin, so it works fully offline.

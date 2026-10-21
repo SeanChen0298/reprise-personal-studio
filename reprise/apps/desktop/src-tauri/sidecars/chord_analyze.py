@@ -30,7 +30,7 @@ import sys
 from collections import Counter
 from datetime import datetime, timezone
 
-OUTPUT_VERSION = 13
+OUTPUT_VERSION = 14
 ALTERNATIVES_PER_CHORD = 4
 
 SR = 22050
@@ -76,6 +76,12 @@ PITCH_NAMES_FLAT = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", 
 #                   beat counts, leaves gaps where there is no steady pulse) or
 #                   "librosa" (the older single-tempo tracker; also the fallback
 #                   when beat_this isn't installed).
+#   chord_model     "btc" (trained Bi-directional Transformer for Chord recognition,
+#                   ISMIR 2019, 170-chord vocabulary; code MIT, weights for
+#                   non-commercial use) or "templates" (the older chroma
+#                   template matcher; also the fallback when BTC isn't present).
+#   btc_stickiness  how strongly BTC's per-beat choices prefer staying on the
+#                   same chord (removes one-beat flicker).
 #   tempo_hint      force the beat grid to this BPM. Set per song (from the
 #                   app's Half / Double tempo buttons) in chord_settings.json
 #                   next to chords.json, because the audio alone can't tell a
@@ -95,6 +101,8 @@ TUNING = {
     "tempo_hint": None,
     "use_stems": False,
     "beat_tracker": "beat_this",
+    "chord_model": "btc",
+    "btc_stickiness": 0.85,
     "beat_align_window": 0.07,
     "beat_align_smooth": 9,
     "temperature": 0.06,
@@ -626,6 +634,133 @@ def suggest_capo(chords):
 
 
 # ---------------------------------------------------------------------------
+# Chords with BTC (Bi-directional Transformer for Chord recognition)
+# ---------------------------------------------------------------------------
+
+BTC_DIR = os.environ.get("REPRISE_BTC_DIR", os.path.join(os.path.expanduser("~"), ".cache", "reprise-models", "BTC-ISMIR19"))
+BTC_ROOTS_PC = list(range(12))  # C … B, BTC's root order
+BTC_QUALITY = {   # BTC quality -> (our suffix, our quality name)
+    "min": ("m", "m"), "maj": ("", "maj"), "dim": ("dim", "dim"), "aug": ("aug", "aug"),
+    "min6": ("m6", "m6"), "maj6": ("6", "6"), "min7": ("m7", "m7"), "minmaj7": ("m", "m"),
+    "maj7": ("maj7", "maj7"), "7": ("7", "7"), "dim7": ("dim7", "dim7"), "hdim7": ("m7b5", "m7b5"),
+    "sus2": ("sus2", "sus2"), "sus4": ("sus4", "sus4"),
+}
+BTC_QUALITIES = ["min", "maj", "dim", "aug", "min6", "maj6", "min7", "minmaj7", "maj7", "7", "dim7", "hdim7", "sus2", "sus4"]
+
+
+def btc_beat_probabilities(audio_paths, beat_times, duration_s):
+    """Average BTC chord probabilities per beat over one or more audio files
+    (the full mix and the instrumental complement each other). Returns a
+    (170, n_beats) array, or None when BTC isn't available."""
+    import numpy as np
+    if not os.path.isdir(BTC_DIR):
+        return None
+    try:
+        import librosa
+        import torch
+        import yaml
+        if not hasattr(np, "float"):
+            np.float = float  # BTC (2019) uses the alias numpy 2 removed
+        if BTC_DIR not in sys.path:
+            sys.path.insert(0, BTC_DIR)
+        from btc_model import BTC_model
+        from utils.hparams import HParams
+
+        with open(os.path.join(BTC_DIR, "run_config.yaml"), encoding="utf-8") as f:
+            config = HParams(**yaml.safe_load(f))
+        config.feature["large_voca"] = True
+        config.model["num_chords"] = 170
+        ck = torch.load(os.path.join(BTC_DIR, "test", "btc_model_large_voca.pt"), map_location="cpu", weights_only=False)
+        model = BTC_model(config=config.model)
+        model.load_state_dict(ck["model"])
+        model.eval()
+    except Exception as err:
+        print(f"[chord_analyze] BTC unavailable, using templates: {type(err).__name__}: {err}", file=sys.stderr)
+        return None
+
+    sr = config.mp3["song_hz"]
+    n = config.model["timestep"]
+    frame_s = config.feature["hop_length"] / sr
+    bounds = list(beat_times) + [duration_s]
+    total = None
+    used = 0
+    for path in audio_paths:
+        if not path or not os.path.isfile(path):
+            continue
+        y, _ = librosa.load(path, sr=sr, mono=True)
+        feat = np.log(np.abs(librosa.cqt(y, sr=sr, n_bins=config.feature["n_bins"],
+                                         bins_per_octave=config.feature["bins_per_octave"],
+                                         hop_length=config.feature["hop_length"])) + 1e-6).T
+        feat = (feat - ck["mean"]) / ck["std"]
+        pad = (n - feat.shape[0] % n) % n
+        feat = np.pad(feat, ((0, pad), (0, 0)))
+        frames = []
+        with torch.no_grad():
+            x = torch.tensor(feat, dtype=torch.float32).unsqueeze(0)
+            for t in range(feat.shape[0] // n):
+                out, _ = model.self_attn_layers(x[:, n * t:n * (t + 1), :])
+                frames.append(torch.softmax(model.output_layer.output_projection(out), -1).squeeze(0).numpy())
+        probs = np.concatenate(frames)[: feat.shape[0] - pad]
+        per_beat = np.zeros((170, len(beat_times)))
+        for k, (a, b) in enumerate(zip(bounds[:-1], bounds[1:])):
+            i0 = int(a / frame_s)
+            i1 = max(int(b / frame_s), i0 + 1)
+            seg = probs[i0:i1] if i0 < len(probs) else probs[-1:]
+            per_beat[:, k] = seg.mean(0)
+        total = per_beat if total is None else total + per_beat
+        used += 1
+    if not used:
+        return None
+    return total / used
+
+
+def btc_chords(P, beat_times, duration_s, names):
+    """Smooth BTC's per-beat probabilities (prefer staying on a chord) and
+    turn them into chord segments in the same shape as the template detector."""
+    import numpy as np
+    import librosa
+
+    P = P + 1e-9
+    P = P / P.sum(0, keepdims=True)
+    path = librosa.sequence.viterbi(P, librosa.sequence.transition_loop(P.shape[0], TUNING["btc_stickiness"]))
+
+    def info(i):
+        if i >= 168:                        # 168 = "X" (no recognisable chord), 169 = "N"
+            return {"label": "N", "root": None, "root_pc": None, "quality": "N"}
+        pc, q = i // 14, BTC_QUALITIES[i % 14]
+        suffix, quality = BTC_QUALITY[q]
+        return {"label": names[pc] + suffix, "root": names[pc], "root_pc": pc, "quality": quality}
+
+    bounds = list(beat_times) + [duration_s]
+    segments = []
+    for k, state in enumerate(path):
+        lab = info(int(state))
+        if segments and segments[-1]["label"] == lab["label"]:
+            seg = segments[-1]
+            seg["end_ms"] = to_ms(bounds[k + 1])
+            seg["beats"] += 1
+            seg["_beats"].append(k)
+        else:
+            segments.append({"start_ms": to_ms(bounds[k]), "end_ms": to_ms(bounds[k + 1]), "beats": 1,
+                             "_beats": [k], **lab})
+    for seg in segments:
+        mean = P[:, seg.pop("_beats")].mean(1)
+        order = np.argsort(-mean)
+        seg["confidence"] = round(float(mean[order[0]]), 3)
+        alts = []
+        best = float(mean[order[0]]) or 1.0
+        for i in order[1:]:
+            lab = info(int(i))
+            if lab["label"] in (seg["label"], "N") or any(a["label"] == lab["label"] for a in alts):
+                continue
+            alts.append({"label": lab["label"], "fit": round(float(mean[i]) / best, 3)})
+            if len(alts) == ALTERNATIVES_PER_CHORD:
+                break
+        seg["alternatives"] = alts
+    return segments, [int(x) for x in path]
+
+
+# ---------------------------------------------------------------------------
 # Beats and bars with beat_this
 # ---------------------------------------------------------------------------
 
@@ -929,6 +1064,9 @@ def analyze(audio_path: str, stems=None, mix_path=None) -> dict:
 
     key, names = detect_key(chroma.mean(axis=1))
     path, chord_ctx = detect_chords(beat_chroma, beat_bass, beat_times, duration_s, names)
+    btc_probs = None
+    if TUNING["chord_model"] == "btc":
+        btc_probs = btc_beat_probabilities([mix_path, audio_path], beat_times, duration_s)
 
     onset_at_beats = onset_env[np.clip(beat_frames, 0, len(onset_env) - 1)]
     if downbeats is not None:
@@ -937,8 +1075,12 @@ def analyze(audio_path: str, stems=None, mix_path=None) -> dict:
     else:
         meter, phase = detect_meter(path, onset_at_beats)
         bars = build_bars(beat_times, meter, phase, duration_s)
-    path = regularize_path(path, chord_ctx["scores"], meter, phase)
-    chords = build_segments(path, chord_ctx)
+    if btc_probs is not None:
+        chords, _ = btc_chords(btc_probs, beat_times, duration_s, names)
+        sources["chords"] = "btc (full mix + instrumental)"
+    else:
+        path = regularize_path(path, chord_ctx["scores"], meter, phase)
+        chords = build_segments(path, chord_ctx)
     strumming = detect_strumming(y_strum, sr, beat_times, bars, meter, tempo)
     capo = suggest_capo(chords)
 

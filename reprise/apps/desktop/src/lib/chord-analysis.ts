@@ -203,7 +203,21 @@ export interface ChordSettings {
   tempo_hint?: number | null;
   /** Analyse on separated drums / bass / other stems (for drum-heavy songs). */
   use_stems?: boolean;
+  /** The strum pattern the guide plays: 8 eighth notes per 4-beat bar, "D" / "U" / "-". */
+  strum_pattern?: string;
 }
+
+/** Common strum patterns (8 eighth notes: 1 & 2 & 3 & 4 &). */
+export const STRUM_PRESETS: { name: string; pattern: string }[] = [
+  { name: "Pop / folk", pattern: "D-DU-UDU" },
+  { name: "Ballad", pattern: "D-D-DUDU" },
+  { name: "Down on each beat", pattern: "D-D-D-D-" },
+  { name: "Every eighth", pattern: "DUDUDUDU" },
+  { name: "Island", pattern: "D-DU-UD-" },
+  { name: "Slow (1 & 3)", pattern: "D---D---" },
+  { name: "Whole bar", pattern: "D-------" },
+];
+export const DEFAULT_STRUM_PATTERN = STRUM_PRESETS[0].pattern;
 
 function settingsPath(chordDataPath: string): string {
   return chordDataPath.replace(/[\/][^\/]*$/, "") + "/chord_settings.json";
