@@ -21,6 +21,8 @@ export interface ChordEdit {
   label: string;      // chord for the span, e.g. "Bb7" or "N"
   detected: string;   // what the analysis said at start_ms, for reference
   edited_at: string;
+  /** "restore" = put the detected chords back on this span (an undoable step itself). */
+  kind?: "set" | "restore";
 }
 
 interface ChordEditsFile {
@@ -47,13 +49,14 @@ export async function readChordEdits(path: string): Promise<ChordEdit[]> {
 }
 
 async function writeChordEdits(path: string, edits: ChordEdit[]): Promise<void> {
-  const file: ChordEditsFile = { version: 2, edits: [...edits].sort((a, b) => a.start_ms - b.start_ms) };
+  // Kept in the order they were made: that order is the undo history.
+  const file: ChordEditsFile = { version: 2, edits: [...edits].sort((a, b) => a.edited_at.localeCompare(b.edited_at)) };
   await writeTextFile(path, JSON.stringify(file, null, 2));
 }
 
 /**
- * Assign `label` to the beats in [start_ms, end_ms). Earlier edits that the
- * new span completely covers are dropped, so the file doesn't grow forever.
+ * Assign `label` to the beats in [start_ms, end_ms). Edits are an
+ * append-only history (later ones win), so Undo can step back one at a time.
  */
 export async function saveChordSpan(
   path: string,
@@ -63,12 +66,15 @@ export async function saveChordSpan(
   detected: string,
 ): Promise<void> {
   const edits = await readChordEdits(path);
-  const kept = edits.filter((e) => {
-    const eEnd = e.end_ms ?? e.start_ms + 1;
-    return !(e.start_ms >= start_ms - TOLERANCE_MS && eEnd <= end_ms + TOLERANCE_MS);
-  });
-  kept.push({ start_ms, end_ms, label: label === "N" ? "N" : canonicalChord(label), detected, edited_at: new Date().toISOString() });
-  await writeChordEdits(path, kept);
+  edits.push({ start_ms, end_ms, label: label === "N" ? "N" : canonicalChord(label), detected, edited_at: new Date().toISOString() });
+  await writeChordEdits(path, edits);
+}
+
+/** Put the detected chords back on [start_ms, end_ms) — recorded as a step, so it can be undone too. */
+export async function restoreDetectedSpan(path: string, start_ms: number, end_ms: number): Promise<void> {
+  const edits = await readChordEdits(path);
+  edits.push({ start_ms, end_ms, label: "", detected: "", kind: "restore", edited_at: new Date().toISOString() });
+  await writeChordEdits(path, edits);
 }
 
 /** Remove every edit touching this chord's span (back to what was detected there). */
@@ -126,8 +132,13 @@ export function applyChordEdits(analysis: ChordAnalysis, edits: ChordEdit[]): Ch
     }
     beats.forEach((t, i) => {
       if (t >= from - TOLERANCE_MS && t < to! - TOLERANCE_MS) {
-        labels[i] = e.label;
-        edited[i] = true;
+        if (e.kind === "restore") {
+          labels[i] = detected[segAt[i]].label;
+          edited[i] = false;
+        } else {
+          labels[i] = e.label;
+          edited[i] = true;
+        }
       }
     });
   }

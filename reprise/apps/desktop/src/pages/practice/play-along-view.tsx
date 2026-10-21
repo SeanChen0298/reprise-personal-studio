@@ -11,7 +11,6 @@ import {
   shapeMidiNotes, soundingLabel, type ChordNotation, type ChordShape,
 } from "../../lib/chord-shapes";
 import { buildPicking, PICK_PATTERNS, type PickEvent, type PickPattern } from "../../lib/fingerpicking";
-import { chordPitchClasses, noteNames, relatedChords } from "../../lib/chord-relations";
 import {
   loadInstrument, pluck, setInstrument, setSynthVolume, strum, synthNow, type GuitarInstrument,
 } from "../../lib/guitar-synth";
@@ -113,7 +112,7 @@ interface PlayAlongActions {
    *  `index` null = drop the choice (back to the song-wide one, or the default). */
   chooseVoicing: (shown: string, index: number | null, atMs?: number) => void;
   /** Play the chord and open its diagram next to `anchor`. `index` = segment, when known (enables editing). */
-  openChord: (label: string, anchor: HTMLElement, index?: number) => void;
+  openChord: (label: string, anchor: HTMLElement, index?: number, scope?: { start: number; end: number }) => void;
 }
 
 const ActionsContext = createContext<PlayAlongActions | null>(null);
@@ -122,15 +121,17 @@ function useActions() {
 }
 
 /** A chord name you can click to hear it and see how to hold it. */
-function ChordName({ label, index, edited, className = "" }: {
+function ChordName({ label, index, scope, edited, className = "" }: {
   label: string;
   /** Index of this chord segment in the song, so it can be corrected. */
   index?: number;
+  /** Limit edits to this time range (e.g. the bar the chord was clicked in). */
+  scope?: { start: number; end: number };
   edited?: boolean;
   className?: string;
 }) {
   const { display, openChord } = useActions();
-  const open = (el: HTMLElement) => openChord(label, el, index);
+  const open = (el: HTMLElement) => openChord(label, el, index, scope);
   return (
     <span
       role="button"
@@ -221,10 +222,10 @@ function splitLabel(label: string): { root: string; suffix: string } {
   return { root: enharmonic[m[1]] ?? m[1], suffix: m[2] ?? "" };
 }
 
-type EditorTab = "suggestions" | "pick" | "timing";
+type EditorTab = "pick" | "timing";
 
 /**
- * Change one chord: pick a close alternative, any chord, or its timing.
+ * Change one chord: pick any chord, or change its timing.
  * Works in the names on screen: with the capo toggle on you pick the shape
  * you play, and the sounding chord is saved.
  */
@@ -265,28 +266,7 @@ function ChordEditor({ segment, beatsInBar, onPreview, onSelect, onSave, onLengt
     try { await action(); } finally { setSaving(false); }
   };
 
-  // Close alternatives: what the analysis nearly picked, then chords that
-  // share most of their notes (e.g. Dmaj7 ⇄ F#m7). Shown in screen names.
-  const soundingCurrent = segment.label;
-  const suggestions = useMemo(() => {
-    const seen = new Set<string>([soundingCurrent]);
-    const list: { label: string; fit?: number; why: string }[] = [];
-    const mine = chordPitchClasses(soundingCurrent);
-    for (const alt of segment.alternatives ?? []) {
-      if (alt.label === "N" || seen.has(alt.label)) continue;
-      seen.add(alt.label);
-      const shared = noteNames(chordPitchClasses(alt.label).filter((pc) => mine.includes(pc)));
-      list.push({ label: alt.label, fit: alt.fit, why: shared.length ? `shares ${shared.join(" ")}` : "heard nearby" });
-    }
-    for (const rel of relatedChords(soundingCurrent, 8)) {
-      if (seen.has(rel.label)) continue;
-      seen.add(rel.label);
-      list.push({ label: rel.label, why: rel.why });
-    }
-    return list.slice(0, 7);
-  }, [segment.alternatives, soundingCurrent]);
-
-  const [tab, setTab] = useState<EditorTab>(suggestions.length && segment.label !== "N" ? "suggestions" : "pick");
+  const [tab, setTab] = useState<EditorTab>("pick");
 
   const tabButton = (value: EditorTab, text: string) => (
     <button
@@ -317,46 +297,11 @@ function ChordEditor({ segment, beatsInBar, onPreview, onSelect, onSave, onLengt
         {capoShown > 0 && <span className="text-[11px] text-[var(--text-muted)]">capo {capoShown} shapes</span>}
       </div>
       <div className="flex gap-4 mb-3 border-b border-[var(--border-subtle)]">
-        {suggestions.length > 0 && segment.label !== "N" && tabButton("suggestions", "Suggestions")}
         {tabButton("pick", "Any chord")}
         {tabButton("timing", "Timing")}
       </div>
 
       <div className="flex-1 min-h-[214px]">
-        {tab === "suggestions" && (
-          <div className="flex flex-col gap-0.5">
-            {suggestions.map((sug) => {
-              const shown = display(sug.label);
-              const parts = splitLabel(shown);
-              const active = !noChord && root === parts.root && suffix === parts.suffix;
-              return (
-                <button
-                  key={sug.label}
-                  onClick={() => pick(parts.root, parts.suffix)}
-                  className={`flex items-center gap-3 px-2.5 py-[5px] rounded-[7px] text-left border-none cursor-pointer transition-colors ${
-                    active ? "bg-[var(--theme-light)]" : "bg-transparent hover:bg-[var(--bg)]"
-                  }`}
-                >
-                  <span className={`w-[64px] text-[13.5px] font-semibold ${active ? "text-[var(--theme-text)]" : "text-[var(--text-primary)]"}`}>
-                    {shown}
-                  </span>
-                  <span className="flex-1 text-[11px] text-[var(--text-muted)] truncate">{sug.why}</span>
-                  {sug.fit != null ? (
-                    <span className="flex items-center gap-1.5" title={`The analysis rated this ${Math.round(sug.fit * 100)}% as good a fit here`}>
-                      <span className="w-[44px] h-[4px] rounded-full bg-[var(--bg)] overflow-hidden">
-                        <span className="block h-full bg-[var(--theme)]" style={{ width: `${Math.round(sug.fit * 100)}%` }} />
-                      </span>
-                      <span className="text-[10px] tabular-nums text-[var(--text-muted)] w-[26px] text-right">{Math.round(sug.fit * 100)}%</span>
-                    </span>
-                  ) : (
-                    <span className="text-[10px] text-[var(--text-muted)] w-[76px] text-right">related</span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        )}
-
         {tab === "pick" && (
           <div className="flex flex-col gap-2.5">
             <div>
@@ -466,10 +411,10 @@ function ChordEditor({ segment, beatsInBar, onPreview, onSelect, onSave, onLengt
               await onReset();
             })}
             disabled={saving}
-            title={`Remove every change made to this chord's beats (detected: ${shownDetected})`}
+            title={`Put back what was detected on these beats (${shownDetected}). You can undo this too.`}
             className="ml-auto text-[11.5px] text-[var(--text-secondary)] bg-transparent border-none cursor-pointer hover:text-[var(--text-primary)] hover:underline"
           >
-            Undo changes here
+            Restore detected chord here
           </button>
         )}
       </div>
@@ -478,10 +423,12 @@ function ChordEditor({ segment, beatsInBar, onPreview, onSelect, onSave, onLengt
 }
 
 function ChordPopover({
-  label, anchor, segment, beatsInBar, capoFret, useCapo, onPlay, onEdit, onLength, onRemove, onReset, onClose,
+  label, anchor, segment, fingeringAt, beatsInBar, capoFret, useCapo, onPlay, onEdit, onLength, onRemove, onReset, onClose,
 }: {
   label: string;
   anchor: DOMRect;
+  /** Start of the whole chord (fingering choices are per chord, even when editing part of it). */
+  fingeringAt?: number;
   /** The specific chord in the song, when opened from one (enables editing). */
   segment?: ChordSegment;
   beatsInBar: number;
@@ -505,7 +452,7 @@ function ChordPopover({
   const soundingShown = shapeLabel === "N" ? "N" : toSounding(shapeLabel);
   // Opened from a chord in the song: fingering choices apply to that spot.
   // Opened from the chord chart: they apply to every chord of that name.
-  const at = segment?.start_ms;
+  const at = fingeringAt ?? segment?.start_ms;
   const { all, chosen, songWide } = voicings(shapeLabel, at);
   const shape = all[chosen];
   const playShape = (v: ChordShape | undefined) => {
@@ -1021,6 +968,7 @@ function BarsView({ analysis, playhead, isPlaying }: {
                           key={ci}
                           label={chords[ci].label}
                           index={ci}
+                          scope={{ start: bar.start_ms, end: bar.end_ms }}
                           edited={chords[ci].edited}
                           className={`text-[15px] font-semibold leading-tight ${
                             ci === playhead.chord && isCurrent ? "text-[var(--theme-text)]" : "text-[var(--text-primary)]"
@@ -1171,6 +1119,7 @@ function PickingView({ analysis, picking, pattern, onPattern, playhead, isPlayin
                     key={ci}
                     label={chords[ci].label}
                     index={ci}
+                    scope={{ start: bar.start_ms, end: bar.end_ms }}
                     edited={chords[ci].edited}
                     className="text-[12.5px] font-semibold text-[var(--text-secondary)]"
                   />
@@ -1441,7 +1390,9 @@ export function PlayAlongView({
   const [guideOn, setGuideOn] = useState(false);
   const [guidePrefs, setGuidePrefs] = useState<GuidePrefs>(readGuidePrefs);
   const [guideSettingsAnchor, setGuideSettingsAnchor] = useState<DOMRect | null>(null);
-  const [popover, setPopover] = useState<{ label: string; anchor: DOMRect; index?: number } | null>(null);
+  const [popover, setPopover] = useState<{
+    label: string; anchor: DOMRect; index?: number; scope?: { start: number; end: number };
+  } | null>(null);
   const [playhead, setPlayhead] = useState<Playhead>({ bar: -1, chord: -1, slot: -1, line: -1 });
   const [clock, setClock] = useState({ now: 0, total: 0 });
 
@@ -1579,9 +1530,9 @@ export function PlayAlongView({
       // The first fingering is the default: song-wide, no need to store it.
       fingerings.choose(shown, atMs == null && index === 0 ? null : voicingKey(v), atMs);
     },
-    openChord: (label, anchor, index) => {
+    openChord: (label, anchor, index, scope) => {
       if (label !== "N") playChord(label);
-      setPopover({ label, anchor: anchor.getBoundingClientRect(), index });
+      setPopover({ label, anchor: anchor.getBoundingClientRect(), index, scope });
     },
   }), [onSeek, display, toSounding, capoShown, notation, voicings, fingerings, playChord]);
 
@@ -1675,6 +1626,20 @@ export function PlayAlongView({
     enqueue(song.id, song.title, "chords");
   };
   const guideDisabled = false;
+
+  // The chord the popup edits. Clicked inside a bar (Bars / Fingerpicking),
+  // only the part of the chord within that bar is edited, so a chord that
+  // carries over from the previous bar isn't changed there too.
+  const popoverSegment: ChordSegment | undefined = (() => {
+    if (!popover || popover.index == null || popover.index < 0) return undefined;
+    const whole = chords[popover.index];
+    if (!whole || !popover.scope) return whole;
+    const start = Math.max(whole.start_ms, popover.scope.start);
+    const end = Math.min(whole.end_ms, popover.scope.end);
+    if (end <= start) return whole;
+    const beatCount = (analysis.beats_ms ?? []).filter((t) => t >= start - 80 && t < end - 80).length;
+    return { ...whole, start_ms: start, end_ms: end, beats: Math.max(1, beatCount) };
+  })();
 
   return (
     <ActionsContext.Provider value={actions}>
@@ -1873,9 +1838,10 @@ export function PlayAlongView({
           <ChordPopover
             label={popover.label}
             anchor={popover.anchor}
-            segment={popover.index != null && popover.index >= 0 ? chords[popover.index] : undefined}
+            segment={popoverSegment}
+            fingeringAt={popover.index != null && popover.index >= 0 ? chords[popover.index]?.start_ms : undefined}
             beatsInBar={(() => {
-              const seg = popover.index != null && popover.index >= 0 ? chords[popover.index] : undefined;
+              const seg = popoverSegment;
               if (!seg) return 0;
               const bar = (analysis.bars ?? []).find((b) => b.start_ms <= seg.start_ms + 80 && seg.start_ms < b.end_ms);
               const beats = analysis.beats_ms ?? [];
