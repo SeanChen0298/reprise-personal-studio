@@ -28,6 +28,7 @@ import { TakesPanel } from "./takes-panel";
 import { LinePanel } from "./line-panel";
 import { CommandPalette, ShortcutSheet, type Command } from "./command-palette";
 import { PlayAlongView } from "./play-along-view";
+import { KeyHints } from "./key-hints";
 import { useTakes, type Backing } from "./use-takes";
 import { displayText, useWorkspaceEdits } from "./use-workspace-edits";
 import type { Line, Section } from "../../types/song";
@@ -438,30 +439,31 @@ function Workspace({ songId }: { songId: string }) {
         label: `Mark selection as ${h.name}`,
         shortcut: i < 9 ? String(i + 1) : undefined,
         disabled: !hasSel,
+        featured: true,
         run: () => {
           if (cursorLine) edits.annotate(cursorLine.id, selStart, selEnd, h.id, h.name);
         },
       })),
       { id: "unmark", group: "Mark", label: "Remove marks in selection", shortcut: "0", run: () => void clearMarks() },
-      { id: "edit", group: "Lyrics", label: "Edit line text", shortcut: "F2", run: () => cursorLine && setEditingLineId(cursorLine.id) },
-      { id: "section", group: "Lyrics", label: cursorLine && sections.some((s) => s.start_line_order === cursorLine.order) ? "Rename this section" : "Start a section at this line", shortcut: "#", run: startSectionEdit },
+      { id: "edit", group: "Lyrics", label: "Edit line text", shortcut: "F2", featured: true, run: () => cursorLine && setEditingLineId(cursorLine.id) },
+      { id: "section", group: "Lyrics", featured: true, label: cursorLine && sections.some((s) => s.start_line_order === cursorLine.order) ? "Rename this section" : "Start a section at this line", shortcut: "#", run: startSectionEdit },
       ...(cursorSection ? [{ id: "section-rm", group: "Lyrics", label: `Remove section “${cursorSection.name}”`, run: () => edits.removeSection(cursorSection) }] : []),
       { id: "lyrics", group: "Lyrics", label: "Import / paste lyrics…", run: () => navigate(`/song/${songId}/lyrics`) },
       { id: "breath", group: "View", label: showBreathMap ? "Hide breath map" : "Show breath map", run: () => setShowBreathMap((v) => !v) },
       { id: "view", group: "View", label: view === "lyrics" ? "Switch to lead sheet (chords)" : "Switch to lyrics", run: () => setView((v) => (v === "lyrics" ? "lead" : "lyrics")) },
       { id: "play", group: "Play", label: player.isPlaying ? "Pause" : "Play", shortcut: "Space", run: player.togglePlay },
-      { id: "play-line", group: "Play", label: "Play from selected line", shortcut: "Enter", run: () => cursorLine && playLine(cursorLine.id) },
-      { id: "loop", group: "Play", label: player.loopEnabled ? "Stop looping" : "Loop selected line", shortcut: "L", run: loopLine },
-      { id: "loop-sec", group: "Play", label: "Loop this section", shortcut: "Shift+L", disabled: !cursorSection, run: loopSection },
+      { id: "play-line", group: "Play", label: "Play from selected line", shortcut: "Enter", featured: true, run: () => cursorLine && playLine(cursorLine.id) },
+      { id: "loop", group: "Play", label: player.loopEnabled ? "Stop looping" : "Loop selected line", shortcut: "L", featured: true, run: loopLine },
+      { id: "loop-sec", group: "Play", label: "Loop this section", shortcut: "Shift+L", featured: true, disabled: !cursorSection, run: loopSection },
       ...tracks.map((t) => ({ id: `track-${t.key}`, group: "Play", label: `Play the ${t.label === "Inst." ? "instrumental" : t.label.toLowerCase()} track`, run: () => setTrack(t.key) })),
-      { id: "tap", group: "Timing", label: "Line starts at the playhead", shortcut: "T", run: () => void tapStart() },
-      { id: "rec", group: "Record", label: "Record from selected line", shortcut: "R", run: () => recordFromCursor(false) },
-      { id: "rec-sec", group: "Record", label: "Record this section", shortcut: "Shift+R", disabled: !cursorSection, run: () => recordFromCursor(true) },
-      { id: "undo", group: "Edit", label: "Undo", shortcut: "Ctrl+Z", disabled: !canUndo, run: () => void doUndo() },
+      { id: "tap", group: "Timing", label: "Line starts at the playhead", shortcut: "T", featured: true, run: () => void tapStart() },
+      { id: "rec", group: "Record", label: "Record from selected line", shortcut: "R", featured: true, run: () => recordFromCursor(false) },
+      { id: "rec-sec", group: "Record", label: "Record this section", shortcut: "Shift+R", featured: true, disabled: !cursorSection, run: () => recordFromCursor(true) },
+      { id: "undo", group: "Edit", label: "Undo", shortcut: "Ctrl+Z", featured: true, disabled: !canUndo, run: () => void doUndo() },
       { id: "redo", group: "Edit", label: "Redo", shortcut: "Ctrl+Y", disabled: !canRedo, run: () => void doRedo() },
-      { id: "setup", group: "Song", label: "Audio setup (download, stems, pitch, chords, align)…", run: () => setSetupOpen(true) },
+      { id: "setup", group: "Song", featured: true, label: "Audio setup (download, stems, pitch, chords, align)…", run: () => setSetupOpen(true) },
       { id: "details", group: "Song", label: "Edit song details…", run: () => setEditOpen(true) },
-      { id: "keys", group: "Help", label: "Keyboard shortcuts", shortcut: "?", run: () => setShortcutsOpen(true) },
+      { id: "keys", group: "Help", label: "Keyboard shortcuts", shortcut: "?", featured: true, run: () => setShortcutsOpen(true) },
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlights, selStart, selEnd, cursorLine, cursorSection, sections, view, showBreathMap, player.isPlaying, player.loopEnabled, tracks, canUndo, canRedo, edits]);
@@ -620,7 +622,8 @@ function Workspace({ songId }: { songId: string }) {
 
       <div className="flex flex-1 min-h-0">
         {/* Center */}
-        <div ref={sheetRef} className="flex-1 min-w-0 overflow-y-auto" style={{ scrollbarWidth: "thin" }}>
+        <div className="flex-1 min-w-0 flex flex-col min-h-0">
+        <div ref={sheetRef} className="flex-1 min-h-0 overflow-y-auto" style={{ scrollbarWidth: "thin" }}>
           {!audioReady && (
             <div className="mx-auto max-w-[760px] mt-5 px-4 py-3 rounded-[9px] border border-amber-300/60 bg-amber-50/60 text-[12.5px] text-amber-800 flex items-center gap-3">
               <span className="flex-1">The song's audio isn't downloaded yet{song.download_status === "downloading" ? " — downloading now…" : "."}</span>
@@ -694,6 +697,23 @@ function Workspace({ songId }: { songId: string }) {
               />
             </div>
           )}
+        </div>
+        <KeyHints
+          mode={
+            takes.busy
+              ? "recording"
+              : editingLineId || sectionEdit
+                ? "editing"
+                : view === "lead"
+                  ? "lead"
+                  : selEnd > selStart
+                    ? "selection"
+                    : "idle"
+          }
+          highlights={highlights}
+          onMark={annotate}
+          onShowAll={() => setShortcutsOpen(true)}
+        />
         </div>
 
         {/* Right panel */}

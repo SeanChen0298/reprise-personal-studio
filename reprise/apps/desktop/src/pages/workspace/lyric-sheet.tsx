@@ -193,7 +193,7 @@ const LineRow = memo(function LineRow({
                 <span
                   {...{ [NON_TEXT_ATTR]: "" }}
                   className={`inline-block mr-[5px] font-bold leading-none align-[0.35em] select-none ${
-                    info.breathBefore.quick ? "text-amber-600" : "text-sky-600"
+                    info.breathBefore.quick ? "text-amber-600" : "text-sky-600/35"
                   }`}
                   title={
                     info.breathBefore.quick

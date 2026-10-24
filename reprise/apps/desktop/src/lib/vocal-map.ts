@@ -23,6 +23,11 @@ const MIN_VOICED_MS = 80;
 const QUICK_BREATH_MS = 450;
 /** Phrases at least this long need planned breath support. */
 export const LONG_PHRASE_MS = 6000;
+/** Longer "phrases" are backing vocals / reverb joining several lines — not something to warn about. */
+const MAX_PLAUSIBLE_PHRASE_MS = 15000;
+/** A gap inside a line has to be this long to be a breath (shorter ones are consonants and note gaps). */
+const MID_LINE_BREATH_MS = 280;
+const MAX_MID_LINE_BREATHS = 2;
 /** High moments shorter than this are passing notes. */
 const MIN_HIGH_MS = 150;
 
@@ -253,7 +258,8 @@ export function lineVocalInfo(map: VocalMap, line: Line, text: string): LineVoca
   const e = line.end_ms;
   let longestPhraseMs = 0;
   for (const p of map.phrases) {
-    if (p.endMs > s && p.startMs < e) longestPhraseMs = Math.max(longestPhraseMs, p.endMs - p.startMs);
+    const len = p.endMs - p.startMs;
+    if (p.endMs > s && p.startMs < e && len <= MAX_PLAUSIBLE_PHRASE_MS) longestPhraseMs = Math.max(longestPhraseMs, len);
   }
 
   // The breath nearest the line's start — lyric timing is approximate, so allow
@@ -279,6 +285,7 @@ export function lineVocalInfo(map: VocalMap, line: Line, text: string): LineVoca
   const midBreaths: { pos: number; breath: BreathPoint }[] = [];
   for (const b of map.breaths) {
     if (b === breathBefore || b.startMs <= s + 300 || b.startMs >= e - 150) continue;
+    if (b.endMs - b.startMs < MID_LINE_BREATH_MS || midBreaths.length >= MAX_MID_LINE_BREATHS) continue;
     let pos = times.findIndex((t) => t >= b.startMs);
     if (pos <= 0 || pos >= chars.length) continue;
     // Prefer a word boundary within a couple of characters.

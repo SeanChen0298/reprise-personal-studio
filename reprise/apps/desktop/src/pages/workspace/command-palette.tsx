@@ -7,6 +7,8 @@ export interface Command {
   shortcut?: string;
   run: () => void;
   disabled?: boolean;
+  /** Shown before you type anything. */
+  featured?: boolean;
 }
 
 export function CommandPalette({ commands, onClose }: { commands: Command[]; onClose: () => void }) {
@@ -18,7 +20,7 @@ export function CommandPalette({ commands, onClose }: { commands: Command[]; onC
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const list = commands.filter((c) => !c.disabled);
-    if (!q) return list;
+    if (!q) return list.filter((c) => c.featured);
     const words = q.split(/\s+/);
     return list.filter((c) => {
       const hay = `${c.group} ${c.label}`.toLowerCase();
@@ -59,6 +61,11 @@ export function CommandPalette({ commands, onClose }: { commands: Command[]; onC
           placeholder="Type a command — e.g. “falsetto”, “section”, “record”…"
           className="px-4 py-3 text-[14px] bg-transparent border-none border-b border-[var(--border-subtle)] outline-none"
         />
+        {!query.trim() && (
+          <div className="px-4 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.09em] text-[var(--text-muted)] border-t border-[var(--border-subtle)]">
+            Most useful — type to search all {commands.filter((c) => !c.disabled).length}
+          </div>
+        )}
         <div className="overflow-y-auto py-1 border-t border-[var(--border-subtle)]">
           {filtered.length === 0 && <p className="px-4 py-3 text-[12.5px] text-[var(--text-muted)]">No matching command.</p>}
           {filtered.map((c, i) => (
