@@ -40,6 +40,8 @@ export interface SongKnowledge {
     model?: string;
     first_ms?: number;
     ms?: number;
+    /** Search was wanted but not available on the model used. */
+    no_search?: boolean;
   })[];
 }
 

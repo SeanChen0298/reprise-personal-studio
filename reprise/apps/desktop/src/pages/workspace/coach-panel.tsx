@@ -144,11 +144,13 @@ export function CoachPanel({
         prompt: SONG_CARD_PROMPT,
         maxSearches: coach.searchMode === "off" ? null : coach.maxSearchesPerAnswer,
         fallbackModels: backupChain(coach),
+        searchModel: coach.modelLists?.gemini?.includes("gemini-2.5-flash") ? "gemini-2.5-flash" : undefined,
       });
       coach.addSearches(r.searches);
       const card = parseSongCard(r.text);
       if (!card) throw new CoachError("The coach's song card came back in an unexpected shape — try again.");
       const next = { ...knowledge, card, card_sources: r.sources, card_made_at: new Date().toISOString() };
+      if (r.searchSkipped) setError("Written without web search — it isn't free on your current Gemini models. Facts about the singer may be less reliable.");
       setKnowledge(next);
       await saveKnowledge(song, next);
     } catch (err) {
@@ -182,6 +184,7 @@ export function CoachPanel({
         prompt: q,
         maxSearches: coach.searchMode === "auto" ? coach.maxSearchesPerAnswer : null,
         fallbackModels: backupChain(coach),
+        searchModel: coach.modelLists?.gemini?.includes("gemini-2.5-flash") ? "gemini-2.5-flash" : undefined,
         quick: true,
         onText: setStreaming,
       });
@@ -198,6 +201,7 @@ export function CoachPanel({
             model: r.model,
             first_ms: Math.round(r.firstMs),
             ms: Math.round(r.totalMs),
+            no_search: r.searchSkipped,
           },
         ],
       };
@@ -395,6 +399,7 @@ export function CoachPanel({
               {turn.ms != null && (
                 <div className="mt-[5px] text-[10px] text-[var(--text-muted)] tabular-nums" title="Time to the first words · time for the whole answer">
                   {turn.model} · first words {(turn.first_ms! / 1000).toFixed(1)} s · done {(turn.ms / 1000).toFixed(1)} s
+                  {turn.no_search && " · without web search (not free on this model)"}
                 </div>
               )}
               {proposals && (

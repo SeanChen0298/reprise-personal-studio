@@ -23,6 +23,8 @@ export interface CoachRequest {
   maxSearches: number | null;
   /** Tried in order when the main model is busy or out of quota (each has its own quota). */
   fallbackModels?: string[];
+  /** Gemini model to use for requests that search (free-tier search only works on 2.5 Flash). */
+  searchModel?: string;
   /** Chat: think less, answer sooner. Song cards leave this off. */
   quick?: boolean;
   /** Called with the answer so far as it streams in. */
@@ -38,6 +40,8 @@ export interface CoachReply {
   /** Time to the first words, and to the whole answer (ms). */
   firstMs: number;
   totalMs: number;
+  /** Search was wanted but couldn't be used (not free on this model), so it answered without. */
+  searchSkipped?: boolean;
 }
 
 export class CoachError extends Error {}
@@ -155,7 +159,31 @@ async function askClaude(req: CoachRequest): Promise<CoachReply> {
 const isBusy = (msg: string) => /\b503\b|UNAVAILABLE|overloaded|high demand/i.test(msg);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * On the free tier, Google Search only works on Gemini 2.5 Flash / Flash-Lite — on Gemini 3+
+ * it fails as "quota exceeded" (its free search allowance is zero). So a request that wants
+ * search goes to the search model; if that can't search either, answer without search.
+ */
 async function askGemini(req: CoachRequest): Promise<CoachReply> {
+  const wantsSearch = req.maxSearches != null;
+  const withoutSearch = async () => ({ ...(await askGeminiChain({ ...req, maxSearches: null })), searchSkipped: true });
+  if (wantsSearch && req.searchModel && req.searchModel !== req.model && !/gemini-2\.5-flash/i.test(req.model)) {
+    try {
+      return await askGeminiChain({ ...req, model: req.searchModel, fallbackModels: [] });
+    } catch (err) {
+      if (!(err instanceof CoachError)) throw err;
+      return withoutSearch();
+    }
+  }
+  try {
+    return await askGeminiChain(req);
+  } catch (err) {
+    if (wantsSearch && err instanceof CoachError) return withoutSearch();
+    throw err;
+  }
+}
+
+async function askGeminiChain(req: CoachRequest): Promise<CoachReply> {
   // Each Gemini model has its own free-tier quota: on "busy" (503) retry once, then —
   // or straight away on "out of quota" (429) — move down the chain of backups.
   const chain = [req.model, ...(req.fallbackModels ?? []).filter((m, i, all) => m && m !== req.model && all.indexOf(m) === i)];
@@ -201,14 +229,18 @@ async function askGeminiOnce(req: CoachRequest, model: string, withThinkingLevel
     ...req.history.map((t) => ({ role: t.role === "assistant" ? "model" : "user", parts: [{ text: t.text }] })),
     { role: "user", parts: [{ text: req.prompt }] },
   ];
+  // Gemma (Google's open models) takes no system instruction, search or thinking settings:
+  // the coach's rules go at the top of the first turn instead.
+  const gemma = /^gemma/i.test(model);
+  if (gemma) contents[0] = { role: "user", parts: [{ text: `${req.system}\n\n---\n\n${req.context}` }] };
   const config: GenerateContentConfig = {
-    systemInstruction: req.system,
+    systemInstruction: gemma ? undefined : req.system,
     // Gemini decides how many searches to run; we can only allow or forbid it.
-    tools: req.maxSearches != null ? [{ googleSearch: {} }] : undefined,
+    tools: req.maxSearches != null && !gemma ? [{ googleSearch: {} }] : undefined,
     maxOutputTokens: 8192,
   };
   // Chat answers don't need long deliberation — thinking is most of the wait.
-  if (req.quick && withThinkingLevel && takesThinkingLevel(model)) config.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
+  if (req.quick && withThinkingLevel && !gemma && takesThinkingLevel(model)) config.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
 
   let text = "";
   const sources = new Map<string, string>();
@@ -271,7 +303,7 @@ export async function listModels(provider: CoachProvider, apiKey: string): Promi
   for await (const m of pager) {
     if (!m.name || !(m.supportedActions ?? []).includes("generateContent")) continue;
     const id = m.name.replace(/^models\//, "");
-    if (/gemini/i.test(id) && !/embedding|image|tts|audio|live|vision/i.test(id)) names.push(id);
+    if (/gemini|gemma/i.test(id) && !/embedding|image|tts|audio|live|vision|robotics|nano/i.test(id)) names.push(id);
   }
   // Newest-looking first: higher version numbers, "pro" before "flash".
   return names.sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
