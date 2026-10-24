@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { useSongStore } from "./stores/song-store";
 import { useTaskQueueProcessor } from "./hooks/use-task-queue-processor";
 import { useAutoProcess } from "./hooks/use-auto-process";
@@ -8,14 +8,16 @@ import { ProtectedRoute } from "./components/protected-route";
 import { LibraryPage } from "./pages/library-page";
 import { ImportUrlPage } from "./pages/import-url-page";
 import { AddSongPage } from "./pages/add-song-page";
-import { SongDetailPage } from "./pages/song-detail-page";
-import { SongSetupPage } from "./pages/song-setup-page";
 import { LyricsInputPage } from "./pages/lyrics-input-page";
+import { WorkspacePage } from "./pages/workspace/workspace-page";
 import { SettingsPage } from "./pages/settings-page";
-import { PracticePage } from "./pages/practice";
-import { TimestampPage } from "./pages/timestamp-page";
-import { RecordingsPage } from "./pages/recordings-page";
 import { DiscoverPage } from "./pages/discover-page";
+
+/** Old per-task song pages all live in the song workspace now. */
+function ToWorkspace({ setup = false }: { setup?: boolean }) {
+  const { id } = useParams<{ id: string }>();
+  return <Navigate to={`/song/${id}${setup ? "?setup=1" : ""}`} replace />;
+}
 
 export function App() {
   const loadAllData = useSongStore((s) => s.loadAllData);
@@ -77,38 +79,10 @@ export function App() {
             </ProtectedRoute>
           }
         />
-        <Route
-          path="/song/:id"
-          element={
-            <ProtectedRoute>
-              <SongDetailPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/song/:id/setup"
-          element={
-            <ProtectedRoute>
-              <SongSetupPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/song/:id/practice"
-          element={
-            <ProtectedRoute>
-              <PracticePage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/song/:id/timestamps"
-          element={
-            <ProtectedRoute>
-              <TimestampPage />
-            </ProtectedRoute>
-          }
-        />
+        <Route path="/song/:id" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
+        <Route path="/song/:id/setup" element={<ToWorkspace setup />} />
+        <Route path="/song/:id/practice" element={<ToWorkspace />} />
+        <Route path="/song/:id/timestamps" element={<ToWorkspace />} />
         <Route
           path="/song/:id/lyrics"
           element={
@@ -117,14 +91,7 @@ export function App() {
             </ProtectedRoute>
           }
         />
-        <Route
-          path="/song/:id/recordings"
-          element={
-            <ProtectedRoute>
-              <RecordingsPage />
-            </ProtectedRoute>
-          }
-        />
+        <Route path="/song/:id/recordings" element={<ToWorkspace />} />
         <Route
           path="/settings"
           element={

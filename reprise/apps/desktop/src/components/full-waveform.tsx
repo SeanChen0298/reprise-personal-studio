@@ -18,9 +18,11 @@ interface Props {
   regions: Region[];
   /** Click-to-seek callback (fraction 0–1) */
   onSeek: (fraction: number) => void;
+  /** Height class (default 64 px). */
+  heightClass?: string;
 }
 
-export function FullWaveform({ peaks, progress, regions, onSeek }: Props) {
+export function FullWaveform({ peaks, progress, regions, onSeek, heightClass = "h-[64px]" }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -115,7 +117,7 @@ export function FullWaveform({ peaks, progress, regions, onSeek }: Props) {
   return (
     <div
       ref={containerRef}
-      className="h-[64px] relative cursor-pointer"
+      className={`${heightClass} relative cursor-pointer`}
       onClick={handleClick}
     >
       <canvas

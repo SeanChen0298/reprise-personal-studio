@@ -1,15 +1,12 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { Sidebar } from "../components/sidebar";
 import { useSongStore } from "../stores/song-store";
 import type { PitchStatus, AlignStatus, ChordStatus } from "../types/song";
 import { useTaskQueueStore } from "../stores/task-queue-store";
 import { backUpAndClearChordWork, readChordSettings, saveChordSettings } from "../lib/chord-analysis";
-import { ConfirmDialog } from "../components/confirm-dialog";
+import { ConfirmDialog } from "./confirm-dialog";
 
-export function SongSetupPage() {
-  const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
+/** Audio download, stems, pitch, chords and alignment for one song (the workspace's Setup drawer). */
+export function SongSetupPanel({ songId: id }: { songId: string }) {
   const song = useSongStore((s) => s.songs.find((s) => s.id === id));
   const downloadSongAudio = useSongStore((s) => s.downloadSongAudio);
   const markStaleAnalysesAsFailed = useSongStore((s) => s.markStaleAnalysesAsFailed);
@@ -77,34 +74,7 @@ export function SongSetupPage() {
   const canAlign = primaryLineCount > 0 && (isDownloaded || stemsDone);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[var(--bg)]">
-      <Sidebar />
-
-      <div className="flex flex-col flex-1 min-w-0">
-        {/* Topbar */}
-        <header className="h-[54px] px-7 flex items-center justify-between bg-[var(--surface)] border-b border-[var(--border)] flex-shrink-0">
-          <button
-            onClick={() => navigate(`/song/${id}`)}
-            className="flex items-center gap-[6px] text-[13px] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors bg-transparent border-none cursor-pointer"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M19 12H5M12 19l-7-7 7-7" />
-            </svg>
-            Back to Song
-          </button>
-          <button
-            onClick={() => navigate(`/song/${id}`)}
-            className="flex items-center gap-[5px] px-[18px] py-[7px] rounded-[7px] bg-[var(--accent)] text-white text-[13px] font-medium hover:opacity-80 transition-opacity"
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-            Done
-          </button>
-        </header>
-
-        {/* Content */}
-        <main className="flex-1 overflow-y-auto px-7 py-8">
+    <div className="px-6 py-6">
           <div className="max-w-[640px] mx-auto animate-fade-up">
             {/* Song header */}
             <div className="flex items-center gap-4 mb-7">
@@ -710,8 +680,6 @@ export function SongSetupPage() {
               </div>
             </div>
           </div>
-        </main>
-      </div>
     </div>
   );
 }

@@ -1,0 +1,791 @@
+// Song workspace — one place to practise, mark up, group, time and record a song.
+//
+// The lyric sheet is the main surface, with a cursor line (and a caret /
+// selection inside it) driven by the keyboard like a text editor. One
+// transport plays the song for everything; the right panel holds takes and
+// the selected line's details. Every lyric edit is undoable.
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { useSongStore } from "../../stores/song-store";
+import { usePreferencesStore } from "../../stores/preferences-store";
+import { useHistoryStore } from "../../stores/history-store";
+import { useHighlightStore } from "../../lib/highlight-config";
+import { useLinePlayer } from "../../hooks/use-line-player";
+import { useWaveformData } from "../../hooks/use-waveform-data";
+import { loadVocalMap } from "../../lib/take-review";
+import { nextWordBoundary } from "../../lib/lyric-edits";
+import type { VocalMap } from "../../lib/vocal-map";
+import { SongSetupPanel } from "../../components/song-setup-panel";
+import { EditSongModal } from "../../components/edit-song-modal";
+import { ConfirmDialog } from "../../components/confirm-dialog";
+import { useTaskQueueStore } from "../../stores/task-queue-store";
+import { LyricSheet, type Cursor, type SectionEdit } from "./lyric-sheet";
+import { TransportBar } from "./transport-bar";
+import { TakesPanel } from "./takes-panel";
+import { LinePanel } from "./line-panel";
+import { CommandPalette, ShortcutSheet, type Command } from "./command-palette";
+import { PlayAlongView } from "./play-along-view";
+import { useTakes, type Backing } from "./use-takes";
+import { displayText, useWorkspaceEdits } from "./use-workspace-edits";
+import type { Line, Section } from "../../types/song";
+
+/** A callback whose identity never changes but always runs the latest version (keeps memoised rows still). */
+function useStable<A extends unknown[], R>(fn: (...args: A) => R): (...args: A) => R {
+  const ref = useRef(fn);
+  ref.current = fn;
+  return useCallback((...args: A) => ref.current(...args), []);
+}
+
+const isTyping = (el: EventTarget | null) =>
+  el instanceof HTMLElement && !!el.closest("input, textarea, select, [contenteditable=true]");
+
+export function WorkspacePage() {
+  const { id } = useParams<{ id: string }>();
+  const song = useSongStore((s) => s.songs.find((x) => x.id === id));
+  if (!song) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-[var(--bg)]">
+        <p className="text-[var(--text-muted)]">Song not found.</p>
+      </div>
+    );
+  }
+  return <Workspace key={song.id} songId={song.id} />;
+}
+
+function Workspace({ songId }: { songId: string }) {
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const song = useSongStore((s) => s.songs.find((x) => x.id === songId))!;
+  const rawLines = useSongStore((s) => s.lines[songId]);
+  const rawSections = useSongStore((s) => s.sections[songId]);
+  const updateSong = useSongStore((s) => s.updateSong);
+  const removeSong = useSongStore((s) => s.removeSong);
+  const incrementPlayCount = useSongStore((s) => s.incrementPlayCount);
+  const highlights = useHighlightStore((s) => s.highlights);
+  const queueTasks = useTaskQueueStore((s) => s.tasks);
+  const setScope = useHistoryStore((s) => s.setScope);
+  const undo = useHistoryStore((s) => s.undo);
+  const redo = useHistoryStore((s) => s.redo);
+  const canUndo = useHistoryStore((s) => s.past.length > 0);
+  const canRedo = useHistoryStore((s) => s.future.length > 0);
+  useEffect(() => setScope(songId), [songId, setScope]);
+
+  // ── Data ─────────────────────────────────────────────────────────────────
+  const transLang = song.translation_language;
+  const lines = useMemo(
+    () => [...(rawLines ?? [])].filter((l) => !transLang || l.language !== transLang).sort((a, b) => a.order - b.order),
+    [rawLines, transLang],
+  );
+  const translationLines = useMemo(
+    () => (transLang ? (rawLines ?? []).filter((l) => l.language === transLang).sort((a, b) => a.order - b.order) : []),
+    [rawLines, transLang],
+  );
+  const translationByOrder = useMemo(() => new Map(translationLines.map((l) => [l.order, l.text])), [translationLines]);
+  const sections = useMemo(
+    () => [...(rawSections ?? [])].sort((a, b) => a.start_line_order - b.start_line_order),
+    [rawSections],
+  );
+  const sectionOf = useCallback(
+    (line: Line | undefined | null) =>
+      line ? sections.find((s) => line.order >= s.start_line_order && line.order <= s.end_line_order) ?? null : null,
+    [sections],
+  );
+
+  // ── Player ───────────────────────────────────────────────────────────────
+  const tracks = useMemo(() => {
+    const t: { key: Backing; label: string; path: string }[] = [];
+    if (song.audio_path) t.push({ key: "original", label: "Original", path: song.audio_path });
+    if (song.vocals_path) t.push({ key: "vocal", label: "Vocal", path: song.vocals_path });
+    if (song.instrumental_path) t.push({ key: "instrumental", label: "Inst.", path: song.instrumental_path });
+    return t;
+  }, [song.audio_path, song.vocals_path, song.instrumental_path]);
+  const [track, setTrack] = useState<Backing>("original");
+  const audioPath = tracks.find((t) => t.key === track)?.path ?? song.audio_path ?? "";
+
+  const player = useLinePlayer({
+    audioPath,
+    lines,
+    onLinePlayed: useCallback(
+      (index: number) => {
+        const line = lines[index];
+        if (line) {
+          incrementPlayCount(songId, line.id);
+          usePreferencesStore.getState().touchLastPracticed(songId);
+        }
+      },
+      [lines, songId, incrementPlayCount],
+    ),
+  });
+
+  const [durationMs, setDurationMs] = useState(song.duration_ms ?? 0);
+  useEffect(() => {
+    const audio = player.audioRef.current;
+    if (!audio) return;
+    const onMeta = () => isFinite(audio.duration) && setDurationMs(Math.round(audio.duration * 1000));
+    audio.addEventListener("loadedmetadata", onMeta);
+    return () => audio.removeEventListener("loadedmetadata", onMeta);
+  }, [player.audioRef]);
+  const { peaks } = useWaveformData(song.audio_path ? convertFileSrc(song.audio_path) : undefined, undefined, undefined, 400, true);
+  const nowMs = player.currentTime * 1000;
+  const playingLineId = player.isPlaying ? lines[player.currentLineIndex]?.id ?? null : null;
+
+  // ── Vocal map (breath marks, long phrases, high notes) ──────────────────
+  const [vocalMap, setVocalMap] = useState<VocalMap | null>(null);
+  const [showBreathMap, setShowBreathMap] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    loadVocalMap(song)
+      ?.then((m) => !cancelled && setVocalMap(m))
+      .catch((err) => console.warn("[workspace] vocal map unavailable:", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [song.pitch_data_path, song.vocals_path]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Cursor / editing state ──────────────────────────────────────────────
+  const [cursor, setCursor] = useState<Cursor | null>(null);
+  useEffect(() => {
+    if (lines.length === 0) setCursor(null);
+    else if (!cursor || !lines.some((l) => l.id === cursor.lineId)) setCursor({ lineId: lines[0].id, anchor: 0, focus: 0 });
+  }, [lines, cursor]);
+  const cursorIdx = cursor ? lines.findIndex((l) => l.id === cursor.lineId) : -1;
+  const cursorLine = cursorIdx >= 0 ? lines[cursorIdx] : null;
+  const cursorText = cursorLine ? displayText(cursorLine) : "";
+  // Undo can shorten the line under the caret.
+  const anchor = Math.min(cursor?.anchor ?? 0, cursorText.length);
+  const focus = Math.min(cursor?.focus ?? 0, cursorText.length);
+  const selStart = Math.min(anchor, focus);
+  const selEnd = Math.max(anchor, focus);
+  const cursorSection = sectionOf(cursorLine);
+
+  const [editingLineId, setEditingLineId] = useState<string | null>(null);
+  const [sectionEdit, setSectionEdit] = useState<SectionEdit | null>(null);
+  const [view, setView] = useState<"lyrics" | "lead">("lyrics");
+  const [modeTabsEl, setModeTabsEl] = useState<HTMLDivElement | null>(null);
+  const [rightTab, setRightTab] = useState<"takes" | "line">("takes");
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const setupOpen = searchParams.get("setup") === "1";
+  const setSetupOpen = (open: boolean) => setSearchParams(open ? { setup: "1" } : {}, { replace: true });
+  const [editOpen, setEditOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const say = useCallback((msg: string) => {
+    setToast(msg);
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 2200);
+  }, []);
+
+  const edits = useWorkspaceEdits(songId);
+  const takes = useTakes({
+    song,
+    lines,
+    sections,
+    player,
+    backing: track,
+    originalPath: song.audio_path,
+  });
+
+  // Follow playback: keep the line being sung in view.
+  const sheetRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!playingLineId) return;
+    sheetRef.current
+      ?.querySelector(`[data-line-id="${playingLineId}"]`)
+      ?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [playingLineId]);
+
+  // ── Actions ──────────────────────────────────────────────────────────────
+  const moveTo = useCallback(
+    (line: Line | undefined, keepColumn = true) => {
+      if (!line) return;
+      const col = keepColumn ? Math.min(focus, displayText(line).length) : 0;
+      setCursor({ lineId: line.id, anchor: col, focus: col });
+    },
+    [focus],
+  );
+
+  const sectionRange = useCallback(
+    (sec: Section): [number, number] | null => {
+      const idxs = lines.map((l, i) => (l.order >= sec.start_line_order && l.order <= sec.end_line_order ? i : -1)).filter((i) => i >= 0);
+      return idxs.length ? [idxs[0], idxs[idxs.length - 1]] : null;
+    },
+    [lines],
+  );
+
+  const playLine = useCallback(
+    (lineId: string) => {
+      if (takes.busy) return;
+      const idx = lines.findIndex((l) => l.id === lineId);
+      if (idx >= 0) player.goToLine(idx, true);
+    },
+    [lines, player, takes.busy],
+  );
+
+  const loopLine = useCallback(() => {
+    if (takes.busy) return;
+    if (player.loopEnabled) {
+      player.toggleLoop();
+      player.setLoopRange(null);
+      return;
+    }
+    player.setLoopRange(null);
+    player.toggleLoop();
+    if (cursorIdx >= 0) player.goToLine(cursorIdx, true);
+  }, [player, cursorIdx, takes.busy]);
+
+  const loopSection = useCallback(() => {
+    if (takes.busy) return;
+    if (!cursorSection) return say("This line isn't in a section — press # to start one.");
+    const range = sectionRange(cursorSection);
+    if (!range) return;
+    player.setLoopRange(range);
+    if (!player.loopEnabled) player.toggleLoop();
+    player.goToLine(range[0], true);
+  }, [player, cursorSection, sectionRange, say, takes.busy]);
+
+  const annotate = useCallback(
+    (n: number) => {
+      const hl = highlights[n - 1];
+      if (!cursorLine || !hl) return;
+      if (selEnd <= selStart) return say("Select some words first — drag, or Shift+←/→");
+      edits.annotate(cursorLine.id, selStart, selEnd, hl.id, hl.name);
+    },
+    [highlights, cursorLine, selStart, selEnd, edits, say],
+  );
+
+  const clearMarks = useCallback(async () => {
+    if (!cursorLine) return;
+    const removed = await edits.clearAnnotations(cursorLine.id, selStart, selEnd);
+    if (!removed) say(selEnd > selStart ? "No marks in the selection" : "No mark under the caret");
+  }, [cursorLine, selStart, selEnd, edits, say]);
+
+  const tapStart = useCallback(async () => {
+    if (!cursorLine || takes.busy) return;
+    const ms = Math.round(nowMs);
+    const prev = lines[cursorIdx - 1];
+    const next = lines[cursorIdx + 1];
+    const changes: { lineId: string; start_ms?: number; end_ms?: number }[] = [];
+    const end = cursorLine.end_ms != null && cursorLine.end_ms > ms
+      ? cursorLine.end_ms
+      : next?.start_ms != null && next.start_ms > ms ? next.start_ms : ms + 2000;
+    changes.push({ lineId: cursorLine.id, start_ms: ms, end_ms: end });
+    if (prev && (prev.end_ms == null || prev.end_ms > ms)) changes.push({ lineId: prev.id, end_ms: ms });
+    await edits.setTiming(changes, "Set line start");
+    if (next) moveTo(next, false);
+  }, [cursorLine, cursorIdx, lines, nowMs, edits, moveTo, takes.busy]);
+
+  const nudge = useCallback(
+    (field: "start_ms" | "end_ms", delta: number) => {
+      if (!cursorLine || cursorLine[field] == null) return;
+      const v = Math.max(0, cursorLine[field]! + delta);
+      edits.setTiming([{ lineId: cursorLine.id, [field]: v }], field === "start_ms" ? "Nudge start" : "Nudge end");
+    },
+    [cursorLine, edits],
+  );
+
+  const startSectionEdit = useCallback(() => {
+    if (!cursorLine) return;
+    const starting = sections.find((s) => s.start_line_order === cursorLine.order);
+    setSectionEdit(starting ? { mode: "rename", sectionId: starting.id } : { mode: "new", lineId: cursorLine.id });
+  }, [cursorLine, sections]);
+
+  const recordFromCursor = useCallback(
+    (sectionOnly: boolean) => {
+      if (takes.busy) return void takes.stop();
+      if (takes.pending) return;
+      if (sectionOnly) {
+        if (!cursorSection) return say("This line isn't in a section — press # to start one.");
+        const range = sectionRange(cursorSection);
+        takes.start(range ? lines[range[0]] : cursorLine, cursorSection);
+      } else {
+        takes.start(cursorLine);
+      }
+      setRightTab("takes");
+    },
+    [takes, cursorSection, sectionRange, lines, cursorLine, say],
+  );
+
+  const doUndo = useCallback(async () => {
+    const label = await undo();
+    say(label ? `Undid: ${label}` : "Nothing to undo");
+  }, [undo, say]);
+  const doRedo = useCallback(async () => {
+    const label = await redo();
+    say(label ? `Redid: ${label}` : "Nothing to redo");
+  }, [redo, say]);
+
+  // ── Keyboard ─────────────────────────────────────────────────────────────
+  const keyRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  keyRef.current = (e: KeyboardEvent) => {
+    if (paletteOpen || shortcutsOpen || editOpen || deleteOpen || setupOpen) return;
+    if (isTyping(e.target)) return;
+    const ctrl = e.ctrlKey || e.metaKey;
+    const k = e.key;
+    const handled = () => e.preventDefault();
+
+    // Global
+    if (ctrl && (k === "k" || k === "K")) return handled(), setPaletteOpen(true);
+    if (ctrl && !e.shiftKey && (k === "z" || k === "Z")) return handled(), void doUndo();
+    if (ctrl && ((k === "y" || k === "Y") || (e.shiftKey && (k === "z" || k === "Z")))) return handled(), void doRedo();
+    if (k === "?") return handled(), setShortcutsOpen(true);
+    if (k === "r" || k === "R") {
+      if (ctrl || e.altKey) return;
+      return handled(), recordFromCursor(e.shiftKey);
+    }
+    if (k === "Escape" && takes.countdown != null) return handled(), void takes.stop();
+
+    // The lead sheet has its own keys (Space plays there).
+    if (view === "lead") return;
+    if (!cursorLine) return;
+    const len = cursorText.length;
+    const setSel = (a: number, f: number) => setCursor({ lineId: cursorLine.id, anchor: a, focus: f });
+
+    switch (k) {
+      case "ArrowUp":
+      case "ArrowDown": {
+        if (e.altKey) return;
+        handled();
+        const down = k === "ArrowDown";
+        if (ctrl) {
+          const starts = sections.map((s) => lines.find((l) => l.order >= s.start_line_order)).filter(Boolean) as Line[];
+          const target = down
+            ? starts.find((l) => l.order > cursorLine.order)
+            : [...starts].reverse().find((l) => l.order < cursorLine.order);
+          return moveTo(target, false);
+        }
+        return moveTo(lines[cursorIdx + (down ? 1 : -1)]);
+      }
+      case "ArrowLeft":
+      case "ArrowRight": {
+        handled();
+        const right = k === "ArrowRight";
+        if (e.altKey) return nudge(e.shiftKey ? "end_ms" : "start_ms", right ? 50 : -50);
+        let f = ctrl ? nextWordBoundary(cursorText, focus, right ? 1 : -1) : Math.max(0, Math.min(len, focus + (right ? 1 : -1)));
+        if (!e.shiftKey && selEnd > selStart && !ctrl) f = right ? selEnd : selStart;
+        return setSel(e.shiftKey ? anchor : f, f);
+      }
+      case "Home":
+      case "End": {
+        handled();
+        const f = k === "Home" ? 0 : len;
+        return setSel(e.shiftKey ? anchor : f, f);
+      }
+      case " ":
+        handled();
+        if (!takes.busy) player.togglePlay();
+        return;
+      case "Enter":
+        handled();
+        return playLine(cursorLine.id);
+      case "Escape":
+        handled();
+        if (selEnd > selStart) return setSel(focus, focus);
+        if (player.isPlaying && !takes.busy) player.pause();
+        return;
+      case "[":
+        handled();
+        if (!takes.busy) player.decrementSpeed();
+        return;
+      case "]":
+        handled();
+        if (!takes.busy) player.incrementSpeed();
+        return;
+      case "F2":
+        handled();
+        return setEditingLineId(cursorLine.id);
+      case "#":
+        handled();
+        return startSectionEdit();
+      case "Delete":
+      case "Backspace":
+      case "0":
+        handled();
+        return void clearMarks();
+    }
+    if (ctrl && (k === "a" || k === "A")) return handled(), setSel(0, len);
+    if (ctrl || e.altKey) return;
+    if (k === "l" || k === "L") return handled(), e.shiftKey ? loopSection() : loopLine();
+    if (k === "t" || k === "T") return handled(), void tapStart();
+    if (/^[1-9]$/.test(k) && !e.repeat) return handled(), annotate(Number(k));
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => keyRef.current(e);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // ── Commands (palette) ───────────────────────────────────────────────────
+  const commands: Command[] = useMemo(() => {
+    const hasSel = selEnd > selStart;
+    return [
+      ...highlights.map((h, i) => ({
+        id: `mark-${h.id}`,
+        group: "Mark",
+        label: `Mark selection as ${h.name}`,
+        shortcut: i < 9 ? String(i + 1) : undefined,
+        disabled: !hasSel,
+        run: () => {
+          if (cursorLine) edits.annotate(cursorLine.id, selStart, selEnd, h.id, h.name);
+        },
+      })),
+      { id: "unmark", group: "Mark", label: "Remove marks in selection", shortcut: "0", run: () => void clearMarks() },
+      { id: "edit", group: "Lyrics", label: "Edit line text", shortcut: "F2", run: () => cursorLine && setEditingLineId(cursorLine.id) },
+      { id: "section", group: "Lyrics", label: cursorLine && sections.some((s) => s.start_line_order === cursorLine.order) ? "Rename this section" : "Start a section at this line", shortcut: "#", run: startSectionEdit },
+      ...(cursorSection ? [{ id: "section-rm", group: "Lyrics", label: `Remove section “${cursorSection.name}”`, run: () => edits.removeSection(cursorSection) }] : []),
+      { id: "lyrics", group: "Lyrics", label: "Import / paste lyrics…", run: () => navigate(`/song/${songId}/lyrics`) },
+      { id: "breath", group: "View", label: showBreathMap ? "Hide breath map" : "Show breath map", run: () => setShowBreathMap((v) => !v) },
+      { id: "view", group: "View", label: view === "lyrics" ? "Switch to lead sheet (chords)" : "Switch to lyrics", run: () => setView((v) => (v === "lyrics" ? "lead" : "lyrics")) },
+      { id: "play", group: "Play", label: player.isPlaying ? "Pause" : "Play", shortcut: "Space", run: player.togglePlay },
+      { id: "play-line", group: "Play", label: "Play from selected line", shortcut: "Enter", run: () => cursorLine && playLine(cursorLine.id) },
+      { id: "loop", group: "Play", label: player.loopEnabled ? "Stop looping" : "Loop selected line", shortcut: "L", run: loopLine },
+      { id: "loop-sec", group: "Play", label: "Loop this section", shortcut: "Shift+L", disabled: !cursorSection, run: loopSection },
+      ...tracks.map((t) => ({ id: `track-${t.key}`, group: "Play", label: `Play the ${t.label === "Inst." ? "instrumental" : t.label.toLowerCase()} track`, run: () => setTrack(t.key) })),
+      { id: "tap", group: "Timing", label: "Line starts at the playhead", shortcut: "T", run: () => void tapStart() },
+      { id: "rec", group: "Record", label: "Record from selected line", shortcut: "R", run: () => recordFromCursor(false) },
+      { id: "rec-sec", group: "Record", label: "Record this section", shortcut: "Shift+R", disabled: !cursorSection, run: () => recordFromCursor(true) },
+      { id: "undo", group: "Edit", label: "Undo", shortcut: "Ctrl+Z", disabled: !canUndo, run: () => void doUndo() },
+      { id: "redo", group: "Edit", label: "Redo", shortcut: "Ctrl+Y", disabled: !canRedo, run: () => void doRedo() },
+      { id: "setup", group: "Song", label: "Audio setup (download, stems, pitch, chords, align)…", run: () => setSetupOpen(true) },
+      { id: "details", group: "Song", label: "Edit song details…", run: () => setEditOpen(true) },
+      { id: "keys", group: "Help", label: "Keyboard shortcuts", shortcut: "?", run: () => setShortcutsOpen(true) },
+    ];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlights, selStart, selEnd, cursorLine, cursorSection, sections, view, showBreathMap, player.isPlaying, player.loopEnabled, tracks, canUndo, canRedo, edits]);
+
+  // ── Derived display ──────────────────────────────────────────────────────
+  const loopLineIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (player.loopEnabled && player.loopRange) {
+      for (let i = player.loopRange[0]; i <= player.loopRange[1]; i++) if (lines[i]) ids.add(lines[i].id);
+    }
+    return ids;
+  }, [player.loopEnabled, player.loopRange, lines]);
+  const loopLabel = useMemo(() => {
+    if (!player.loopRange) return null;
+    const [a, b] = player.loopRange;
+    const sec = sections.find((s) => {
+      const r = sectionRange(s);
+      return r && r[0] === a && r[1] === b;
+    });
+    return sec ? sec.name : `Lines ${a + 1}–${b + 1}`;
+  }, [player.loopRange, sections, sectionRange]);
+
+  const setupBusy = queueTasks.some((t) => t.songId === songId);
+  const setupError = [song.download_status, song.stem_status, song.pitch_status, song.align_status, song.chord_status].includes("error");
+  const audioReady = !!song.audio_path && song.download_status === "done";
+
+  const onSelect = useCallback((lineId: string, a: number, f: number) => {
+    setCursor({ lineId, anchor: a, focus: f });
+    setEditingLineId(null);
+  }, []);
+  const onCommitEdit = useStable((lineId: string, text: string) => {
+    setEditingLineId(null);
+    edits.editText(lineId, text.trim());
+  });
+  const onCancelEdit = useCallback(() => setEditingLineId(null), []);
+  const onIssueClick = useStable(takes.playIssueYou);
+  const onPlay = useStable(playLine);
+
+  return (
+    <div className="flex flex-col h-screen overflow-hidden bg-[var(--bg)]">
+      <audio ref={player.audioRef} src={player.audioSrc} preload="metadata" />
+
+      {/* Header */}
+      <header className="h-[52px] px-4 flex items-center gap-3 bg-[var(--surface)] border-b border-[var(--border)] flex-shrink-0">
+        <button
+          onClick={() => navigate("/library")}
+          title="Library"
+          className="w-[30px] h-[30px] rounded-[7px] flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg)] bg-transparent border-none cursor-pointer"
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
+        </button>
+        {song.thumbnail_url && <img src={song.thumbnail_url} alt="" className="w-[36px] h-[24px] rounded-[4px] object-cover" />}
+        <div className="min-w-0">
+          <div className="text-[13.5px] font-medium truncate leading-tight">{song.title}</div>
+          <div className="text-[11px] text-[var(--text-muted)] truncate leading-tight">{song.artist}</div>
+        </div>
+
+        <div className="ml-4 flex p-[2px] rounded-[8px] bg-[var(--bg)] border border-[var(--border)]">
+          {([["lyrics", "Lyrics"], ["lead", "Lead sheet"]] as const).map(([v, label]) => (
+            <button
+              key={v}
+              onClick={() => setView(v)}
+              className={`px-3 py-[3px] rounded-[6px] text-[12px] font-medium border-none cursor-pointer ${
+                view === v ? "bg-[var(--surface)] text-[var(--text-primary)] shadow-sm" : "bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {view === "lyrics" && vocalMap && (
+          <button
+            onClick={() => setShowBreathMap((v) => !v)}
+            title="Where the original singer breathes (’ blue = breath, amber = quick breath), long phrases and the highest notes"
+            className={`px-[8px] py-[3px] text-[11px] font-medium rounded-[6px] border cursor-pointer ${
+              showBreathMap ? "bg-[var(--theme-light)] text-[var(--theme-text)] border-transparent" : "bg-transparent text-[var(--text-muted)] border-[var(--border)]"
+            }`}
+          >
+            Breath map
+          </button>
+        )}
+        <div ref={setModeTabsEl} className={view === "lead" ? "" : "hidden"} />
+
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={() => setPaletteOpen(true)}
+            className="flex items-center gap-2 px-3 py-[5px] rounded-[7px] border border-[var(--border)] bg-[var(--bg)] text-[11.5px] text-[var(--text-muted)] hover:border-[#888] cursor-pointer"
+          >
+            Commands <kbd className="font-sans text-[10.5px]">Ctrl K</kbd>
+          </button>
+          <button
+            onClick={() => setShortcutsOpen(true)}
+            title="Keyboard shortcuts (?)"
+            className="w-[28px] h-[28px] rounded-[7px] border border-[var(--border)] bg-transparent text-[12px] text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
+          >
+            ?
+          </button>
+          <button
+            onClick={() => setSetupOpen(true)}
+            className="relative flex items-center gap-[6px] px-3 py-[5px] rounded-[7px] border border-[var(--border)] bg-transparent text-[12px] text-[var(--text-secondary)] hover:border-[#888] cursor-pointer"
+          >
+            {(setupBusy || setupError) && (
+              <span className={`w-[7px] h-[7px] rounded-full ${setupError ? "bg-red-500" : "bg-amber-500 animate-pulse"}`} />
+            )}
+            Setup
+          </button>
+          <div className="relative">
+            <button
+              onClick={() => setMenuOpen((v) => !v)}
+              className="w-[28px] h-[28px] rounded-[7px] border border-[var(--border)] bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
+            >
+              ⋯
+            </button>
+            {menuOpen && (
+              <div
+                className="absolute right-0 top-[calc(100%+6px)] z-40 w-[190px] p-1 rounded-[9px] border border-[var(--border)] bg-[var(--surface)] shadow-lg"
+                onMouseLeave={() => setMenuOpen(false)}
+              >
+                {[
+                  ["Edit song details…", () => setEditOpen(true)],
+                  ["Import / paste lyrics…", () => navigate(`/song/${songId}/lyrics`)],
+                  ["Delete song…", () => setDeleteOpen(true)],
+                ].map(([label, fn]) => (
+                  <button
+                    key={label as string}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      (fn as () => void)();
+                    }}
+                    className={`w-full text-left px-3 py-[6px] text-[12.5px] rounded-[5px] bg-transparent border-none cursor-pointer hover:bg-[var(--bg)] ${
+                      (label as string).startsWith("Delete") ? "text-red-600" : "text-[var(--text-secondary)]"
+                    }`}
+                  >
+                    {label as string}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
+
+      <TransportBar
+        player={player}
+        durationMs={durationMs}
+        peaks={peaks}
+        lines={lines}
+        cursorLineId={cursorLine?.id ?? null}
+        tracks={tracks}
+        track={track}
+        onTrack={setTrack}
+        loopLabel={loopLabel}
+        onClearLoopRange={() => player.setLoopRange(null)}
+        disabled={takes.busy || !audioReady}
+      />
+
+      <div className="flex flex-1 min-h-0">
+        {/* Center */}
+        <div ref={sheetRef} className="flex-1 min-w-0 overflow-y-auto" style={{ scrollbarWidth: "thin" }}>
+          {!audioReady && (
+            <div className="mx-auto max-w-[760px] mt-5 px-4 py-3 rounded-[9px] border border-amber-300/60 bg-amber-50/60 text-[12.5px] text-amber-800 flex items-center gap-3">
+              <span className="flex-1">The song's audio isn't downloaded yet{song.download_status === "downloading" ? " — downloading now…" : "."}</span>
+              <button onClick={() => setSetupOpen(true)} className="font-medium text-amber-900 bg-transparent border-none cursor-pointer hover:underline">
+                Open setup
+              </button>
+            </div>
+          )}
+          {view === "lead" ? (
+            <PlayAlongView
+              song={song}
+              lines={lines}
+              translationLines={translationLines}
+              audioRef={player.audioRef}
+              isPlaying={player.isPlaying}
+              onTogglePlay={player.togglePlay}
+              onSeek={player.seekTo}
+              modeTabsContainer={modeTabsEl}
+            />
+          ) : lines.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-28 gap-3 text-center">
+              <p className="text-[15px] text-[var(--text-primary)]">No lyrics yet</p>
+              <p className="text-[12.5px] text-[var(--text-muted)] max-w-[340px] leading-relaxed">
+                Fetch them from the video's captions or paste them in — sections like [Chorus] are picked up automatically.
+              </p>
+              <button
+                onClick={() => navigate(`/song/${songId}/lyrics`)}
+                className="mt-2 px-4 py-[7px] rounded-[7px] bg-[var(--accent)] text-white text-[13px] font-medium hover:opacity-80 border-none cursor-pointer"
+              >
+                Add lyrics
+              </button>
+            </div>
+          ) : (
+            <div className="mx-auto max-w-[760px] px-6 pt-4">
+              <LyricSheet
+                lines={lines}
+                sections={sections}
+                translationByOrder={translationByOrder}
+                highlights={highlights}
+                vocalMap={vocalMap}
+                showBreathMap={showBreathMap}
+                cursor={cursor ? { ...cursor, anchor, focus } : null}
+                editingLineId={editingLineId}
+                sectionEdit={sectionEdit}
+                playingLineId={playingLineId}
+                loopLineIds={loopLineIds}
+                showStartDot={!takes.busy && !takes.pending}
+                issuesByLine={takes.issuesByLine}
+                onSelect={onSelect}
+                onStartEdit={setEditingLineId}
+                onCommitEdit={onCommitEdit}
+                onCancelEdit={onCancelEdit}
+                onPlay={onPlay}
+                onIssueClick={onIssueClick}
+                onSectionClick={(sec) => {
+                  const first = lines.find((l) => l.order >= sec.start_line_order);
+                  moveTo(first, false);
+                }}
+                onSectionEdit={setSectionEdit}
+                onCommitNewSection={(lineId, name) => {
+                  setSectionEdit(null);
+                  const line = lines.find((l) => l.id === lineId);
+                  if (line && name.trim()) edits.createSection(sections, lines, line.order, name.trim());
+                }}
+                onCommitRename={(sec, name) => {
+                  setSectionEdit(null);
+                  if (!name.trim()) edits.removeSection(sec);
+                  else edits.renameSection(sec, name.trim());
+                }}
+                onRemoveSection={(sec) => edits.removeSection(sec)}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Right panel */}
+        {view === "lyrics" && (
+          <aside className="w-[400px] flex-shrink-0 flex flex-col min-h-0 border-l border-[var(--border)] bg-[var(--surface)]">
+            <div className="flex items-center gap-1 px-4 pt-3 flex-shrink-0 border-b border-[var(--border-subtle)]">
+              {([["takes", `Takes${takes.takes.length ? ` · ${takes.takes.length}` : ""}`], ["line", "Line"]] as const).map(([v, label]) => (
+                <button
+                  key={v}
+                  onClick={() => setRightTab(v)}
+                  className={`px-3 pb-[8px] pt-[2px] text-[12px] font-medium border-none bg-transparent cursor-pointer border-b-2 -mb-px ${
+                    rightTab === v ? "text-[var(--text-primary)] border-[var(--theme)]" : "text-[var(--text-muted)] border-transparent hover:text-[var(--text-primary)]"
+                  }`}
+                  style={{ borderBottomStyle: "solid" }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {rightTab === "takes" ? (
+              <TakesPanel
+                t={takes}
+                song={song}
+                lines={lines}
+                sections={sections}
+                startLine={cursorLine}
+                cursorSection={cursorSection}
+                backingLabel={tracks.find((t) => t.key === track)?.label ?? "Original"}
+              />
+            ) : (
+              <LinePanel
+                song={song}
+                line={cursorLine}
+                index={cursorIdx}
+                total={lines.length}
+                section={cursorSection}
+                highlights={highlights}
+                player={player}
+                issues={cursorLine ? takes.issuesByLine.get(cursorLine.id) ?? [] : []}
+                onNudge={nudge}
+                onTapStart={() => void tapStart()}
+                onRemoveAnnotation={(i) => {
+                  const a = cursorLine?.annotations?.[i];
+                  if (cursorLine && a) edits.clearAnnotations(cursorLine.id, a.start, a.end);
+                }}
+                onIssueClick={onIssueClick}
+              />
+            )}
+          </aside>
+        )}
+      </div>
+
+      {/* Overlays */}
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-[7px] rounded-[8px] bg-[#111] text-white text-[12.5px] shadow-lg pointer-events-none">
+          {toast}
+        </div>
+      )}
+      {paletteOpen && <CommandPalette commands={commands} onClose={() => setPaletteOpen(false)} />}
+      {shortcutsOpen && <ShortcutSheet onClose={() => setShortcutsOpen(false)} highlightNames={highlights.map((h) => h.name)} />}
+      {setupOpen && (
+        <div className="fixed inset-0 z-40 flex justify-end bg-black/25" onMouseDown={() => setSetupOpen(false)}>
+          <div
+            className="w-full max-w-[640px] h-full overflow-y-auto bg-[var(--bg)] border-l border-[var(--border)] shadow-2xl"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-3 bg-[var(--surface)] border-b border-[var(--border)]">
+              <span className="text-[13px] font-medium">Audio setup</span>
+              <button
+                onClick={() => setSetupOpen(false)}
+                className="px-3 py-[5px] rounded-[7px] bg-[var(--accent)] text-white text-[12.5px] font-medium border-none cursor-pointer hover:opacity-80"
+              >
+                Done
+              </button>
+            </div>
+            <SongSetupPanel songId={songId} />
+          </div>
+        </div>
+      )}
+      <EditSongModal
+        open={editOpen}
+        song={song}
+        onSave={(data) => {
+          updateSong(songId, data);
+          setEditOpen(false);
+        }}
+        onClose={() => setEditOpen(false)}
+      />
+      <ConfirmDialog
+        open={deleteOpen}
+        title="Delete this song?"
+        message="Its lyrics, marks, sections and takes are removed from the library — this can't be undone. Audio files on disk stay where they are."
+        confirmLabel="Delete"
+        destructive
+        onConfirm={async () => {
+          setDeleteOpen(false);
+          await removeSong(songId);
+          navigate("/library");
+        }}
+        onCancel={() => setDeleteOpen(false)}
+      />
+    </div>
+  );
+}

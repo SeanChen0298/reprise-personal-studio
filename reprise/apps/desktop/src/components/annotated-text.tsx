@@ -11,6 +11,10 @@ interface Props {
   lineFuriganaHtml?: string;
   /** Character positions in `text` to draw a breath mark before (with a tooltip each). */
   breathMarks?: { pos: number; title: string }[];
+  /** Keyboard selection [start, end) to highlight. */
+  selection?: [number, number];
+  /** Caret position to draw (character index, 0..text.length). */
+  caret?: number;
 }
 
 interface Segment {
@@ -106,9 +110,10 @@ function buildSegments(text: string, annotations?: Annotation[]): Segment[] {
   return segments;
 }
 
-/** Split segments so every breath-mark position falls on a segment boundary. */
-function splitAtMarks(segments: Segment[], marks: number[]): Segment[] {
-  if (marks.length === 0) return segments;
+/** Split segments so every mark position falls on a segment boundary. */
+function splitAtMarks(segments: Segment[], unsorted: number[]): Segment[] {
+  if (unsorted.length === 0) return segments;
+  const marks = [...new Set(unsorted)].sort((a, b) => a - b);
   const out: Segment[] = [];
   for (const seg of segments) {
     let start = seg.charStart;
@@ -127,30 +132,59 @@ function splitAtMarks(segments: Segment[], marks: number[]): Segment[] {
   return out;
 }
 
-export function AnnotatedText({ text, annotations, highlights, onClickAnnotation, className, lineFuriganaHtml, breathMarks }: Props) {
+/** Decorations (breath marks, caret) carry this attribute so selection offsets can skip them. */
+export const NON_TEXT_ATTR = "data-nontext";
+
+const caretEl = (key: string) => (
+  <span
+    key={key}
+    {...{ [NON_TEXT_ATTR]: "" }}
+    className="inline-block w-[2px] h-[1.05em] -mr-[2px] align-[-0.15em] bg-[var(--theme)] animate-pulse select-none"
+  />
+);
+
+export function AnnotatedText({
+  text, annotations, highlights, onClickAnnotation, className, lineFuriganaHtml, breathMarks, selection, caret,
+}: Props) {
   const marks = breathMarks ?? [];
-  const segments = splitAtMarks(buildSegments(text, annotations), marks.map((m) => m.pos));
+  const sel = selection && selection[1] > selection[0] ? selection : null;
+  const bounds = marks.map((m) => m.pos);
+  if (sel) bounds.push(sel[0], sel[1]);
+  if (caret != null) bounds.push(caret);
+  const segments = splitAtMarks(buildSegments(text, annotations), bounds);
   const hlMap = new Map(highlights.map((h) => [h.id, h]));
 
   return (
     <span className={className}>
       {segments.map((seg, i) => {
         const mark = marks.find((m) => m.pos === seg.charStart && m.pos > 0);
-        const node = renderSegment(seg, i);
-        return mark ? (
-          <span key={i}>
-            <span
-              className="inline-block mx-[3px] text-sky-600 font-bold leading-none align-[0.35em] select-none"
-              title={mark.title}
-            >
-              ’
+        let node = renderSegment(seg, i);
+        if (sel && seg.charStart >= sel[0] && seg.charStart < sel[1]) {
+          node = (
+            <span key={i} className="rounded-[2px]" style={{ backgroundColor: "color-mix(in srgb, var(--theme) 28%, transparent)" }}>
+              {node}
             </span>
+          );
+        }
+        const withCaret = caret != null && caret === seg.charStart;
+        if (!mark && !withCaret) return node;
+        return (
+          <span key={i}>
+            {mark && (
+              <span
+                {...{ [NON_TEXT_ATTR]: "" }}
+                className="inline-block mx-[3px] text-sky-600 font-bold leading-none align-[0.35em] select-none"
+                title={mark.title}
+              >
+                ’
+              </span>
+            )}
+            {withCaret && caretEl("c")}
             {node}
           </span>
-        ) : (
-          node
         );
       })}
+      {caret != null && text.length > 0 && caret >= text.length && caretEl("c-end")}
     </span>
   );
 
