@@ -96,15 +96,26 @@ export function RecordDock({
     );
   }
 
+  if (t.between) {
+    return (
+      <div className={shell}>
+        <span className="text-[12.5px] text-[var(--text-secondary)]">Try {t.tryNo - 1} saved — going again…</span>
+        <button onClick={() => t.stop()} title="Stop repeating (R)" className="px-3 py-[4px] rounded-[7px] border border-[var(--border)] bg-transparent text-[12px] text-[var(--text-primary)] cursor-pointer">
+          Stop
+        </button>
+      </div>
+    );
+  }
+
   if (t.countdown != null) {
     return (
       <div className={shell}>
         <span className="w-8 h-8 rounded-full bg-red-600 text-white text-[16px] font-semibold flex items-center justify-center tabular-nums animate-pulse">
           {t.countdown}
         </span>
-        <span className="text-[12.5px] text-[var(--text-secondary)]">Get ready…</span>
+        <span className="text-[12.5px] text-[var(--text-secondary)]">{t.repeat && t.takeSection && t.tryNo > 1 ? `Try ${t.tryNo} — get ready…` : "Get ready…"}</span>
         <MicMeter getLevel={t.recorder.getInputLevel} />
-        <button onClick={t.stop} className="px-2 py-[4px] rounded-[7px] bg-transparent text-[12px] text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer border-none">
+        <button onClick={() => t.stop()} className="px-2 py-[4px] rounded-[7px] bg-transparent text-[12px] text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer border-none">
           Cancel
         </button>
       </div>
@@ -120,9 +131,13 @@ export function RecordDock({
         </span>
         <MicMeter getLevel={t.recorder.getInputLevel} />
         <span className="text-[11px] text-[var(--text-muted)]">
-          {t.takeSection && t.stopAtMs != null ? `${t.takeSection.name} · stops at ${formatMs(t.stopAtMs)}` : "to the end"}
+          {t.takeSection && t.stopAtMs != null
+            ? t.repeat
+              ? `${t.takeSection.name} · try ${t.tryNo} · goes again at ${formatMs(t.stopAtMs)}`
+              : `${t.takeSection.name} · stops at ${formatMs(t.stopAtMs)}`
+            : "to the end"}
         </span>
-        <button onClick={t.stop} title="Stop (R)" className="px-4 py-[5px] rounded-[8px] bg-red-600 text-white text-[12.5px] font-medium hover:bg-red-700 cursor-pointer border-none">
+        <button onClick={() => t.stop()} title={t.repeat && t.takeSection ? "Stop repeating (R)" : "Stop (R)"} className="px-4 py-[5px] rounded-[8px] bg-red-600 text-white text-[12.5px] font-medium hover:bg-red-700 cursor-pointer border-none">
           Stop
         </button>
       </div>
@@ -179,6 +194,15 @@ export function RecordDock({
             <span>
               Sing along with the {backingLabel.toLowerCase()} track
               <span className="block text-[11px] text-[var(--text-muted)]">Needed for the review. Wear headphones.</span>
+            </span>
+          </label>
+          <label className="flex items-start gap-[7px] cursor-pointer select-none">
+            <input type="checkbox" checked={t.repeat} onChange={(e) => t.setRepeat(e.target.checked)} className="mt-[2px] accent-[var(--theme)] cursor-pointer" />
+            <span>
+              Repeat section takes
+              <span className="block text-[11px] text-[var(--text-muted)]">
+                A section take (Shift+R) saves itself at the section's end and goes again. R stops. Alt+R toggles.
+              </span>
             </span>
           </label>
           <label className="flex items-center gap-[7px] select-none">

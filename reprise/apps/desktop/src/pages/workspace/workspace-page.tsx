@@ -479,6 +479,7 @@ function Workspace({ songId }: { songId: string }) {
       return setPanel((cur) => (cur === want ? null : want));
     }
     if (ctrl && letter === "J") return handled(), setPanel((v) => (v ? null : "takes"));
+    if (letter === "R" && alt && !ctrl) return handled(), takes.setRepeat((v) => !v);
     if (letter === "R" && !ctrl && !alt) return handled(), recordFromCursor(shift);
     if (k === "Escape" && takes.countdown != null) return handled(), void takes.stop();
 

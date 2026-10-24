@@ -55,10 +55,19 @@ export function useTakes({ song, lines, sections, player, backing, originalPath,
     backing?: Backing;
   } | null>(null);
   const syncRef = useRef<{ songStartMs: number; backing: Backing } | null>(null);
+  /** Repeat section takes: each one is saved at the section's end and the next starts. */
+  const [repeat, setRepeat] = useState(false);
+  const repeatRef = useRef(repeat);
+  repeatRef.current = repeat;
+  /** Which try of the current repeat run (1 = first). */
+  const [tryNo, setTryNo] = useState(1);
+  const lastStartRef = useRef<{ fromLine: Line | null; section: Section | null } | null>(null);
   const restoreRef = useRef<{ speed: number; loop: boolean } | null>(null);
 
   const recording = recorder.isRecording && countdown == null;
-  const busy = recorder.isRecording || countdown != null;
+  /** Between two repeat tries (the short pause). */
+  const [between, setBetween] = useState(false);
+  const busy = recorder.isRecording || countdown != null || between;
 
   /** Section end (+ tail) for a section take. */
   const sectionEndMs = useCallback(
@@ -72,8 +81,10 @@ export function useTakes({ song, lines, sections, player, backing, originalPath,
   );
 
   const start = useCallback(
-    async (fromLine: Line | null, section: Section | null = null) => {
-      if (!song.audio_folder || busy || pending) return;
+    async (fromLine: Line | null, section: Section | null = null, again = false) => {
+      if (!song.audio_folder || (busy && !again) || pending) return;
+      lastStartRef.current = { fromLine, section };
+      if (!again) setTryNo(1);
       stopSnippet();
       const audio = player.audioRef.current;
       const withSong = singAlong && !!audio && !!song.audio_path;
@@ -130,6 +141,9 @@ export function useTakes({ song, lines, sections, player, backing, originalPath,
     [song, busy, pending, singAlong, player, recorder, recordCountIn, sectionEndMs, backing, inputDeviceId],
   );
 
+  const startRef = useRef(start);
+  startRef.current = start;
+
   const restorePlayer = useCallback(() => {
     const r = restoreRef.current;
     restoreRef.current = null;
@@ -138,12 +152,34 @@ export function useTakes({ song, lines, sections, player, backing, originalPath,
     if (r.loop && !player.loopEnabled) player.toggleLoop();
   }, [player]);
 
-  const stop = useCallback(async () => {
+  const stoppingRef = useRef(false);
+  /** The pause between repeat tries — R / Stop / leaving the song cancels it. */
+  const againTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (againTimerRef.current) clearTimeout(againTimerRef.current);
+  }, []);
+  const stop = useCallback(async (auto = false) => {
     if (countdown != null) {
       cancelCountdownRef.current = true;
       return;
     }
-    if (!recorder.isRecording) return;
+    if (againTimerRef.current) {
+      clearTimeout(againTimerRef.current);
+      againTimerRef.current = null;
+      setBetween(false);
+      return;
+    }
+    if (!recorder.isRecording || stoppingRef.current) return;
+    stoppingRef.current = true;
+    try {
+      await finishTake(auto);
+    } finally {
+      stoppingRef.current = false;
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [countdown, recorder, player, restorePlayer, takeSection]);
+
+  const finishTake = async (auto: boolean) => {
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
@@ -151,6 +187,24 @@ export function useTakes({ song, lines, sections, player, backing, originalPath,
     player.pause();
     const result = await recorder.stopRecording();
     restorePlayer();
+    // Repeating a section: keep this try and go again.
+    const last = lastStartRef.current;
+    if (result && auto && repeatRef.current && takeSection && last) {
+      await storeTake(
+        { filePath: result.filePath, durationMs: result.durationMs, songStartMs: syncRef.current?.songStartMs, backing: syncRef.current?.backing },
+        "",
+        takeSection,
+        false,
+      );
+      setTryNo((n) => n + 1);
+      setBetween(true);
+      againTimerRef.current = setTimeout(() => {
+        againTimerRef.current = null;
+        setBetween(false);
+        void startRef.current(last.fromLine, last.section, true);
+      }, 700);
+      return;
+    }
     if (result) {
       setPending({
         filePath: result.filePath,
@@ -159,12 +213,12 @@ export function useTakes({ song, lines, sections, player, backing, originalPath,
         backing: syncRef.current?.backing,
       });
     }
-  }, [countdown, recorder, player, restorePlayer]);
+  };
 
   // A section take ends with the section; any take ends with the song.
   const nowMs = player.currentTime * 1000;
   useEffect(() => {
-    if (recording && player.isPlaying && stopAtMs != null && nowMs >= stopAtMs) stop();
+    if (recording && player.isPlaying && stopAtMs != null && nowMs >= stopAtMs) stop(true);
   }, [recording, player.isPlaying, stopAtMs, nowMs, stop]);
   const stopRef = useRef(stop);
   stopRef.current = stop;
@@ -214,6 +268,36 @@ export function useTakes({ song, lines, sections, player, backing, originalPath,
     },
     [takes, analyzing, runAnalysis],
   );
+
+  /** Save a finished take; `openIt` opens its review (repeat tries just analyse quietly). */
+  const storeTake = async (
+    data: { filePath: string; durationMs: number; songStartMs?: number; backing?: Backing },
+    note: string,
+    section: Section | null,
+    openIt: boolean,
+  ) => {
+    const now = new Date().toISOString();
+    const rec: Recording = {
+      id: crypto.randomUUID(),
+      song_id: song.id,
+      line_id: null,
+      section_id: section?.id,
+      file_path: data.filePath,
+      duration_ms: data.durationMs,
+      is_master_take: false,
+      is_best_take: false,
+      note: note.trim() || undefined,
+      song_start_ms: data.songStartMs,
+      backing: data.backing,
+      created_at: now,
+      updated_at: now,
+    };
+    await addRecording(song.id, rec);
+    if (canReview(rec, song)) {
+      if (openIt) setReviewId(rec.id);
+      runAnalysis(rec);
+    }
+  };
 
   const save = useCallback(
     async (note: string) => {
@@ -391,6 +475,10 @@ export function useTakes({ song, lines, sections, player, backing, originalPath,
     playIssueYou,
     playIssueOriginal,
     issuesByLine,
+    repeat,
+    setRepeat,
+    between,
+    tryNo,
     mixId,
     playMix,
     stopMix,

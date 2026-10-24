@@ -120,6 +120,7 @@ const SHORTCUTS: [string, [string, string][]][] = [
   ["Record", [
     ["R", "Record from the selected line / stop"],
     ["Shift+R", "Record just this section"],
+    ["Alt+R", "Repeat section takes on / off"],
     ["E", "Play the open take with the instrumental"],
   ]],
   ["General", [
