@@ -292,6 +292,30 @@ export function parseReply(text: string): { body: string; proposals: CoachPropos
 }
 
 /** The song card from a reply that should be JSON (tolerates fences / stray prose). */
+/** The coach's translation: one text per line (index = L# − 1); null if too few lines came back. */
+export function parseTranslation(text: string, lineCount: number): string[] | null {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end <= start) return null;
+  try {
+    const raw = JSON.parse(text.slice(start, end + 1)) as { lines?: unknown };
+    if (!Array.isArray(raw.lines)) return null;
+    const out = new Array<string>(lineCount).fill("");
+    let filled = 0;
+    for (const l of raw.lines as Record<string, unknown>[]) {
+      const at = Math.round(Number(l?.line)) - 1;
+      const t = typeof l?.text === "string" ? l.text.trim() : "";
+      if (at >= 0 && at < lineCount && t && !out[at]) {
+        out[at] = t;
+        filled++;
+      }
+    }
+    return filled >= Math.ceil(lineCount * 0.6) ? out : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The coach's section split: names with the L# (1-based) each starts at, in order and in range. */
 export function parseSectionPlan(text: string, lineCount: number): { name: string; start: number }[] | null {
   const start = text.indexOf("{");

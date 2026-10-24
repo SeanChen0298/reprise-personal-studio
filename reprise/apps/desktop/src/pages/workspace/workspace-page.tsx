@@ -232,6 +232,61 @@ function Workspace({ songId }: { songId: string }) {
   const [coachRequest, setCoachRequest] = useState<{ text: string; nonce: number } | null>(null);
   const [cardTabNonce, setCardTabNonce] = useState(0);
   const [sectionsNonce, setSectionsNonce] = useState(0);
+  const [translateNonce, setTranslateNonce] = useState(0);
+  const setLinesForLanguage = useSongStore((s) => s.setLinesForLanguage);
+  /** Where a coach translation goes: the song's translation language (English by default). */
+  const coachTranslation = useMemo(() => {
+    const lang = transLang ?? "en";
+    const base = (c: string | null | undefined) => (c ?? "").split("-")[0].toLowerCase();
+    // Never when the lyrics themselves are in that language (it would replace them).
+    if (base(song.language) === base(lang) || lines.some((l) => l.language && base(l.language) === base(lang))) return null;
+    let languageName = lang;
+    try {
+      languageName = new Intl.DisplayNames(["en"], { type: "language" }).of(lang) ?? lang;
+    } catch {
+      /* keep the code */
+    }
+    return {
+      languageName,
+      onApply: (texts: string[]) => {
+        const now = new Date().toISOString();
+        const next: Line[] = lines.map((src, i) => ({
+          id: crypto.randomUUID(),
+          song_id: songId,
+          text: texts[i] ?? "",
+          language: lang,
+          order: i,
+          start_ms: src.start_ms,
+          end_ms: src.end_ms,
+          annotations: [],
+          status: "new" as const,
+          play_count: 0,
+          created_at: now,
+          updated_at: now,
+        }));
+        const prev = translationLines;
+        const hadLang = !!transLang;
+        const apply = async (rows: Line[]) => {
+          // The translation language must be set before saving rows in it (see setLinesForLanguage).
+          if (!useSongStore.getState().songs.find((s) => s.id === songId)?.translation_language) await updateSong(songId, { translation_language: lang });
+          await setLinesForLanguage(songId, lang, rows);
+        };
+        void apply(next).then(() => {
+          setShowTranslation(true);
+          say(`Translation from the coach saved (${languageName}) — Ctrl+Z puts the old one back`);
+        });
+        useHistoryStore.getState().push({
+          label: "Coach translation",
+          undo: async () => {
+            await apply(prev);
+            if (!hadLang && prev.length === 0) await updateSong(songId, { translation_language: undefined });
+          },
+          redo: () => apply(next),
+        });
+      },
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transLang, song.language, lines, translationLines, songId]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const setupOpen = searchParams.get("setup") === "1";
@@ -675,6 +730,9 @@ function Workspace({ songId }: { songId: string }) {
       ...(cursorSection ? [{ id: "section-rm", group: "Lyrics", label: `Remove section “${cursorSection.name}”`, run: () => edits.removeSection(cursorSection) }] : []),
       { id: "lyrics", group: "Lyrics", label: "Import / paste lyrics…", run: () => navigate(`/song/${songId}/lyrics`) },
       { id: "hints", group: "View", label: showHints ? "Focus on the lyrics (hide song hints and coach notes)" : "Show song hints and coach notes", shortcut: "V", run: () => setShowHints((v) => !v) },
+      ...(coachTranslation
+        ? [{ id: "coach-translate", group: "Coach", label: `Translate the lyrics with the coach (${coachTranslation.languageName})`, run: () => (setPanel("coach"), setTranslateNonce((n) => n + 1)) }]
+        : []),
       ...(sections.length === 0
         ? [{ id: "coach-sections", group: "Coach", label: "Suggest sections (coach)", run: () => (setPanel("coach"), setSectionsNonce((n) => n + 1)) }]
         : []),
@@ -1092,6 +1150,8 @@ function Workspace({ songId }: { songId: string }) {
                 request={coachRequest}
                 cardTabNonce={cardTabNonce}
                 sectionsNonce={sectionsNonce}
+                translateNonce={translateNonce}
+                translation={coachTranslation}
                 onJumpToLine={(idx) => {
                   markInteraction();
                   moveTo(lines[idx], false);

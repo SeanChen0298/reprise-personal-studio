@@ -45,6 +45,13 @@ export const SECTIONS_PROMPT = `Split this song's lyrics into sections (intro, v
 {"sections": [{"name": "Verse 1", "start": 1}, {"name": "Chorus", "start": 9}]}
 "start" is the L# where the section begins; list them in order; each runs until the next one starts. Number repeated sections (Verse 1, Verse 2, Chorus 2).`;
 
+/** Translate the lyrics line by line — JSON only; previewed before it replaces the current translation. */
+export function translatePrompt(language: string): string {
+  return `Translate this song's lyrics into ${language}, line by line, for a singer who wants to feel what each line means. Natural and faithful to the meaning and mood — not word-for-word, not rhymed, no added explanations. Keep each line about as short as the original; repeated words stay repeated only as often as in the original. Ignore any existing translation shown after "/" — it may be wrong. Reply with ONLY a JSON object, no prose:
+{"lines": [{"line": 1, "text": "…"}, {"line": 2, "text": "…"}]}
+One entry for every L#, in order.`;
+}
+
 export const TIDY_MEMORY_PROMPT = `Tidy your memory of me and of this song. Merge duplicates, rewrite vague items to be specific, and drop anything outdated or wrong — using update_ and forget_ in the reprise block. Keep within the limits. In the answer, just list briefly what you changed and why.`;
 
 /** The song-card job: a structured brief, returned as JSON only. */

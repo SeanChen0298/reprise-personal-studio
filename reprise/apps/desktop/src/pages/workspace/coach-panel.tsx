@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-shell";
 import { backupChain, useCoachStore, searchesToday } from "../../stores/coach-store";
 import { askCoach, CoachError } from "../../lib/coach/providers";
-import { COACH_SYSTEM, SECTIONS_PROMPT, SONG_CARD_PROMPT, TIDY_MEMORY_PROMPT } from "../../lib/coach/persona";
+import { COACH_SYSTEM, SECTIONS_PROMPT, SONG_CARD_PROMPT, TIDY_MEMORY_PROMPT, translatePrompt } from "../../lib/coach/persona";
 import {
   MAX_SINGER_FACTS,
   MAX_SONG_MEMORY,
@@ -11,6 +11,7 @@ import {
   memoryIndex,
   parseReply,
   parseSectionPlan,
+  parseTranslation,
   parseSongCard,
   saveKnowledge,
   saveProfile,
@@ -97,6 +98,8 @@ export function CoachPanel({
   request,
   cardTabNonce,
   sectionsNonce,
+  translateNonce,
+  translation,
   onJumpToLine,
   onApplySections,
   onApplyLineNote,
@@ -117,6 +120,10 @@ export function CoachPanel({
   cardTabNonce?: number;
   /** Bumped from the command palette: suggest sections. */
   sectionsNonce?: number;
+  /** Bumped from the command palette: translate the lyrics. */
+  translateNonce?: number;
+  /** Where a coach translation goes; null when it can't (e.g. the lyrics are already in that language). */
+  translation: { languageName: string; onApply: (texts: string[]) => void } | null;
   onJumpToLine: (lineIndex: number) => void;
   /** Sections the user approved: names with the line index (0-based) each starts at. */
   onApplySections: (plan: { name: string; startIndex: number }[]) => void;
@@ -124,7 +131,9 @@ export function CoachPanel({
 }) {
   const coach = useCoachStore();
   const [input, setInput] = useState("");
-  const [busy, setBusy] = useState<null | "card" | "chat" | "sections">(null);
+  const [busy, setBusy] = useState<null | "card" | "chat" | "sections" | "translate">(null);
+  /** The coach's translation, waiting for approval (index = line). */
+  const [draftTranslation, setDraftTranslation] = useState<string[] | null>(null);
   /** The coach's suggested section split, waiting for approval. */
   const [sectionPlan, setSectionPlan] = useState<{ name: string; start: number }[] | null>(null);
   /** The answer so far while it streams in. */
@@ -216,6 +225,45 @@ export function CoachPanel({
       setStartedAt(null);
     }
   };
+  const translate = async () => {
+    if (!knowledge || busy || !translation) return;
+    setBusy("translate");
+    setStartedAt(Date.now());
+    setError(null);
+    setDraftTranslation(null);
+    try {
+      const r = await askCoach({
+        provider: coach.provider,
+        apiKey,
+        model,
+        system: COACH_SYSTEM,
+        context: context(),
+        history: [],
+        prompt: translatePrompt(translation.languageName),
+        maxSearches: null,
+        fallbackModels: backupChain(coach),
+        quick: true,
+      });
+      const texts = parseTranslation(r.text, lines.length);
+      if (!texts) throw new CoachError("The translation came back incomplete — try again.");
+      setDraftTranslation(texts);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+      setStreaming("");
+      setStartedAt(null);
+    }
+  };
+  const lastTranslateNonce = useRef(0);
+  useEffect(() => {
+    if (translateNonce && translateNonce !== lastTranslateNonce.current && knowledge && apiKey && model) {
+      lastTranslateNonce.current = translateNonce;
+      void translate();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [translateNonce, knowledge !== null]);
+
   const lastSectionsNonce = useRef(0);
   useEffect(() => {
     if (sectionsNonce && sectionsNonce !== lastSectionsNonce.current && knowledge && apiKey && model) {
@@ -348,10 +396,20 @@ export function CoachPanel({
               <svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor" className={`transition-transform ${cardOpen ? "rotate-90" : ""}`}><polygon points="6,3 20,12 6,21" /></svg>
               Song card
             </button>
+            {translation && (
+              <button
+                onClick={() => void translate()}
+                disabled={busy != null}
+                title={`Translate the lyrics into ${translation.languageName} — you see it before it replaces the current translation`}
+                className="ml-auto text-[11px] text-[var(--text-muted)] bg-transparent border-none cursor-pointer hover:text-[var(--theme)] disabled:opacity-40"
+              >
+                Translate lyrics
+              </button>
+            )}
             <button
               onClick={() => void writeCard()}
               disabled={busy != null}
-              className="ml-auto text-[11px] text-[var(--theme)] bg-transparent border-none cursor-pointer hover:underline disabled:opacity-40"
+              className={`${translation ? "" : "ml-auto "}text-[11px] text-[var(--theme)] bg-transparent border-none cursor-pointer hover:underline disabled:opacity-40`}
             >
               {busy === "card" ? "Writing…" : card ? "Rewrite" : "Write it"}
             </button>
@@ -439,6 +497,48 @@ export function CoachPanel({
                   </button>
                 </div>
                 <p className="mt-2 text-[10.5px] text-[var(--text-muted)]">Ctrl+Z undoes it.</p>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* A translation from the coach, previewed before it replaces the current one */}
+        {(busy === "translate" || draftTranslation) && (
+          <div className="rounded-[10px] border border-[var(--border)] bg-[var(--bg)] p-3">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.09em] text-[var(--text-muted)]">Translation</div>
+            {busy === "translate" && startedAt != null && (
+              <p className="mt-2 text-[12px] text-[var(--text-muted)] tabular-nums">
+                <span className="animate-pulse">Translating…</span> {((Date.now() - startedAt) / 1000).toFixed(1)} s
+              </p>
+            )}
+            {draftTranslation && (
+              <>
+                <div className="mt-2 max-h-[260px] overflow-y-auto flex flex-col gap-[6px] pr-1" style={{ scrollbarWidth: "thin" }}>
+                  {lines.map((l, i) => (
+                    <div key={l.id} className="text-[12px] leading-snug">
+                      <div className="text-[var(--text-muted)]">{l.custom_text ?? l.text}</div>
+                      <div className="text-[var(--text-primary)]">{draftTranslation[i] || "—"}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      translation?.onApply(draftTranslation);
+                      setDraftTranslation(null);
+                    }}
+                    className="px-3 py-[4px] rounded-[6px] bg-[var(--theme)] text-white text-[11.5px] font-medium border-none cursor-pointer"
+                  >
+                    Use this translation
+                  </button>
+                  <button
+                    onClick={() => setDraftTranslation(null)}
+                    className="ml-auto text-[11.5px] text-[var(--text-muted)] bg-transparent border-none cursor-pointer hover:text-[var(--text-primary)]"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+                <p className="mt-2 text-[10.5px] text-[var(--text-muted)]">Replaces the current translation. Ctrl+Z puts it back.</p>
               </>
             )}
           </div>
