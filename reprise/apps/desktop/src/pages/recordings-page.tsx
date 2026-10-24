@@ -25,6 +25,31 @@ import {
 import { LONG_PHRASE_MS, lineVocalInfo, semitoneToNoteName, type VocalMap } from "../lib/vocal-map";
 import type { Recording, Line, Section, TakeIssue } from "../types/song";
 
+/** Music played before the start line so there's something to come in on. */
+const LEAD_IN_MS = 2000;
+/** A section take keeps recording this long after the section's last line. */
+const STOP_TAIL_MS = 1500;
+
+/** Live mic level while recording — confirms the mic is picking you up. */
+function MicMeter({ getLevel }: { getLevel: () => number }) {
+  const barRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      const level = Math.min(1, getLevel() * 3);
+      if (barRef.current) barRef.current.style.width = `${Math.round(level * 100)}%`;
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [getLevel]);
+  return (
+    <div className="w-[70px] h-[5px] rounded-full bg-[var(--bg)] overflow-hidden" title="Mic level">
+      <div ref={barRef} className="h-full bg-emerald-500 transition-[width] duration-75" style={{ width: 0 }} />
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // WaveSurfer thumbnail (renders peaks from the recording file, display-only)
 // ---------------------------------------------------------------------------
@@ -670,9 +695,13 @@ export function RecordingsPage() {
     }
   }, [currentSongPath]);
 
-  const seekToLine = useCallback((line: Line) => {
+  /** Where the next take starts: a line (and the section it was picked from, to stop at its end). */
+  const [cue, setCue] = useState<{ lineId: string; sectionId?: string } | null>(null);
+
+  const seekToLine = useCallback((line: Line, sectionId?: string) => {
     const audio = songAudioRef.current;
     if (!audio || !currentSongPath || line.start_ms == null) return;
+    setCue({ lineId: line.id, sectionId });
     audio.currentTime = line.start_ms / 1000;
     // Don't call setSongCurrentMs here — the RAF loop reads audio.currentTime
     // which is synchronously updated by the seek. Two competing state setters
@@ -682,25 +711,76 @@ export function RecordingsPage() {
 
   const seekToSection = useCallback((section: Section) => {
     const first = lines.find((l) => l.order >= section.start_line_order && l.start_ms != null);
-    if (first) seekToLine(first);
+    if (first) seekToLine(first, section.id);
   }, [lines, seekToLine]);
 
   // ── Free recording (start / stop / save) ─────────────────────────────────
+  const recordCountIn = usePreferencesStore((s) => s.recordCountIn);
+  const setRecordCountIn = usePreferencesStore((s) => s.setRecordCountIn);
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const cancelCountdownRef = useRef(false);
+
+  /** The line a take will start from: the cued line, else the one at (or next after) the playhead. */
+  const startLine = useMemo(() => {
+    const timed = lines.filter((l) => l.start_ms != null);
+    if (cue) {
+      const l = timed.find((x) => x.id === cue.lineId);
+      if (l) return l;
+    }
+    return (
+      timed.find((l) => songCurrentMs >= l.start_ms! && (l.end_ms == null || songCurrentMs < l.end_ms)) ??
+      timed.find((l) => l.start_ms! >= songCurrentMs) ??
+      null
+    );
+  }, [cue, lines, songCurrentMs]);
+
+  /** When a section was picked, the take stops shortly after its last line. */
+  const stopAtMs = useMemo(() => {
+    if (!cue?.sectionId) return null;
+    const sec = sections.find((x) => x.id === cue.sectionId);
+    if (!sec) return null;
+    const secLines = lines.filter(
+      (l) => l.order >= sec.start_line_order && l.order <= sec.end_line_order && l.end_ms != null,
+    );
+    return secLines.length ? Math.max(...secLines.map((l) => l.end_ms!)) + STOP_TAIL_MS : null;
+  }, [cue, sections, lines]);
+  const cueSection = cue?.sectionId ? sections.find((x) => x.id === cue.sectionId) ?? null : null;
+
   const startFreeRecording = useCallback(async () => {
-    if (!song?.audio_folder) return;
+    if (!song?.audio_folder || countdown != null) return;
     stopAllPlayback();
     setRecordingTimer(0);
+    setPendingSync(null);
     const audio = songAudioRef.current;
     const withSong = singAlong && !!audio && !!currentSongPath;
     if (audio && !audio.paused) {
       audio.pause();
       setSongPlaying(false);
     }
+    // Rewind to the start of the line, with a little music before it to come in on.
+    if (withSong && audio && startLine?.start_ms != null) {
+      const fromMs = Math.max(0, startLine.start_ms - LEAD_IN_MS);
+      audio.currentTime = fromMs / 1000;
+      setSongCurrentMs(fromMs);
+    }
+
+    // The mic opens now; the countdown gives you (and it) a moment to settle.
     await recorder.startRecording("free", song.audio_folder);
+    cancelCountdownRef.current = false;
+    for (let n = recordCountIn; n > 0; n--) {
+      setCountdown(n);
+      await new Promise((r) => setTimeout(r, 1000));
+      if (cancelCountdownRef.current) {
+        setCountdown(null);
+        const discarded = await recorder.stopRecording();
+        if (discarded) remove(discarded.filePath).catch(() => {});
+        return;
+      }
+    }
+    setCountdown(null);
+
     timerRef.current = setInterval(() => setRecordingTimer((t) => t + 1), 1000);
-    setPendingSync(null);
     if (withSong && audio) {
-      // Start the song where it's parked (click a line/section first to start there).
       const songPosMs = audio.currentTime * 1000;
       try {
         await audio.play();
@@ -712,9 +792,13 @@ export function RecordingsPage() {
         // Couldn't start the song — it's just a free take then.
       }
     }
-  }, [recorder, song?.audio_folder, singAlong, currentSongPath, songSrcKey, stopAllPlayback]);
+  }, [recorder, song?.audio_folder, singAlong, currentSongPath, songSrcKey, stopAllPlayback, startLine, recordCountIn, countdown]);
 
   const stopFreeRecording = useCallback(async () => {
+    if (countdown != null) {
+      cancelCountdownRef.current = true;
+      return;
+    }
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
@@ -730,7 +814,50 @@ export function RecordingsPage() {
       setPendingNote("");
       setTimeout(() => noteInputRef.current?.focus(), 50);
     }
-  }, [recorder]);
+  }, [recorder, countdown]);
+
+  // A take started from a section ends with the section.
+  useEffect(() => {
+    if (recorder.isRecording && countdown == null && songPlaying && stopAtMs != null && songCurrentMs >= stopAtMs) {
+      stopFreeRecording();
+    }
+  }, [recorder.isRecording, countdown, songPlaying, stopAtMs, songCurrentMs, stopFreeRecording]);
+
+  // Keyboard: R starts/stops a take, Space plays/pauses the song (not while typing).
+  const startRef = useRef(startFreeRecording);
+  startRef.current = startFreeRecording;
+  const stopRef = useRef(stopFreeRecording);
+  stopRef.current = stopFreeRecording;
+  const toggleRef = useRef(toggleSongPlay);
+  toggleRef.current = toggleSongPlay;
+  const keyStateRef = useRef({ recording: false, counting: false, pending: false });
+  keyStateRef.current = { recording: recorder.isRecording, counting: countdown != null, pending: pendingRec != null };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (e.ctrlKey || e.metaKey || e.altKey || el?.closest("input, textarea, select, [contenteditable=true]")) return;
+      const st = keyStateRef.current;
+      if (e.key === "r" || e.key === "R") {
+        e.preventDefault();
+        if (st.recording || st.counting) stopRef.current();
+        else if (!st.pending) startRef.current();
+      } else if (e.key === " " && !st.recording && !st.counting) {
+        e.preventDefault();
+        toggleRef.current();
+      } else if (e.key === "Escape" && st.counting) {
+        stopRef.current();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Follow the song: keep the line being sung in view.
+  const lineElRefs = useRef(new Map<string, HTMLDivElement>());
+  useEffect(() => {
+    if (!playingLineId) return;
+    lineElRefs.current.get(playingLineId)?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [playingLineId]);
 
   // The song ending ends a sung-along take.
   const stopFreeRecordingRef = useRef(stopFreeRecording);
@@ -1015,7 +1142,7 @@ export function RecordingsPage() {
                   {vocalMap && (
                     <button
                       onClick={() => setShowBreathMap((v) => !v)}
-                      title="Show where the original singer takes quick breaths, sings long phrases and goes high"
+                      title="Where the original singer breathes (’ blue = breath, amber = quick breath), long phrases and the highest notes"
                       className={`px-[7px] py-[2px] text-[9.5px] font-medium rounded-[4px] border cursor-pointer transition-colors ${
                         showBreathMap
                           ? "bg-[var(--theme-light)] text-[var(--theme-text)] border-transparent"
@@ -1048,7 +1175,7 @@ export function RecordingsPage() {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={toggleSongPlay}
-                    disabled={!currentSongPath || recorder.isRecording}
+                    disabled={!currentSongPath || recorder.isRecording || countdown != null}
                     className="w-7 h-7 rounded-full bg-[var(--theme)] text-white flex items-center justify-center border-none cursor-pointer hover:opacity-85 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
                   >
                     {songPlaying ? (
@@ -1065,7 +1192,7 @@ export function RecordingsPage() {
                     {formatMs(Math.round(songCurrentMs))}
                   </span>
                   <span className="text-[10px] text-[var(--text-muted)] opacity-50">
-                    Click a line to jump
+                    Click a line to play from it · Space play/pause · R record
                   </span>
                 </div>
               )}
@@ -1084,10 +1211,15 @@ export function RecordingsPage() {
                       return (
                         <button
                           key={`sec-${item.section.id}`}
-                          onClick={() => seekToSection(item.section)}
+                          onClick={() => !recorder.isRecording && countdown == null && seekToSection(item.section)}
+                          title="Play from here — the next take records just this section"
                           className="flex items-center gap-2 mt-3 mb-1 w-full text-left cursor-pointer bg-transparent border-none group"
                         >
-                          <span className="text-[9.5px] font-semibold uppercase tracking-[0.09em] text-[var(--text-muted)] group-hover:text-[var(--theme-text)] transition-colors flex-shrink-0">
+                          <span
+                            className={`text-[9.5px] font-semibold uppercase tracking-[0.09em] group-hover:text-[var(--theme-text)] transition-colors flex-shrink-0 ${
+                              cue?.sectionId === item.section.id ? "text-red-600" : "text-[var(--text-muted)]"
+                            }`}
+                          >
                             {item.section.name}
                           </span>
                           <div className="flex-1 h-px bg-[var(--border-subtle)]" />
@@ -1098,33 +1230,55 @@ export function RecordingsPage() {
                     const isPlaying = playingLineId === line.id;
                     const translation = translationByOrder.get(line.order);
                     // Seeking mid-take would break the take's alignment with the song.
-                    const canSeek = line.start_ms != null && currentSongPath && !recorder.isRecording;
-                    const info = vocalMap && showBreathMap ? lineVocalInfo(vocalMap, line) : null;
+                    const canSeek = line.start_ms != null && currentSongPath && !recorder.isRecording && countdown == null;
+                    const displayText = line.custom_text ?? line.text;
+                    const info = vocalMap && showBreathMap ? lineVocalInfo(vocalMap, line, displayText) : null;
+                    const isStart = !recorder.isRecording && !pendingRec && startLine?.id === line.id;
                     const lineIssues = reviewIssuesByLine.get(line.id) ?? [];
                     return (
                       <div
                         key={line.id}
+                        ref={(el) => {
+                          if (el) lineElRefs.current.set(line.id, el);
+                          else lineElRefs.current.delete(line.id);
+                        }}
                         onClick={() => canSeek && seekToLine(line)}
-                        className={`flex flex-col px-2 py-[5px] rounded-[6px] transition-colors ${
-                          canSeek ? "hover:bg-[var(--bg)] cursor-pointer" : ""
-                        }`}
+                        className={`relative flex flex-col px-2 py-[5px] rounded-[6px] transition-colors ${
+                          isPlaying ? "bg-[var(--theme-light)]" : canSeek ? "hover:bg-[var(--bg)]" : ""
+                        } ${canSeek ? "cursor-pointer" : ""}`}
                       >
-                        {info?.breathBefore?.quick && (
-                          <div
-                            className="text-[9.5px] text-sky-700/80 -mb-[1px] select-none"
-                            title={`The original singer has ${((info.breathBefore.endMs - info.breathBefore.startMs) / 1000).toFixed(1)} s to breathe here`}
-                          >
-                            ‿ quick breath
-                          </div>
+                        {isStart && (
+                          <span
+                            className="absolute -left-[10px] top-[11px] w-[6px] h-[6px] rounded-full bg-red-500"
+                            title="The next take starts from this line"
+                          />
                         )}
                         <div className="flex items-start">
                         <div className="flex-1 min-w-0">
-                          <div className={`text-[14px] leading-[1.6] text-[var(--text-primary)] transition-all ${isPlaying ? "font-medium" : "font-normal"}`}>
+                          <div className={`text-[14px] leading-[1.6] transition-all ${isPlaying ? "font-medium text-[var(--theme-text)]" : "font-normal text-[var(--text-primary)]"}`}>
+                            {info?.breathBefore && (
+                              <span
+                                className={`inline-block mr-[5px] font-bold leading-none align-[0.35em] select-none ${
+                                  info.breathBefore.quick ? "text-amber-600" : "text-sky-600"
+                                }`}
+                                title={
+                                  info.breathBefore.quick
+                                    ? `Quick breath — the original singer has only ${((info.breathBefore.endMs - info.breathBefore.startMs) / 1000).toFixed(1)} s here`
+                                    : `Breathe before this line (${((info.breathBefore.endMs - info.breathBefore.startMs) / 1000).toFixed(1)} s gap)`
+                                }
+                              >
+                                ’
+                              </span>
+                            )}
                             <AnnotatedText
-                              text={line.custom_text ?? line.text}
+                              text={displayText}
                               annotations={line.annotations}
                               highlights={highlights}
                               lineFuriganaHtml={line.custom_text ? line.custom_furigana_html : line.furigana_html}
+                              breathMarks={info?.midBreaths.map((m) => ({
+                                pos: m.pos,
+                                title: `${m.breath.quick ? "Quick breath" : "Breath"} inside the line (${((m.breath.endMs - m.breath.startMs) / 1000).toFixed(1)} s)`,
+                              }))}
                             />
                           </div>
                           {translation && (
@@ -1201,11 +1355,28 @@ export function RecordingsPage() {
                 <span className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-[var(--text-muted)]">
                   Free recording
                 </span>
-                <span className="text-[10.5px] text-[var(--text-muted)]">
-                  {singAlong && currentSongPath
-                    ? `starts the song from ${formatMs(Math.round(songCurrentMs))} — click a line or section first to start there`
-                    : "not tied to any line"}
+                <span className="text-[10.5px] text-[var(--text-muted)] truncate">
+                  {!singAlong || !currentSongPath
+                    ? "not tied to any line"
+                    : recorder.isRecording || countdown != null
+                      ? cueSection && stopAtMs != null
+                        ? `${cueSection.name} — stops at ${formatMs(stopAtMs)}`
+                        : "to the end of the song"
+                      : startLine
+                        ? `starts at “${(startLine.custom_text ?? startLine.text).slice(0, 24)}${(startLine.custom_text ?? startLine.text).length > 24 ? "…" : ""}” (${formatMs(startLine.start_ms!)})${
+                            cueSection ? ` · ${cueSection.name} only` : ""
+                          } — click a line or section to change`
+                        : "click a line or section to choose where to start"}
                 </span>
+                {cueSection && !recorder.isRecording && countdown == null && (
+                  <button
+                    onClick={() => setCue(cue ? { lineId: cue.lineId } : null)}
+                    title="Keep recording to the end of the song"
+                    className="text-[10.5px] text-[var(--theme)] bg-transparent border-none cursor-pointer hover:underline flex-shrink-0"
+                  >
+                    whole song
+                  </button>
+                )}
               </div>
 
               {pendingRec ? (
@@ -1242,6 +1413,21 @@ export function RecordingsPage() {
                     </button>
                   </div>
                 </div>
+              ) : countdown != null ? (
+                /* Count-in before the song starts */
+                <div className="flex items-center gap-3">
+                  <span className="w-9 h-9 rounded-full bg-red-600 text-white text-[18px] font-semibold flex items-center justify-center tabular-nums animate-pulse">
+                    {countdown}
+                  </span>
+                  <span className="text-[12.5px] text-[var(--text-secondary)]">Get ready…</span>
+                  <MicMeter getLevel={recorder.getInputLevel} />
+                  <button
+                    onClick={stopFreeRecording}
+                    className="px-3 py-[6px] rounded-[7px] border border-[var(--border)] bg-transparent text-[12.5px] text-[var(--text-secondary)] hover:border-[#888] transition-all cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
               ) : recorder.isRecording ? (
                 /* Recording in progress */
                 <div className="flex items-center gap-3">
@@ -1250,8 +1436,10 @@ export function RecordingsPage() {
                     {String(Math.floor(recordingTimer / 60)).padStart(2, "0")}:
                     {String(recordingTimer % 60).padStart(2, "0")}
                   </span>
+                  <MicMeter getLevel={recorder.getInputLevel} />
                   <button
                     onClick={stopFreeRecording}
+                    title="Stop (R)"
                     className="flex items-center gap-[5px] px-4 py-[6px] rounded-[7px] bg-red-600 text-white text-[12.5px] font-medium hover:bg-red-700 transition-colors cursor-pointer border-none"
                   >
                     Stop
@@ -1263,6 +1451,7 @@ export function RecordingsPage() {
                   <button
                     onClick={startFreeRecording}
                     disabled={!song.audio_folder}
+                    title="Record (R)"
                     className="flex items-center gap-[6px] px-4 py-2 rounded-[8px] bg-red-600 text-white text-[13px] font-medium hover:bg-red-700 transition-colors cursor-pointer border-none disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
@@ -1284,6 +1473,18 @@ export function RecordingsPage() {
                       Sing along ({songAudioSources.find((s) => s.key === songSrcKey)?.label ?? "Original"}) — headphones on
                     </label>
                   )}
+                  <label className="flex items-center gap-[6px] text-[12px] text-[var(--text-secondary)] select-none">
+                    Count-in
+                    <select
+                      value={recordCountIn}
+                      onChange={(e) => setRecordCountIn(Number(e.target.value))}
+                      className="px-1 py-[2px] rounded-[5px] border border-[var(--border)] bg-[var(--surface)] text-[12px] text-[var(--text-primary)] outline-none cursor-pointer"
+                    >
+                      <option value={0}>off</option>
+                      <option value={3}>3 s</option>
+                      <option value={5}>5 s</option>
+                    </select>
+                  </label>
                 </div>
               )}
             </div>

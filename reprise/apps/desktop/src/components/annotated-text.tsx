@@ -9,6 +9,8 @@ interface Props {
   className?: string;
   /** Full-line ruby HTML for `text`. Used to show furigana on non-annotated segments. */
   lineFuriganaHtml?: string;
+  /** Character positions in `text` to draw a breath mark before (with a tooltip each). */
+  breathMarks?: { pos: number; title: string }[];
 }
 
 interface Segment {
@@ -104,48 +106,88 @@ function buildSegments(text: string, annotations?: Annotation[]): Segment[] {
   return segments;
 }
 
-export function AnnotatedText({ text, annotations, highlights, onClickAnnotation, className, lineFuriganaHtml }: Props) {
-  const segments = buildSegments(text, annotations);
+/** Split segments so every breath-mark position falls on a segment boundary. */
+function splitAtMarks(segments: Segment[], marks: number[]): Segment[] {
+  if (marks.length === 0) return segments;
+  const out: Segment[] = [];
+  for (const seg of segments) {
+    let start = seg.charStart;
+    const end = seg.charStart + seg.text.length;
+    for (const m of marks) {
+      if (m <= start || m >= end) continue;
+      out.push({ ...seg, text: seg.text.slice(start - seg.charStart, m - seg.charStart), charStart: start, furigana_html: null });
+      start = m;
+    }
+    out.push(
+      start === seg.charStart
+        ? seg
+        : { ...seg, text: seg.text.slice(start - seg.charStart), charStart: start, furigana_html: null },
+    );
+  }
+  return out;
+}
+
+export function AnnotatedText({ text, annotations, highlights, onClickAnnotation, className, lineFuriganaHtml, breathMarks }: Props) {
+  const marks = breathMarks ?? [];
+  const segments = splitAtMarks(buildSegments(text, annotations), marks.map((m) => m.pos));
   const hlMap = new Map(highlights.map((h) => [h.id, h]));
 
   return (
     <span className={className}>
       {segments.map((seg, i) => {
-        // Prefer annotation's own furigana; fall back to slicing the full-line furigana
-        const segFurigana = seg.furigana_html
-          ?? (lineFuriganaHtml ? sliceFuriganaHtml(lineFuriganaHtml, seg.charStart, seg.charStart + seg.text.length) : null);
-
-        if (seg.annotationIndex == null || !seg.type) {
-          return segFurigana
-            ? <span key={i} dangerouslySetInnerHTML={{ __html: segFurigana }} />
-            : <span key={i}>{seg.text}</span>;
-        }
-
-        const hl = hlMap.get(seg.type);
-        if (!hl) {
-          return segFurigana
-            ? <span key={i} dangerouslySetInnerHTML={{ __html: segFurigana }} />
-            : <span key={i}>{seg.text}</span>;
-        }
-
-        return (
-          <span
-            key={i}
-            onClick={onClickAnnotation ? (e) => { e.stopPropagation(); onClickAnnotation(seg.annotationIndex!); } : undefined}
-            className={onClickAnnotation ? "cursor-pointer hover:opacity-70 transition-opacity" : ""}
-            style={{
-              backgroundColor: hl.bg,
-              color: hl.color,
-              borderRadius: "3px",
-              padding: "1px 2px",
-            }}
-          >
-            {segFurigana
-              ? <span dangerouslySetInnerHTML={{ __html: segFurigana }} />
-              : seg.text}
+        const mark = marks.find((m) => m.pos === seg.charStart && m.pos > 0);
+        const node = renderSegment(seg, i);
+        return mark ? (
+          <span key={i}>
+            <span
+              className="inline-block mx-[3px] text-sky-600 font-bold leading-none align-[0.35em] select-none"
+              title={mark.title}
+            >
+              ’
+            </span>
+            {node}
           </span>
+        ) : (
+          node
         );
       })}
     </span>
   );
+
+  function renderSegment(seg: Segment, i: number) {
+    // Prefer annotation's own furigana; fall back to slicing the full-line furigana
+    const segFurigana = seg.furigana_html
+      ?? (lineFuriganaHtml ? sliceFuriganaHtml(lineFuriganaHtml, seg.charStart, seg.charStart + seg.text.length) : null);
+
+    if (seg.annotationIndex == null || !seg.type) {
+      return segFurigana
+        ? <span key={i} dangerouslySetInnerHTML={{ __html: segFurigana }} />
+        : <span key={i}>{seg.text}</span>;
+    }
+
+    const hl = hlMap.get(seg.type);
+    if (!hl) {
+      return segFurigana
+        ? <span key={i} dangerouslySetInnerHTML={{ __html: segFurigana }} />
+        : <span key={i}>{seg.text}</span>;
+    }
+
+    return (
+      <span
+        key={i}
+        onClick={onClickAnnotation ? (e) => { e.stopPropagation(); onClickAnnotation(seg.annotationIndex!); } : undefined}
+        className={onClickAnnotation ? "cursor-pointer hover:opacity-70 transition-opacity" : ""}
+        style={{
+          backgroundColor: hl.bg,
+          color: hl.color,
+          borderRadius: "3px",
+          padding: "1px 2px",
+        }}
+      >
+        {segFurigana
+          ? <span dangerouslySetInnerHTML={{ __html: segFurigana }} />
+          : seg.text}
+      </span>
+    );
+  }
 }

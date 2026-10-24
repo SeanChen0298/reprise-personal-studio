@@ -7,6 +7,7 @@
 // user's take against it.
 
 import { freqToSemitone, type PitchPoint } from "./audio-analysis";
+import { characterTimes } from "./lyric-timing";
 import type { Line } from "../types/song";
 
 export const HOP_MS = 10;
@@ -35,6 +36,8 @@ export interface BreathPoint {
   startMs: number;
   endMs: number;
   quick: boolean;
+  /** Found from a loudness dip in the stem rather than a gap in the singing. */
+  inferred?: boolean;
 }
 
 export interface HighMoment {
@@ -65,6 +68,8 @@ export interface LineVocalInfo {
   longestPhraseMs: number;
   /** The breath right before the line starts, if the singer takes one. */
   breathBefore: BreathPoint | null;
+  /** Breaths inside the line: `pos` = character index in the display text the breath comes before. */
+  midBreaths: { pos: number; breath: BreathPoint }[];
   highMoments: HighMoment[];
   peakSemitone: number | null;
 }
@@ -210,19 +215,85 @@ export function medianFilter(values: Float32Array, width: number): Float32Array 
   return out;
 }
 
-/** Summarise the vocal map for one timed line. */
-export function lineVocalInfo(map: VocalMap, line: Pick<Line, "start_ms" | "end_ms">): LineVocalInfo | null {
-  if (line.start_ms == null || line.end_ms == null) return null;
+/** The deepest loudness dip in [fromMs, toMs] if it's ≥ 8 dB below its surroundings. */
+function loudnessDip(db: Float32Array, fromMs: number, toMs: number): BreathPoint | null {
+  const a = Math.max(0, Math.round(fromMs / HOP_MS));
+  const b = Math.min(db.length, Math.round(toMs / HOP_MS));
+  if (b - a < 10) return null;
+  // Smooth over 50 ms so a single quiet frame doesn't count.
+  const smooth = (i: number) => {
+    let sum = 0;
+    let n = 0;
+    for (let k = i - 2; k <= i + 2; k++) if (k >= 0 && k < db.length) (sum += db[k]), n++;
+    return sum / n;
+  };
+  let minAt = a;
+  let min = Infinity;
+  for (let i = a; i < b; i++) {
+    const v = smooth(i);
+    if (v < min) {
+      min = v;
+      minAt = i;
+    }
+  }
+  const around: number[] = [];
+  for (let i = Math.max(0, minAt - 100); i < Math.min(db.length, minAt + 100); i++) {
+    if (Math.abs(i - minAt) > 15) around.push(db[i]);
+  }
+  around.sort((x, y) => x - y);
+  const level = around[Math.floor(around.length * 0.6)];
+  if (!(level - min >= 8)) return null;
+  return { startMs: (minAt - 5) * HOP_MS, endMs: (minAt + 5) * HOP_MS, quick: true, inferred: true };
+}
+
+/** Summarise the vocal map for one timed line (`text` = the text as displayed). */
+export function lineVocalInfo(map: VocalMap, line: Line, text: string): LineVocalInfo | null {
+  if (line.start_ms == null || line.end_ms == null || line.end_ms <= line.start_ms) return null;
   const s = line.start_ms;
   const e = line.end_ms;
   let longestPhraseMs = 0;
   for (const p of map.phrases) {
     if (p.endMs > s && p.startMs < e) longestPhraseMs = Math.max(longestPhraseMs, p.endMs - p.startMs);
   }
-  // The breath whose re-entry lands near the line's start (lyric timing is approximate).
-  const breathBefore =
-    map.breaths.find((b) => b.endMs >= s - 400 && b.endMs <= s + 600) ?? null;
+
+  // The breath nearest the line's start — lyric timing is approximate, so allow
+  // the gap to sit a little either side of it.
+  let breathBefore: BreathPoint | null = null;
+  let bestDist = Infinity;
+  for (const b of map.breaths) {
+    if (b.endMs < s - 800 || b.startMs > s + 400) continue;
+    const dist = Math.abs(b.endMs - s);
+    if (dist < bestDist) {
+      bestDist = dist;
+      breathBefore = b;
+    }
+  }
+
+  // No clear gap (lines sung legato, or reverb / backing vocals filling it): a
+  // sharp dip in the stem's loudness near the start is almost always a catch-breath.
+  if (!breathBefore && map.stemDb) breathBefore = loudnessDip(map.stemDb, s - 700, s + 300);
+
+  // Breaths taken inside the line, placed between the characters around them.
+  const chars = Array.from(text);
+  const times = chars.length ? characterTimes(line, chars.length) : [];
+  const midBreaths: { pos: number; breath: BreathPoint }[] = [];
+  for (const b of map.breaths) {
+    if (b === breathBefore || b.startMs <= s + 300 || b.startMs >= e - 150) continue;
+    let pos = times.findIndex((t) => t >= b.startMs);
+    if (pos <= 0 || pos >= chars.length) continue;
+    // Prefer a word boundary within a couple of characters.
+    for (const d of [0, -1, 1, -2, 2]) {
+      const k = pos + d;
+      if (k > 0 && k < chars.length && /[\s、。,.!?！？]/.test(chars[k - 1])) {
+        pos = k;
+        break;
+      }
+    }
+    // Back to a UTF-16 index for slicing the string.
+    midBreaths.push({ pos: chars.slice(0, pos).join("").length, breath: b });
+  }
+
   const highMoments = map.highMoments.filter((h) => h.endMs > s && h.startMs < e);
   const peakSemitone = highMoments.length ? Math.max(...highMoments.map((h) => h.peakSemitone)) : null;
-  return { longestPhraseMs, breathBefore, highMoments, peakSemitone };
+  return { longestPhraseMs, breathBefore, midBreaths, highMoments, peakSemitone };
 }
