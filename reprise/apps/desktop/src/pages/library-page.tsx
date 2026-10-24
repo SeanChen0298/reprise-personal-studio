@@ -8,21 +8,8 @@ import { useQueueStore } from "../stores/queue-store";
 import { useSortedGroupedSongs } from "../hooks/use-sorted-grouped-songs";
 import { QueuePlayerBar } from "../components/queue-player-bar";
 import { TidyTitlesDialog, findTitleFixes } from "../components/tidy-titles-dialog";
-import { computeSongProgress } from "../lib/status-config";
 import type { Song } from "../types/song";
 import type { SongGroup } from "../hooks/use-sorted-grouped-songs";
-
-/** Thin practice-progress line — quiet when untouched. */
-function ProgressLine({ value, className = "" }: { value: number; className?: string }) {
-  return (
-    <div
-      className={`h-[3px] rounded-full bg-[var(--border-subtle)] overflow-hidden ${className}`}
-      title={value > 0 ? `${value}% practised` : "Not practised yet"}
-    >
-      {value > 0 && <div className="h-full rounded-full bg-[var(--theme)]" style={{ width: `${value}%` }} />}
-    </div>
-  );
-}
 
 function DownloadBadge({ status }: { status?: string }) {
   if (status === "downloading") {
@@ -49,11 +36,10 @@ function DownloadBadge({ status }: { status?: string }) {
 }
 
 function SongCard({
-  song, mastery, onPin, onClick, onContextMenu, onEnqueue,
+  song, onPin, onClick, onContextMenu, onEnqueue,
   draggable, dragOver, onDragStart, onDragOver, onDragEnd, onDrop,
 }: {
   song: Song;
-  mastery: number;
   onPin: (id: string) => void;
   onClick: (e: React.MouseEvent) => void;
   onContextMenu?: (e: React.MouseEvent, song: Song) => void;
@@ -122,7 +108,6 @@ function SongCard({
       <div className="px-3 pt-[10px] pb-3">
         <div className="text-[13.5px] font-medium text-[var(--text-primary)] truncate" title={song.title}>{song.title}</div>
         <div className="text-[12px] text-[var(--text-muted)] truncate mt-[1px]">{song.artist}</div>
-        <ProgressLine value={mastery} className="mt-[10px]" />
       </div>
     </div>
   );
@@ -130,10 +115,9 @@ function SongCard({
 
 
 function SongListRow({
-  song, mastery, isPlaying, onPlay, onClick, onPin, onEnqueue, onContextMenu,
+  song, isPlaying, onPlay, onClick, onPin, onEnqueue, onContextMenu,
 }: {
   song: Song;
-  mastery: number;
   isPlaying: boolean;
   onPlay: (song: Song) => void;
   onClick: (e: React.MouseEvent) => void;
@@ -202,8 +186,6 @@ function SongListRow({
         </span>
       )}
 
-      {/* Practice progress */}
-      <ProgressLine value={mastery} className="w-[72px] flex-shrink-0" />
 
       {/* Hover actions */}
       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
@@ -467,7 +449,6 @@ function ViewMenu({ tidyCount, onTidy }: { tidyCount: number; onTidy: () => void
           {option("Custom", librarySort === "custom", () => setLibrarySort("custom"), !canCustomSort)}
           {option("Title", librarySort === "title", () => setLibrarySort("title"))}
           {option("Artist", librarySort === "artist", () => setLibrarySort("artist"))}
-          {option("Progress", librarySort === "mastery", () => setLibrarySort("mastery"))}
           {option("Date added", librarySort === "date_added", () => setLibrarySort("date_added"))}
           <div className="h-px bg-[var(--border-subtle)] my-1" />
           {heading("Group")}
@@ -530,7 +511,6 @@ export function LibraryPage() {
   const setGroupCollapsed = usePreferencesStore((s) => s.setGroupCollapsed);
   const enqueue = useQueueStore((s) => s.enqueue);
   const queueIsPlaying = useQueueStore((s) => s.isPlaying);
-  const allLines = useSongStore((s) => s.lines);
   const librarySearch = usePreferencesStore((s) => s.librarySearch);
   const setLibrarySearch = usePreferencesStore((s) => s.setLibrarySearch);
 
@@ -675,7 +655,6 @@ export function LibraryPage() {
         <SongCard
           key={song.id}
           song={song}
-          mastery={computeSongProgress(allLines[song.id] ?? [])}
           onPin={togglePin}
           onClick={(e) => { if (e.ctrlKey || e.shiftKey) { e.preventDefault(); enqueue(song); } else { navigate(`/song/${song.id}`); } }}
           onContextMenu={handleContextMenu}
@@ -697,7 +676,6 @@ export function LibraryPage() {
         <SongListRow
           key={song.id}
           song={song}
-          mastery={computeSongProgress(allLines[song.id] ?? [])}
           isPlaying={playingId === song.id}
           onPlay={handlePlay}
           onClick={(e) => { if (e.ctrlKey || e.shiftKey) { e.preventDefault(); enqueue(song); } else { navigate(`/song/${song.id}`); } }}
