@@ -1,3 +1,4 @@
+import { CoachSettings } from "../components/coach-settings";
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { exists } from "@tauri-apps/plugin-fs";
@@ -13,7 +14,7 @@ import { useAudioDevices } from "../hooks/use-audio-devices";
 import { useSongStore } from "../stores/song-store";
 import { exportBackup, importBackupViaPicker } from "../lib/backup";
 
-type Tab = "highlights" | "preferences" | "downloads" | "audio";
+type Tab = "highlights" | "preferences" | "downloads" | "audio" | "coach";
 
 const THEME_OPTIONS = [
   { key: "blue", color: "#2563EB", label: "Blue", light: "#EFF6FF", text: "#1D4ED8" },
@@ -384,6 +385,13 @@ export function SettingsPage() {
                 </svg>,
               )}
               {tabDef(
+                "coach",
+                "Coach",
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+                </svg>,
+              )}
+              {tabDef(
                 "audio",
                 "Audio I/O",
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -700,6 +708,9 @@ export function SettingsPage() {
 
               </div>
             )}
+
+            {/* ═══ COACH TAB ═══ */}
+            {activeTab === "coach" && <CoachSettings />}
 
             {/* ═══ AUDIO I/O TAB ═══ */}
             {activeTab === "audio" && (

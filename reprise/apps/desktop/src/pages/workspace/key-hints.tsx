@@ -91,6 +91,7 @@ export function KeyHints({
         <Hint k={<Key>T</Key>} label="start = now" />
         <Hint k={<Key>C</Key>} label="symbol ⤴ ~" />
         <Hint k={<Key>N</Key>} label="note" />
+        <Hint k={<Key>G</Key>} label="coach" />
         <Hint k={<Key>#</Key>} label="new section" />
       </>
     );

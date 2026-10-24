@@ -4,6 +4,7 @@ import { LONG_PHRASE_MS, lineVocalInfo, semitoneToNoteName, type LineVocalInfo, 
 import { ISSUE_LABEL, isBreathIssue } from "../../lib/take-review";
 import { displayText } from "./use-workspace-edits";
 import type { VocalSymbol } from "../../lib/symbol-config";
+import type { SongCard } from "../../lib/coach/knowledge";
 import type { HighlightType } from "../../lib/highlight-config";
 import type { Line, Section, TakeIssue } from "../../types/song";
 
@@ -441,6 +442,7 @@ const LineRow = memo(function LineRow({
 
 function SectionHeading({
   section,
+  intent,
   active,
   renaming,
   onClick,
@@ -450,6 +452,8 @@ function SectionHeading({
   onRemove,
 }: {
   section: Section;
+  /** From the song card: how this section should feel. */
+  intent?: { mood: string; intent: string };
   active: boolean;
   renaming: boolean;
   onClick: () => void;
@@ -459,7 +463,7 @@ function SectionHeading({
   onRemove: () => void;
 }) {
   return (
-    <div className="group flex items-center gap-2 mt-5 mb-1 pl-7 pr-2">
+    <div className="group flex flex-wrap items-center gap-x-2 mt-5 mb-1 pl-7 pr-2">
       {renaming ? (
         <InlineInput
           initial={section.name}
@@ -491,6 +495,12 @@ function SectionHeading({
           </button>
         </div>
       )}
+      {intent && !renaming && (
+        <div className="basis-full text-[11.5px] italic text-[var(--text-muted)] leading-snug -mt-[2px]" title="From the song card">
+          {intent.mood && <span className="not-italic text-[var(--text-secondary)]">{intent.mood} · </span>}
+          {intent.intent}
+        </div>
+      )}
     </div>
   );
 }
@@ -519,6 +529,8 @@ export interface LyricSheetProps {
   onNudge: (field: "start_ms" | "end_ms", deltaMs: number) => void;
   symbols: VocalSymbol[];
   takeNotesByLine: Map<string, { key: string; text: string; when: string }[]>;
+  songCard: SongCard | null;
+  onOpenCoach: () => void;
   noteLineId: string | null;
   onStartNote: (lineId: string) => void;
   onCommitNote: (lineId: string, text: string) => void;
@@ -547,8 +559,20 @@ export function LyricSheet(p: LyricSheetProps) {
     return m;
   }, [p.vocalMap, p.showHints, p.lines]);
 
+  const intents = new Map((p.songCard?.sections ?? []).map((s) => [s.name.trim().toLowerCase(), s]));
+
   return (
     <div className="flex flex-col pb-[40vh]">
+      {p.songCard?.summary && (
+        <button
+          onClick={p.onOpenCoach}
+          title="From your coach's song card — click to open the coach (G)"
+          className="mx-7 mb-2 text-left px-4 py-3 rounded-[10px] border border-[var(--border-subtle)] bg-[var(--surface)] hover:border-[var(--border)] cursor-pointer"
+        >
+          <div className="text-[13px] leading-snug text-[var(--text-primary)]">{p.songCard.summary}</div>
+          {p.songCard.mood && <div className="text-[11.5px] text-[var(--text-muted)] mt-1">Mood · {p.songCard.mood}</div>}
+        </button>
+      )}
       {p.lines.map((line) => {
         const sec = sectionAt.get(line.order);
         const isCursor = p.cursor?.lineId === line.id;
@@ -570,6 +594,7 @@ export function LyricSheet(p: LyricSheetProps) {
             {sec && (
               <SectionHeading
                 section={sec}
+                intent={intents.get(sec.name.trim().toLowerCase())}
                 active={cursorSection?.id === sec.id}
                 renaming={p.sectionEdit?.mode === "rename" && p.sectionEdit.sectionId === sec.id}
                 onClick={() => p.onSectionClick(sec)}

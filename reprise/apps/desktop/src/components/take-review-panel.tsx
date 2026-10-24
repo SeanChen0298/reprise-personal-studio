@@ -68,6 +68,7 @@ export function TakeReviewPanel({
   onAddNote,
   onDeleteNote,
   onPlayNote,
+  onAskCoach,
 }: {
   rec: Recording;
   song: Song;
@@ -87,6 +88,7 @@ export function TakeReviewPanel({
   onAddNote: (text: string, takeMs: number) => void;
   onDeleteNote: (id: string) => void;
   onPlayNote: (takeMs: number) => void;
+  onAskCoach: () => void;
 }) {
   const a = rec.analysis;
   const lineById = new Map(lines.map((l) => [l.id, l]));
@@ -116,9 +118,16 @@ export function TakeReviewPanel({
         </span>
         <span className="text-[11px] text-[var(--text-muted)] tabular-nums">{formatMs(rec.duration_ms)}</span>
         <button
+          onClick={onAskCoach}
+          title="Send your notes and the check for this take to your coach"
+          className="ml-auto text-[11px] font-medium px-[8px] py-[2px] rounded-[6px] border border-[var(--border)] bg-transparent text-[var(--theme)] hover:border-[var(--theme)] cursor-pointer"
+        >
+          Ask the coach
+        </button>
+        <button
           onClick={onClose}
           title="Close"
-          className="ml-auto w-6 h-6 flex items-center justify-center cursor-pointer border-none bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+          className="w-6 h-6 flex items-center justify-center cursor-pointer border-none bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
         >
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 6L6 18M6 6l12 12" /></svg>
         </button>

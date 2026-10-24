@@ -30,6 +30,9 @@ import { LinePanel } from "./line-panel";
 import { CommandPalette, ShortcutSheet, type Command } from "./command-palette";
 import { PlayAlongView } from "./play-along-view";
 import { KeyHints } from "./key-hints";
+import { CoachPanel } from "./coach-panel";
+import { debriefPrompt } from "../../lib/coach/persona";
+import { describeTake, loadKnowledge, loadProfile, type SingerProfile, type SongKnowledge } from "../../lib/coach/knowledge";
 import { useTakes, type Backing } from "./use-takes";
 import { displayText, useWorkspaceEdits } from "./use-workspace-edits";
 import type { Line, Section } from "../../types/song";
@@ -166,6 +169,15 @@ function Workspace({ songId }: { songId: string }) {
   const nowMs = player.currentTime * 1000;
   const playingLineId = player.isPlaying ? lines[player.currentLineIndex]?.id ?? null : null;
 
+  useEffect(() => {
+    let cancelled = false;
+    void loadKnowledge(song).then((k) => !cancelled && setKnowledge(k));
+    void loadProfile().then((p) => !cancelled && setProfile(p));
+    return () => {
+      cancelled = true;
+    };
+  }, [song.id, song.audio_folder]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Vocal map (long phrases, high notes) ─────────────────────────────────
   const [vocalMap, setVocalMap] = useState<VocalMap | null>(null);
   const [showHints, setShowHints] = useState(true);
@@ -207,7 +219,11 @@ function Workspace({ songId }: { songId: string }) {
   const [view, setView] = useState<"lyrics" | "lead">("lyrics");
   const [modeTabsEl, setModeTabsEl] = useState<HTMLDivElement | null>(null);
   /** Slide-over side panel (closed by default so the lyrics stay centred). */
-  const [panel, setPanel] = useState<"takes" | "line" | null>(null);
+  const [panel, setPanel] = useState<"takes" | "line" | "coach" | null>(null);
+  // Coach: what it knows about this song and about you (loaded from disk).
+  const [knowledge, setKnowledge] = useState<SongKnowledge | null>(null);
+  const [profile, setProfile] = useState<SingerProfile>({ facts: [] });
+  const [coachRequest, setCoachRequest] = useState<{ text: string; nonce: number } | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const setupOpen = searchParams.get("setup") === "1";
@@ -581,6 +597,9 @@ function Workspace({ songId }: { songId: string }) {
       case "F":
         handled();
         return setEditingLineId(cursorLine.id);
+      case "G":
+        handled();
+        return setPanel((cur) => (cur === "coach" ? null : "coach"));
       case "N":
         handled();
         // A take is open: note a moment in it. Otherwise: note this line.
@@ -638,6 +657,7 @@ function Workspace({ songId }: { songId: string }) {
       { id: "setup", group: "Song", featured: true, label: "Audio setup (download, stems, pitch, chords, align)…", run: () => setSetupOpen(true) },
       { id: "details", group: "Song", label: "Edit song details…", run: () => setEditOpen(true) },
       { id: "panel-takes", group: "View", label: panel === "takes" ? "Hide takes" : "Show takes", shortcut: "Tab", featured: true, run: () => setPanel((v) => (v === "takes" ? null : "takes")) },
+      { id: "coach", group: "Coach", label: panel === "coach" ? "Close the coach" : "Ask the coach about this song", shortcut: "G", featured: true, run: () => setPanel((v) => (v === "coach" ? null : "coach")) },
       { id: "panel-line", group: "View", label: "Line details (timing, melody, marks)", shortcut: "Shift+Tab", run: () => setPanel("line") },
       ...(translationLines.length
         ? [{ id: "translation", group: "View", label: showTranslation ? "Hide translation" : "Show translation", run: () => setShowTranslation(!showTranslation) }]
@@ -773,11 +793,11 @@ function Workspace({ songId }: { songId: string }) {
         <div className="ml-auto flex items-center gap-2">
           {view === "lyrics" && (
             <div className="flex p-[2px] rounded-[8px] bg-[var(--bg)] border border-[var(--border)]">
-              {([["takes", `Takes${takes.takes.length ? ` · ${takes.takes.length}` : ""}`], ["line", "Line"]] as const).map(([v, label]) => (
+              {([["takes", `Takes${takes.takes.length ? ` · ${takes.takes.length}` : ""}`], ["line", "Line"], ["coach", "Coach"]] as const).map(([v, label]) => (
                 <button
                   key={v}
                   onClick={() => setPanel((cur) => (cur === v ? null : v))}
-                  title={v === "takes" ? "Your takes and their reviews (Tab)" : "Timing, melody and marks of the selected line (Shift+Tab)"}
+                  title={v === "takes" ? "Your takes and their reviews (Tab)" : v === "line" ? "Timing, melody and marks of the selected line (Shift+Tab)" : "Your vocal coach for this song (G)"}
                   className={`px-3 py-[3px] rounded-[6px] text-[12px] font-medium border-none cursor-pointer ${
                     panel === v ? "bg-[var(--surface)] text-[var(--text-primary)] shadow-sm" : "bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                   }`}
@@ -928,6 +948,8 @@ function Workspace({ songId }: { songId: string }) {
                 onNudge={onNudge}
                 symbols={symbols}
                 takeNotesByLine={takeNotesByLine}
+                songCard={knowledge?.card ?? null}
+                onOpenCoach={() => setPanel("coach")}
                 noteLineId={noteLineId}
                 onStartNote={onStartNote}
                 onCommitNote={onCommitNote}
@@ -993,8 +1015,8 @@ function Workspace({ songId }: { songId: string }) {
         {view === "lyrics" && panel && (
           <aside className="absolute right-0 top-0 bottom-0 z-20 w-[420px] max-w-full flex flex-col min-h-0 border-l border-[var(--border)] bg-[var(--surface)] shadow-[-12px_0_32px_rgba(0,0,0,0.08)] animate-fade-up">
             <div className="flex items-center gap-2 px-4 py-[10px] flex-shrink-0 border-b border-[var(--border-subtle)]">
-              <span className="text-[12.5px] font-medium">{panel === "takes" ? "Takes" : "Line details"}</span>
-              <span className="text-[11px] text-[var(--text-muted)]">{panel === "takes" ? "Tab" : "Shift+Tab"}</span>
+              <span className="text-[12.5px] font-medium">{panel === "takes" ? "Takes" : panel === "line" ? "Line details" : "Coach"}</span>
+              <span className="text-[11px] text-[var(--text-muted)]">{panel === "takes" ? "Tab" : panel === "line" ? "Shift+Tab" : "G"}</span>
               <button
                 onClick={() => setPanel(null)}
                 title="Close (Esc)"
@@ -1004,7 +1026,36 @@ function Workspace({ songId }: { songId: string }) {
               </button>
             </div>
             {panel === "takes" ? (
-              <TakesPanel t={takes} song={song} lines={lines} sections={sections} noteFocusNonce={noteFocusNonce} />
+              <TakesPanel
+                t={takes}
+                song={song}
+                lines={lines}
+                sections={sections}
+                noteFocusNonce={noteFocusNonce}
+                onAskCoach={(rec) => {
+                  setCoachRequest({ text: debriefPrompt(describeTake(rec, lines)), nonce: Date.now() });
+                  setPanel("coach");
+                }}
+              />
+            ) : panel === "coach" ? (
+              <CoachPanel
+                song={song}
+                lines={lines}
+                translationById={translationById}
+                sections={sections}
+                highlights={highlights}
+                takes={takes.takes}
+                knowledge={knowledge}
+                setKnowledge={setKnowledge}
+                profile={profile}
+                setProfile={setProfile}
+                request={coachRequest}
+                onApplyLineNote={(idx, note) => {
+                  const line = lines[idx];
+                  if (!line) return;
+                  edits.setLineNote(line.id, line.note ? `${line.note} · ${note}` : note);
+                }}
+              />
             ) : (
               <LinePanel
                 song={song}

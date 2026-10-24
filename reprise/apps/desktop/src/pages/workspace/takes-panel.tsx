@@ -200,6 +200,7 @@ export function TakesPanel({
   lines,
   sections,
   noteFocusNonce,
+  onAskCoach,
 }: {
   t: TakesState;
   song: Song;
@@ -207,6 +208,7 @@ export function TakesPanel({
   sections: Section[];
   /** Bumped by the N key: focus the open take's note box. */
   noteFocusNonce: number;
+  onAskCoach: (rec: Recording) => void;
 }) {
   const playbackVolume = usePreferencesStore((s) => s.playbackVolume);
   const updateRecording = useSongStore((s) => s.updateRecording);
@@ -255,6 +257,7 @@ export function TakesPanel({
           onAddNote={(text, ms) => addNote(open, text, ms)}
           onDeleteNote={(id) => deleteNote(open, id)}
           onPlayNote={(ms) => playAt(open, ms)}
+          onAskCoach={() => onAskCoach(open)}
         />
       )}
       <div className="flex-1 overflow-y-auto px-3 py-3" style={{ scrollbarWidth: "thin" }}>
