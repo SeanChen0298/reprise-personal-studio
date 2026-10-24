@@ -64,8 +64,8 @@ export function KeyHints({
             </span>
           </button>
         ))}
-        <Hint k={<Key>0</Key>} label="remove" />
-        <Hint k={<Key>S</Key>} label="symbol" />
+        <Hint k={<Key>X</Key>} label="remove" />
+        <Hint k={<Key>C</Key>} label="symbol" />
         <Hint k={<><Key>Ctrl</Key><Key>Z</Key></>} label="undo" />
       </>
     );
@@ -74,21 +74,22 @@ export function KeyHints({
       <>
         <Hint k={<Key>Space</Key>} label="play" />
         <Hint k={<Key>R</Key>} label="record" />
-        <Hint k={<><Key>Ctrl</Key><Key>K</Key></>} label="commands" />
+        <Hint k={<><Key>Ctrl</Key><Key>E</Key></>} label="commands" />
       </>
     );
   } else {
     hints = (
       <>
         <Hint k={<Key>Space</Key>} label="play" />
-        <Hint k={<Key>Enter</Key>} label="play this line" />
-        <Hint k={<Key>L</Key>} label="loop" />
+        <Hint k={<Key>E</Key>} label="play line" />
+        <Hint k={<Key>Q</Key>} label="loop" />
         <Hint k={<Key>R</Key>} label="record" />
-        <Hint k={<><Key>Shift</Key><Key>→</Key></>} label="select words to mark" />
+        <Hint k={<><Key>W</Key><Key>S</Key></>} label="lines" />
+        <Hint k={<><Key>Shift</Key><Key>D</Key></>} label="select to mark" />
         {breathKey != null && <Hint k={<Key>{breathKey}</Key>} label="breath mark here" />}
-        <Hint k={<><Key>Alt</Key><Key>←</Key><Key>→</Key></>} label="shift line start" />
+        <Hint k={<><Key>Alt</Key><Key>A</Key><Key>D</Key></>} label="shift start" />
         <Hint k={<Key>T</Key>} label="start = now" />
-        <Hint k={<Key>S</Key>} label="symbol ⤴ ~" />
+        <Hint k={<Key>C</Key>} label="symbol ⤴ ~" />
         <Hint k={<Key>#</Key>} label="new section" />
       </>
     );
@@ -100,7 +101,7 @@ export function KeyHints({
         onClick={onShowAll}
         className="ml-auto inline-flex items-center gap-[5px] bg-transparent border-none cursor-pointer text-[11px] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
       >
-        <Key>?</Key> all keys
+        <Key>F1</Key> all keys
       </button>
     </div>
   );

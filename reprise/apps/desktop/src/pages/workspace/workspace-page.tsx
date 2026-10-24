@@ -316,7 +316,7 @@ function Workspace({ songId }: { songId: string }) {
           const at = Math.max(0, Math.min(cursorText.length - 1, focus - 1));
           return void edits.annotate(cursorLine.id, at, at + 1, hl.id, hl.name);
         }
-        return say("Select some words first — drag, or Shift+←/→");
+        return say("Select some words first — drag, or Shift+A / Shift+D");
       }
       edits.annotate(cursorLine.id, selStart, selEnd, hl.id, hl.name);
     },
@@ -420,24 +420,34 @@ function Workspace({ songId }: { songId: string }) {
 
   // ── Keyboard ─────────────────────────────────────────────────────────────
   const keyRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  // Left-hand layout (right hand stays on the mouse): W/S lines, A/D caret,
+  // E play line, Q loop, R record, T timing, X unmark, C symbols, F edit,
+  // Alt+W/S speed, Alt+A/D shift timing, Tab panels. Arrows / Enter / L / [ ] /
+  // Delete / F2 / Ctrl+K / ? still work as alternates. Letters are matched by
+  // physical key (e.code) so they work with an IME on.
   keyRef.current = (e: KeyboardEvent) => {
     if (paletteOpen || shortcutsOpen || editOpen || deleteOpen || setupOpen) return;
     if (isTyping(e.target)) return;
-    if (e.key !== " " && e.key !== "Enter") markInteraction();
     const ctrl = e.ctrlKey || e.metaKey;
+    const alt = e.altKey;
+    const shift = e.shiftKey;
     const k = e.key;
+    const letter = e.code.startsWith("Key") ? e.code.slice(3) : "";
     const handled = () => e.preventDefault();
+    if (k !== " " && k !== "Enter" && letter !== "E") markInteraction();
 
     // Global
-    if (ctrl && (k === "k" || k === "K")) return handled(), setPaletteOpen(true);
-    if (ctrl && (k === "j" || k === "J")) return handled(), setPanel((v) => (v ? null : "takes"));
-    if (ctrl && !e.shiftKey && (k === "z" || k === "Z")) return handled(), void doUndo();
-    if (ctrl && ((k === "y" || k === "Y") || (e.shiftKey && (k === "z" || k === "Z")))) return handled(), void doRedo();
-    if (k === "?") return handled(), setShortcutsOpen(true);
-    if (k === "r" || k === "R") {
-      if (ctrl || e.altKey) return;
-      return handled(), recordFromCursor(e.shiftKey);
+    if (ctrl && (letter === "E" || letter === "K")) return handled(), setPaletteOpen(true);
+    if (ctrl && letter === "Z") return handled(), void (shift ? doRedo() : doUndo());
+    if (ctrl && letter === "Y") return handled(), void doRedo();
+    if (k === "F1" || k === "?") return handled(), setShortcutsOpen(true);
+    if (k === "Tab" && !ctrl && !alt) {
+      handled();
+      const want = shift ? "line" : "takes";
+      return setPanel((cur) => (cur === want ? null : want));
     }
+    if (ctrl && letter === "J") return handled(), setPanel((v) => (v ? null : "takes"));
+    if (letter === "R" && !ctrl && !alt) return handled(), recordFromCursor(shift);
     if (k === "Escape" && takes.countdown != null) return handled(), void takes.stop();
 
     // The lead sheet has its own keys (Space plays there).
@@ -445,44 +455,66 @@ function Workspace({ songId }: { songId: string }) {
     if (!cursorLine) return;
     if (symbolPickerOpen) {
       if (/^[1-9]$/.test(k) && symbols[Number(k) - 1]) return handled(), void insertSymbol(symbols[Number(k) - 1].char);
-      if (k === "Escape" || k === "s" || k === "S") return handled(), setSymbolPickerOpen(false);
+      if (k === "Escape" || letter === "C") return handled(), setSymbolPickerOpen(false);
     }
     const len = cursorText.length;
     const setSel = (a: number, f: number) => setCursor({ lineId: cursorLine.id, anchor: a, focus: f });
 
+    const moveLine = (down: boolean, bySection: boolean) => {
+      handled();
+      setCaretShown(false);
+      setSymbolPickerOpen(false);
+      if (bySection) {
+        const starts = sections.map((s) => lines.find((l) => l.order >= s.start_line_order)).filter(Boolean) as Line[];
+        const target = down
+          ? starts.find((l) => l.order > cursorLine.order)
+          : [...starts].reverse().find((l) => l.order < cursorLine.order);
+        return moveTo(target, false);
+      }
+      moveTo(lines[cursorIdx + (down ? 1 : -1)]);
+    };
+    const moveCaret = (right: boolean, extend: boolean, byWord: boolean) => {
+      handled();
+      setCaretShown(true);
+      let f = byWord ? nextWordBoundary(cursorText, focus, right ? 1 : -1) : Math.max(0, Math.min(len, focus + (right ? 1 : -1)));
+      if (!extend && selEnd > selStart && !byWord) f = right ? selEnd : selStart;
+      setSel(extend ? anchor : f, f);
+    };
+    const changeSpeed = (faster: boolean) => {
+      handled();
+      if (takes.busy) return;
+      if (faster) player.incrementSpeed();
+      else player.decrementSpeed();
+    };
+
+    // Alt: timing (A/D, arrows) and speed (W/S)
+    if (alt && !ctrl) {
+      if (letter === "A" || k === "ArrowLeft") return handled(), void nudge(shift ? "end_ms" : "start_ms", -50);
+      if (letter === "D" || k === "ArrowRight") return handled(), void nudge(shift ? "end_ms" : "start_ms", 50);
+      if (letter === "W") return changeSpeed(true);
+      if (letter === "S") return changeSpeed(false);
+      return;
+    }
+    if (ctrl) {
+      if (letter === "A") return handled(), setCaretShown(true), setSel(0, len);
+      if (k === "ArrowUp" || k === "ArrowDown") return moveLine(k === "ArrowDown", true);
+      if (k === "ArrowLeft" || k === "ArrowRight") return moveCaret(k === "ArrowRight", shift, true);
+      return;
+    }
+
     switch (k) {
       case "ArrowUp":
-      case "ArrowDown": {
-        if (e.altKey) return;
-        handled();
-        setCaretShown(false);
-        setSymbolPickerOpen(false);
-        const down = k === "ArrowDown";
-        if (ctrl) {
-          const starts = sections.map((s) => lines.find((l) => l.order >= s.start_line_order)).filter(Boolean) as Line[];
-          const target = down
-            ? starts.find((l) => l.order > cursorLine.order)
-            : [...starts].reverse().find((l) => l.order < cursorLine.order);
-          return moveTo(target, false);
-        }
-        return moveTo(lines[cursorIdx + (down ? 1 : -1)]);
-      }
+      case "ArrowDown":
+        return moveLine(k === "ArrowDown", false);
       case "ArrowLeft":
-      case "ArrowRight": {
-        handled();
-        const right = k === "ArrowRight";
-        if (e.altKey) return void nudge(e.shiftKey ? "end_ms" : "start_ms", right ? 50 : -50);
-        setCaretShown(true);
-        let f = ctrl ? nextWordBoundary(cursorText, focus, right ? 1 : -1) : Math.max(0, Math.min(len, focus + (right ? 1 : -1)));
-        if (!e.shiftKey && selEnd > selStart && !ctrl) f = right ? selEnd : selStart;
-        return setSel(e.shiftKey ? anchor : f, f);
-      }
+      case "ArrowRight":
+        return moveCaret(k === "ArrowRight", shift, false);
       case "Home":
       case "End": {
         handled();
         setCaretShown(true);
         const f = k === "Home" ? 0 : len;
-        return setSel(e.shiftKey ? anchor : f, f);
+        return setSel(shift ? anchor : f, f);
       }
       case " ":
         handled();
@@ -498,13 +530,9 @@ function Workspace({ songId }: { songId: string }) {
         if (player.isPlaying && !takes.busy) player.pause();
         return;
       case "[":
-        handled();
-        if (!takes.busy) player.decrementSpeed();
-        return;
+        return changeSpeed(false);
       case "]":
-        handled();
-        if (!takes.busy) player.incrementSpeed();
-        return;
+        return changeSpeed(true);
       case "F2":
         handled();
         return setEditingLineId(cursorLine.id);
@@ -517,11 +545,36 @@ function Workspace({ songId }: { songId: string }) {
         handled();
         return void clearMarks();
     }
-    if (ctrl && (k === "a" || k === "A")) return handled(), setCaretShown(true), setSel(0, len);
-    if (ctrl || e.altKey) return;
-    if (k === "l" || k === "L") return handled(), e.shiftKey ? loopSection() : loopLine();
-    if (k === "t" || k === "T") return handled(), void tapStart();
-    if ((k === "s" || k === "S") && symbols.length) return handled(), setCaretShown(true), setSymbolPickerOpen(true);
+
+    switch (letter) {
+      case "W":
+      case "S":
+        return moveLine(letter === "S", shift);
+      case "A":
+      case "D":
+        return moveCaret(letter === "D", shift, false);
+      case "E":
+        handled();
+        return playLine(cursorLine.id);
+      case "Q":
+      case "L":
+        handled();
+        return shift ? loopSection() : loopLine();
+      case "T":
+        handled();
+        return void tapStart();
+      case "X":
+        handled();
+        return void clearMarks();
+      case "C":
+        if (!symbols.length) return;
+        handled();
+        setCaretShown(true);
+        return setSymbolPickerOpen(true);
+      case "F":
+        handled();
+        return setEditingLineId(cursorLine.id);
+    }
     if (/^[1-9]$/.test(k) && !e.repeat) return handled(), annotate(Number(k));
   };
   useEffect(() => {
@@ -545,38 +598,38 @@ function Workspace({ songId }: { songId: string }) {
           if (cursorLine) edits.annotate(cursorLine.id, selStart, selEnd, h.id, h.name);
         },
       })),
-      { id: "unmark", group: "Mark", label: "Remove marks in selection", shortcut: "0", run: () => void clearMarks() },
+      { id: "unmark", group: "Mark", label: "Remove marks in selection", shortcut: "X", run: () => void clearMarks() },
       ...symbols.map((sym) => ({
         id: `sym-${sym.id}`,
         group: "Lyrics",
         label: `Insert ${sym.char} ${sym.label}`,
-        shortcut: "S",
+        shortcut: "C",
         run: () => void insertSymbol(sym.char),
       })),
-      { id: "edit", group: "Lyrics", label: "Edit line text", shortcut: "F2", featured: true, run: () => cursorLine && setEditingLineId(cursorLine.id) },
+      { id: "edit", group: "Lyrics", label: "Edit line text", shortcut: "F", featured: true, run: () => cursorLine && setEditingLineId(cursorLine.id) },
       { id: "section", group: "Lyrics", featured: true, label: cursorLine && sections.some((s) => s.start_line_order === cursorLine.order) ? "Rename this section" : "Start a section at this line", shortcut: "#", run: startSectionEdit },
       ...(cursorSection ? [{ id: "section-rm", group: "Lyrics", label: `Remove section “${cursorSection.name}”`, run: () => edits.removeSection(cursorSection) }] : []),
       { id: "lyrics", group: "Lyrics", label: "Import / paste lyrics…", run: () => navigate(`/song/${songId}/lyrics`) },
       { id: "hints", group: "View", label: showHints ? "Hide song hints (long phrases, high notes)" : "Show song hints (long phrases, high notes)", run: () => setShowHints((v) => !v) },
       { id: "view", group: "View", label: view === "lyrics" ? "Switch to lead sheet (chords)" : "Switch to lyrics", run: () => setView((v) => (v === "lyrics" ? "lead" : "lyrics")) },
       { id: "play", group: "Play", label: player.isPlaying ? "Pause" : "Play", shortcut: "Space", run: player.togglePlay },
-      { id: "play-line", group: "Play", label: "Play from selected line", shortcut: "Enter", featured: true, run: () => cursorLine && playLine(cursorLine.id) },
-      { id: "loop", group: "Play", label: player.loopEnabled ? "Stop looping" : "Loop selected line", shortcut: "L", featured: true, run: loopLine },
-      { id: "loop-sec", group: "Play", label: "Loop this section", shortcut: "Shift+L", featured: true, disabled: !cursorSection, run: loopSection },
+      { id: "play-line", group: "Play", label: "Play from selected line", shortcut: "E", featured: true, run: () => cursorLine && playLine(cursorLine.id) },
+      { id: "loop", group: "Play", label: player.loopEnabled ? "Stop looping" : "Loop selected line", shortcut: "Q", featured: true, run: loopLine },
+      { id: "loop-sec", group: "Play", label: "Loop this section", shortcut: "Shift+Q", featured: true, disabled: !cursorSection, run: loopSection },
       ...tracks.map((t) => ({ id: `track-${t.key}`, group: "Play", label: `Play the ${t.label === "Inst." ? "instrumental" : t.label.toLowerCase()} track`, run: () => setTrack(t.key) })),
       { id: "tap", group: "Timing", label: "Line starts at the playhead", shortcut: "T", featured: true, run: () => void tapStart() },
       { id: "rec", group: "Record", label: "Record from selected line", shortcut: "R", featured: true, run: () => recordFromCursor(false) },
       { id: "rec-sec", group: "Record", label: "Record this section", shortcut: "Shift+R", featured: true, disabled: !cursorSection, run: () => recordFromCursor(true) },
       { id: "undo", group: "Edit", label: "Undo", shortcut: "Ctrl+Z", featured: true, disabled: !canUndo, run: () => void doUndo() },
-      { id: "redo", group: "Edit", label: "Redo", shortcut: "Ctrl+Y", disabled: !canRedo, run: () => void doRedo() },
+      { id: "redo", group: "Edit", label: "Redo", shortcut: "Ctrl+Shift+Z", disabled: !canRedo, run: () => void doRedo() },
       { id: "setup", group: "Song", featured: true, label: "Audio setup (download, stems, pitch, chords, align)…", run: () => setSetupOpen(true) },
       { id: "details", group: "Song", label: "Edit song details…", run: () => setEditOpen(true) },
-      { id: "panel-takes", group: "View", label: panel === "takes" ? "Hide takes" : "Show takes", shortcut: "Ctrl+J", featured: true, run: () => setPanel((v) => (v === "takes" ? null : "takes")) },
-      { id: "panel-line", group: "View", label: "Line details (timing, melody, marks)", run: () => setPanel("line") },
+      { id: "panel-takes", group: "View", label: panel === "takes" ? "Hide takes" : "Show takes", shortcut: "Tab", featured: true, run: () => setPanel((v) => (v === "takes" ? null : "takes")) },
+      { id: "panel-line", group: "View", label: "Line details (timing, melody, marks)", shortcut: "Shift+Tab", run: () => setPanel("line") },
       ...(translationLines.length
         ? [{ id: "translation", group: "View", label: showTranslation ? "Hide translation" : "Show translation", run: () => setShowTranslation(!showTranslation) }]
         : [{ id: "translation-add", group: "Lyrics", label: "Add a translation…", run: () => navigate(`/song/${songId}/lyrics`) }]),
-      { id: "keys", group: "Help", label: "Keyboard shortcuts", shortcut: "?", featured: true, run: () => setShortcutsOpen(true) },
+      { id: "keys", group: "Help", label: "Keyboard shortcuts", shortcut: "F1", featured: true, run: () => setShortcutsOpen(true) },
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlights, selStart, selEnd, cursorLine, cursorSection, sections, view, showHints, panel, symbols, showTranslation, translationLines.length, player.isPlaying, player.loopEnabled, tracks, canUndo, canRedo, edits]);
@@ -683,7 +736,7 @@ function Workspace({ songId }: { songId: string }) {
                 <button
                   key={v}
                   onClick={() => setPanel((cur) => (cur === v ? null : v))}
-                  title={v === "takes" ? "Your takes and their reviews (Ctrl+J)" : "Timing, melody and marks of the selected line"}
+                  title={v === "takes" ? "Your takes and their reviews (Tab)" : "Timing, melody and marks of the selected line (Shift+Tab)"}
                   className={`px-3 py-[3px] rounded-[6px] text-[12px] font-medium border-none cursor-pointer ${
                     panel === v ? "bg-[var(--surface)] text-[var(--text-primary)] shadow-sm" : "bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                   }`}
@@ -697,11 +750,11 @@ function Workspace({ songId }: { songId: string }) {
             onClick={() => setPaletteOpen(true)}
             className="flex items-center gap-2 px-3 py-[5px] rounded-[7px] border border-[var(--border)] bg-[var(--bg)] text-[11.5px] text-[var(--text-muted)] hover:border-[#888] cursor-pointer"
           >
-            Commands <kbd className="font-sans text-[10.5px]">Ctrl K</kbd>
+            Commands <kbd className="font-sans text-[10.5px]">Ctrl E</kbd>
           </button>
           <button
             onClick={() => setShortcutsOpen(true)}
-            title="Keyboard shortcuts (?)"
+            title="Keyboard shortcuts (F1)"
             className="w-[28px] h-[28px] rounded-[7px] border border-[var(--border)] bg-transparent text-[12px] text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
           >
             ?
@@ -895,7 +948,7 @@ function Workspace({ songId }: { songId: string }) {
           <aside className="absolute right-0 top-0 bottom-0 z-20 w-[420px] max-w-full flex flex-col min-h-0 border-l border-[var(--border)] bg-[var(--surface)] shadow-[-12px_0_32px_rgba(0,0,0,0.08)] animate-fade-up">
             <div className="flex items-center gap-2 px-4 py-[10px] flex-shrink-0 border-b border-[var(--border-subtle)]">
               <span className="text-[12.5px] font-medium">{panel === "takes" ? "Takes" : "Line details"}</span>
-              <span className="text-[11px] text-[var(--text-muted)]">{panel === "takes" ? "Ctrl+J" : ""}</span>
+              <span className="text-[11px] text-[var(--text-muted)]">{panel === "takes" ? "Tab" : "Shift+Tab"}</span>
               <button
                 onClick={() => setPanel(null)}
                 title="Close (Esc)"

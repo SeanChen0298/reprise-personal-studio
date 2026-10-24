@@ -88,48 +88,50 @@ export function CommandPalette({ commands, onClose }: { commands: Command[]; onC
   );
 }
 
+/** Left hand on the keys, right hand on the mouse. Arrows / Enter / L / [ ] / Delete / F2 also work. */
 const SHORTCUTS: [string, [string, string][]][] = [
   ["Move", [
-    ["↑ / ↓", "Previous / next line"],
-    ["Ctrl+↑ / ↓", "Previous / next section"],
-    ["← / →", "Move the caret (Ctrl = by word)"],
-    ["Shift + arrows, Home, End", "Select text in the line"],
+    ["W / S", "Previous / next line"],
+    ["Shift+W / S", "Previous / next section"],
+    ["A / D", "Move the caret in the line"],
+    ["Shift+A / D", "Select text (or drag with the mouse)"],
     ["Ctrl+A", "Select the whole line"],
   ]],
   ["Play", [
     ["Space", "Play / pause"],
-    ["Enter / double-click", "Play from the line"],
-    ["L / Shift+L", "Loop the line / loop the section"],
-    ["[ / ]", "Slower / faster (0.5–1.0×)"],
-    ["Esc", "Clear selection, then pause"],
+    ["E / double-click", "Play from the line"],
+    ["Q / Shift+Q", "Loop the line / the section"],
+    ["Alt+W / Alt+S", "Faster / slower (0.5–1.0×)"],
+    ["Esc", "Clear selection, close panel, pause"],
   ]],
   ["Mark", [
     ["1 – 9", "Mark the selection (falsetto, …); again to remove — Breath mark works at the caret"],
-    ["0 / Delete", "Remove marks in the selection (or under the caret)"],
-    ["F2", "Edit the line's text (Alt+1…9 inserts symbols)"],
-    ["S, then 1–9", "Insert a symbol (⤴ ⤵ ~ /) at the caret"],
+    ["X", "Remove marks in the selection (or under the caret)"],
+    ["C, then 1–9", "Insert a symbol (⤴ ⤵ ~ /) at the caret"],
+    ["F", "Edit the line's text (Alt+1…9 inserts symbols)"],
     ["#", "Start a section here (or rename it)"],
   ]],
   ["Timing", [
     ["T", "Line starts at the playhead, move to the next line"],
-    ["Alt+← / →", "Nudge the line's start ±50 ms"],
-    ["Alt+Shift+← / →", "Nudge the line's end ±50 ms"],
+    ["Alt+A / D", "Shift the line's start ±50 ms"],
+    ["Alt+Shift+A / D", "Shift the line's end ±50 ms"],
   ]],
   ["Record", [
     ["R", "Record from the selected line / stop"],
     ["Shift+R", "Record just this section"],
   ]],
   ["General", [
-    ["Ctrl+Z / Ctrl+Y", "Undo / redo"],
-    ["Ctrl+K", "Command palette"],
-    ["?", "This list"],
+    ["Tab / Shift+Tab", "Takes / line details panel"],
+    ["Ctrl+Z / Ctrl+Shift+Z", "Undo / redo"],
+    ["Ctrl+E", "Command palette"],
+    ["F1", "This list"],
   ]],
 ];
 
 export function ShortcutSheet({ onClose, highlightNames }: { onClose: () => void; highlightNames: string[] }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" || e.key === "?") {
+      if (e.key === "Escape" || e.key === "?" || e.key === "F1") {
         e.preventDefault();
         e.stopPropagation();
         onClose();

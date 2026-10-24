@@ -130,7 +130,7 @@ export function TransportBar({
         value={player.speed}
         onChange={(e) => player.setSpeed(Number(e.target.value))}
         disabled={disabled}
-        title="Speed ([ slower, ] faster)"
+        title="Speed (Alt+S slower, Alt+W faster)"
         className={`${ctl} flex-shrink-0 px-2 outline-none cursor-pointer tabular-nums ${player.speed < 1 ? "text-[var(--theme-text)] font-medium" : ""}`}
       >
         {SPEEDS.map((s) => (
@@ -143,7 +143,7 @@ export function TransportBar({
         <button
           onClick={player.toggleLoop}
           disabled={disabled}
-          title="Loop the playing line, or the selected section / range (L, Shift+L)"
+          title="Loop the line (Q), or the section (Shift+Q)"
           className={`${ctl} px-[9px] flex items-center gap-[5px] cursor-pointer ${
             player.loopEnabled ? "!bg-[var(--theme)] !border-[var(--theme)] !text-white" : "hover:border-[#888] hover:text-[var(--text-primary)]"
           }`}

@@ -73,8 +73,8 @@ export function LinePanel({
           <div key={field} className="flex items-center gap-2 mb-[6px]">
             <span className="w-[34px] text-[11.5px] text-[var(--text-muted)]">{field === "start_ms" ? "Start" : "End"}</span>
             <span className="w-[62px] text-[12px] tabular-nums text-[var(--text-primary)]">{fmtPrecise(line[field])}</span>
-            <button className={nudgeBtn} onClick={() => onNudge(field, -50)} title={field === "start_ms" ? "Alt+←" : "Alt+Shift+←"}>−50ms</button>
-            <button className={nudgeBtn} onClick={() => onNudge(field, 50)} title={field === "start_ms" ? "Alt+→" : "Alt+Shift+→"}>+50ms</button>
+            <button className={nudgeBtn} onClick={() => onNudge(field, -50)} title={field === "start_ms" ? "Alt+A" : "Alt+Shift+A"}>−50ms</button>
+            <button className={nudgeBtn} onClick={() => onNudge(field, 50)} title={field === "start_ms" ? "Alt+D" : "Alt+Shift+D"}>+50ms</button>
           </div>
         ))}
         <button
@@ -109,7 +109,7 @@ export function LinePanel({
         <div className="text-[10px] font-semibold uppercase tracking-[0.09em] text-[var(--text-muted)] mb-2">Annotations</div>
         {(line.annotations ?? []).length === 0 ? (
           <p className="text-[11.5px] text-[var(--text-muted)] leading-relaxed">
-            Select words (drag, or Shift+←/→) and press a number key to mark them.
+            Select words (drag, or Shift+A / Shift+D) and press a number key to mark them.
           </p>
         ) : (
           <div className="flex flex-col gap-[5px]">

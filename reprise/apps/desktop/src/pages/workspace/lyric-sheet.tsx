@@ -50,7 +50,7 @@ export function fmtTiming(ms: number): string {
 }
 
 const TIMING_HELP =
-  "Line timing. ◀ ▶ (or Alt+← / Alt+→) shift the start by 50 ms; Alt+Shift+← / → shifts the end. " +
+  "Line timing. ◀ ▶ (or Alt+A / Alt+D) shift the start by 50 ms; Alt+Shift+A / D shifts the end. " +
   "T sets the start to where the song is now. The line replays after each change so you can hear it. Ctrl+Z undoes.";
 
 function InlineInput({
@@ -238,7 +238,7 @@ const LineRow = memo(function LineRow({
         window.getSelection()?.removeAllRanges();
         onPlay(line.id);
       }}
-      title={line.start_ms != null ? "Double-click to play from this line · F2 to edit the text" : "F2 to edit the text"}
+      title={line.start_ms != null ? "Double-click (or E) to play from this line · F to edit the text" : "F to edit the text"}
     >
       {/* Being sung: a small level-meter icon; otherwise ▶ on hover */}
       {isPlaying ? (
@@ -258,7 +258,7 @@ const LineRow = memo(function LineRow({
             e.stopPropagation();
             onPlay(line.id);
           }}
-          title="Play from this line (Enter)"
+          title="Play from this line (E)"
           className="absolute left-[5px] top-[9px] w-[18px] h-[18px] rounded-full flex items-center justify-center border-none cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity bg-[var(--surface)] text-[var(--text-secondary)] shadow-sm"
         >
           <svg width="7" height="7" viewBox="0 0 24 24" fill="currentColor" style={{ marginLeft: 1 }}>
@@ -302,7 +302,7 @@ const LineRow = memo(function LineRow({
               e.stopPropagation();
               onStartEdit(line.id);
             }}
-            title="Edit the text (F2)"
+            title="Edit the text (F)"
             className="flex-shrink-0 ml-2 mt-[3px] w-[22px] h-[22px] rounded-[6px] flex items-center justify-center border-none bg-transparent cursor-pointer text-[var(--text-muted)] opacity-0 group-hover:opacity-100 hover:bg-[var(--surface)] hover:text-[var(--text-primary)] transition-opacity select-none"
           >
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -319,7 +319,7 @@ const LineRow = memo(function LineRow({
           >
             <button
               onClick={() => onNudge("start_ms", -50)}
-              title="Start 50 ms earlier (Alt+←)"
+              title="Start 50 ms earlier (Alt+A)"
               className="w-[18px] h-[18px] rounded-[4px] flex items-center justify-center bg-transparent border-none cursor-pointer text-[var(--text-muted)] hover:bg-[var(--surface)] hover:text-[var(--text-primary)]"
             >
               ◀
@@ -327,7 +327,7 @@ const LineRow = memo(function LineRow({
             <span className="px-[3px] text-[var(--text-primary)]">{fmtTiming(line.start_ms)}</span>
             <button
               onClick={() => onNudge("start_ms", 50)}
-              title="Start 50 ms later (Alt+→)"
+              title="Start 50 ms later (Alt+D)"
               className="w-[18px] h-[18px] rounded-[4px] flex items-center justify-center bg-transparent border-none cursor-pointer text-[var(--text-muted)] hover:bg-[var(--surface)] hover:text-[var(--text-primary)]"
             >
               ▶
