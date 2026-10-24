@@ -189,8 +189,26 @@ export function useWorkspaceEdits(songId: string) {
     [songId, push],
   );
 
+  /** The line's voice mark (register / placement); empty string clears it. */
+  const setLineVoice = useCallback(
+    async (lineId: string, field: "register" | "placement", value: string) => {
+      const line = getLine(songId, lineId);
+      if (!line) return;
+      const prev = line[field];
+      const next = value || undefined;
+      if ((prev ?? "") === (next ?? "")) return;
+      await useSongStore.getState().updateLine(songId, lineId, { [field]: next });
+      push({
+        label: next ? `Mark ${next}` : `Clear ${field}`,
+        undo: () => useSongStore.getState().updateLine(songId, lineId, { [field]: prev }),
+        redo: () => useSongStore.getState().updateLine(songId, lineId, { [field]: next }),
+      });
+    },
+    [songId, push],
+  );
+
   return useMemo(
-    () => ({ annotate, clearAnnotations, editText, setTiming, createSection, addSections, renameSection, removeSection, setLineNote }),
-    [annotate, clearAnnotations, editText, setTiming, createSection, addSections, renameSection, removeSection, setLineNote],
+    () => ({ annotate, clearAnnotations, editText, setTiming, createSection, addSections, renameSection, removeSection, setLineNote, setLineVoice }),
+    [annotate, clearAnnotations, editText, setTiming, createSection, addSections, renameSection, removeSection, setLineNote, setLineVoice],
   );
 }

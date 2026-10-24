@@ -354,6 +354,16 @@ const LineRow = memo(function LineRow({
             {line.end_ms != null && <span className="pl-[2px] pr-[5px] text-[var(--text-muted)]">– {fmtTiming(line.end_ms)}</span>}
           </div>
         )}
+        {(line.register || line.placement) && (
+          <div className="flex-shrink-0 pl-2 pt-[4px] select-none">
+            <span
+              className="text-[9.5px] px-[5px] py-[1px] rounded-[3px] bg-violet-500/10 text-violet-700"
+              title="Your voice mark — B cycles placement, Shift+B register"
+            >
+              {[line.register, line.placement].filter(Boolean).join(" · ")}
+            </span>
+          </div>
+        )}
         {info && (info.longestPhraseMs >= LONG_PHRASE_MS || info.peakSemitone != null) && (
           <div className="flex-shrink-0 flex flex-col items-end gap-[2px] pl-2 pt-[4px] select-none">
             {info.longestPhraseMs >= LONG_PHRASE_MS && (

@@ -70,6 +70,10 @@ export interface Line {
   language?: string; // e.g. "en", "ja" — null/undefined means primary/legacy
   /** The singer's own note on this line ("darker here", "breathe before 'kaerou'"). */
   note?: string;
+  /** The singer's own voice mark: register (chest / mix / head / falsetto / breathy). */
+  register?: string;
+  /** …and placement (forward / nasal / top / back / chest). */
+  placement?: string;
   created_at: string;
   updated_at: string;
 }

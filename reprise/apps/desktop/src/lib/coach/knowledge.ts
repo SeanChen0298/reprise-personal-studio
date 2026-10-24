@@ -208,7 +208,8 @@ export function buildContext(opts: {
       `L${i + 1}: ${text}` +
         (tr ? `  /  ${tr}` : "") +
         (marks ? `  [${marks}]` : "") +
-        (l.note ? `  ✎ ${l.note}` : ""),
+        (l.note ? `  ✎ ${l.note}` : "") +
+        (l.register || l.placement ? `  {my voice mark: ${[l.register, l.placement].filter(Boolean).join(", ")}}` : ""),
     );
   });
 

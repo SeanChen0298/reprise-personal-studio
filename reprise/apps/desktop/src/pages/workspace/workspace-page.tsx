@@ -20,6 +20,7 @@ import { loadVocalMap } from "../../lib/take-review";
 import { nextWordBoundary } from "../../lib/lyric-edits";
 import { collapseRepeats } from "../../lib/translate";
 import { emptyTakeTrash } from "../../lib/take-trash";
+import { PLACEMENTS, REGISTERS } from "../../lib/coach/knowledge";
 import type { VocalMap } from "../../lib/vocal-map";
 import { SongSetupPanel } from "../../components/song-setup-panel";
 import { EditSongModal } from "../../components/edit-song-modal";
@@ -605,6 +606,16 @@ function Workspace({ songId }: { songId: string }) {
       case "F":
         handled();
         return setEditingLineId(cursorLine.id);
+      case "B": {
+        // Voice mark on the line: B cycles placement, Shift+B cycles register.
+        handled();
+        const field = shift ? "register" : "placement";
+        const options = shift ? REGISTERS : PLACEMENTS;
+        const cur = cursorLine[field] ?? "";
+        const next = options[(options.indexOf(cur as never) + 1) % (options.length + 1)] ?? "";
+        say(next ? `${field === "register" ? "Register" : "Placement"}: ${next}` : `${field === "register" ? "Register" : "Placement"} cleared`);
+        return void edits.setLineVoice(cursorLine.id, field, next);
+      }
       case "E":
         // The open take, with the instrumental under it.
         if (!takes.reviewRec || !takes.canPlayMix(takes.reviewRec)) return;

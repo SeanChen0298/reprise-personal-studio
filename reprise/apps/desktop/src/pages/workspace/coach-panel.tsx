@@ -80,6 +80,7 @@ const QUICK = [
   "What is this song about, and how should it feel?",
   "How should I sing the chorus differently from the verses?",
   "Plan a 20-minute practice for this song today.",
+  "Warm me up for this song: 5 minutes — easy slides and trills first, then drills for its techniques, ending on the hardest lines.",
 ];
 
 export function CoachPanel({
