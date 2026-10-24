@@ -355,7 +355,8 @@ function SectionHeading({
 export interface LyricSheetProps {
   lines: Line[];
   sections: Section[];
-  translationByOrder: Map<number, string>;
+  /** Translation text per lyric line id. */
+  translationById: Map<string, string>;
   highlights: HighlightType[];
   vocalMap: VocalMap | null;
   showHints: boolean;
@@ -429,7 +430,7 @@ export function LyricSheet(p: LyricSheetProps) {
             <LineRow
               line={line}
               info={infos.get(line.id) ?? null}
-              translation={p.translationByOrder.get(line.order)}
+              translation={p.translationById.get(line.id)}
               highlights={p.highlights}
               isCursor={isCursor}
               anchor={isCursor ? p.cursor!.anchor : 0}

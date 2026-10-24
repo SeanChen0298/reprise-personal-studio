@@ -24,7 +24,7 @@ import { ConfirmDialog } from "../../components/confirm-dialog";
 import { useTaskQueueStore } from "../../stores/task-queue-store";
 import { LyricSheet, fmtTiming, type Cursor, type SectionEdit } from "./lyric-sheet";
 import { TransportBar } from "./transport-bar";
-import { TakesPanel } from "./takes-panel";
+import { RecordDock, TakesPanel } from "./takes-panel";
 import { LinePanel } from "./line-panel";
 import { CommandPalette, ShortcutSheet, type Command } from "./command-palette";
 import { PlayAlongView } from "./play-along-view";
@@ -39,6 +39,8 @@ function useStable<A extends unknown[], R>(fn: (...args: A) => R): (...args: A) 
   ref.current = fn;
   return useCallback((...args: A) => ref.current(...args), []);
 }
+
+const EMPTY_MAP = new Map<string, string>();
 
 /** After you touch the lyric sheet, playback stops scrolling it for this long. */
 const FOLLOW_PAUSE_MS = 5000;
@@ -87,7 +89,33 @@ function Workspace({ songId }: { songId: string }) {
     () => (transLang ? (rawLines ?? []).filter((l) => l.language === transLang).sort((a, b) => a.order - b.order) : []),
     [rawLines, transLang],
   );
-  const translationByOrder = useMemo(() => new Map(translationLines.map((l) => [l.order, l.text])), [translationLines]);
+  // Translation per lyric line. Match by time first — translations fetched from
+  // captions are split differently from the lyrics, so their numbering doesn't
+  // line up — and fall back to the line number.
+  const translationById = useMemo(() => {
+    const m = new Map<string, string>();
+    if (translationLines.length === 0) return m;
+    const byOrder = new Map(translationLines.map((l) => [l.order, l.text]));
+    const timed = translationLines.filter((t) => t.start_ms != null);
+    for (const line of lines) {
+      let text: string | undefined;
+      if (line.start_ms != null && line.end_ms != null && timed.length) {
+        const parts = timed
+          .filter((t) => {
+            const mid = (t.start_ms! + (t.end_ms ?? t.start_ms!)) / 2;
+            return mid >= line.start_ms! - 150 && mid < line.end_ms!;
+          })
+          .map((t) => t.text.trim())
+          .filter(Boolean);
+        if (parts.length) text = parts.join(" ");
+      }
+      text ??= byOrder.get(line.order);
+      if (text) m.set(line.id, text);
+    }
+    return m;
+  }, [lines, translationLines]);
+  const showTranslation = usePreferencesStore((s) => s.showTranslation);
+  const setShowTranslation = usePreferencesStore((s) => s.setShowTranslation);
   const sections = useMemo(
     () => [...(rawSections ?? [])].sort((a, b) => a.start_line_order - b.start_line_order),
     [rawSections],
@@ -171,7 +199,8 @@ function Workspace({ songId }: { songId: string }) {
   const [sectionEdit, setSectionEdit] = useState<SectionEdit | null>(null);
   const [view, setView] = useState<"lyrics" | "lead">("lyrics");
   const [modeTabsEl, setModeTabsEl] = useState<HTMLDivElement | null>(null);
-  const [rightTab, setRightTab] = useState<"takes" | "line">("takes");
+  /** Slide-over side panel (closed by default so the lyrics stay centred). */
+  const [panel, setPanel] = useState<"takes" | "line" | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const setupOpen = searchParams.get("setup") === "1";
@@ -204,6 +233,11 @@ function Workspace({ songId }: { songId: string }) {
     originalPath: song.audio_path,
     inputDeviceId: audioDevices.selectedInputId,
   });
+
+  // A freshly saved take opens the panel on its review.
+  useEffect(() => {
+    if (takes.reviewId) setPanel("takes");
+  }, [takes.reviewId]);
 
   // Follow playback: keep the line being sung in view — but not while you're
   // working in the sheet (selecting, clicking, scrolling, moving with keys).
@@ -354,7 +388,6 @@ function Workspace({ songId }: { songId: string }) {
       } else {
         takes.start(cursorLine);
       }
-      setRightTab("takes");
     },
     [takes, cursorSection, sectionRange, lines, cursorLine, say],
   );
@@ -380,6 +413,7 @@ function Workspace({ songId }: { songId: string }) {
 
     // Global
     if (ctrl && (k === "k" || k === "K")) return handled(), setPaletteOpen(true);
+    if (ctrl && (k === "j" || k === "J")) return handled(), setPanel((v) => (v ? null : "takes"));
     if (ctrl && !e.shiftKey && (k === "z" || k === "Z")) return handled(), void doUndo();
     if (ctrl && ((k === "y" || k === "Y") || (e.shiftKey && (k === "z" || k === "Z")))) return handled(), void doRedo();
     if (k === "?") return handled(), setShortcutsOpen(true);
@@ -438,6 +472,7 @@ function Workspace({ songId }: { songId: string }) {
       case "Escape":
         handled();
         if (selEnd > selStart) return setSel(focus, focus);
+        if (panel) return setPanel(null);
         if (player.isPlaying && !takes.busy) player.pause();
         return;
       case "[":
@@ -506,10 +541,15 @@ function Workspace({ songId }: { songId: string }) {
       { id: "redo", group: "Edit", label: "Redo", shortcut: "Ctrl+Y", disabled: !canRedo, run: () => void doRedo() },
       { id: "setup", group: "Song", featured: true, label: "Audio setup (download, stems, pitch, chords, align)…", run: () => setSetupOpen(true) },
       { id: "details", group: "Song", label: "Edit song details…", run: () => setEditOpen(true) },
+      { id: "panel-takes", group: "View", label: panel === "takes" ? "Hide takes" : "Show takes", shortcut: "Ctrl+J", featured: true, run: () => setPanel((v) => (v === "takes" ? null : "takes")) },
+      { id: "panel-line", group: "View", label: "Line details (timing, melody, marks)", run: () => setPanel("line") },
+      ...(translationLines.length
+        ? [{ id: "translation", group: "View", label: showTranslation ? "Hide translation" : "Show translation", run: () => setShowTranslation(!showTranslation) }]
+        : [{ id: "translation-add", group: "Lyrics", label: "Add a translation…", run: () => navigate(`/song/${songId}/lyrics`) }]),
       { id: "keys", group: "Help", label: "Keyboard shortcuts", shortcut: "?", featured: true, run: () => setShortcutsOpen(true) },
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [highlights, selStart, selEnd, cursorLine, cursorSection, sections, view, showHints, player.isPlaying, player.loopEnabled, tracks, canUndo, canRedo, edits]);
+  }, [highlights, selStart, selEnd, cursorLine, cursorSection, sections, view, showHints, panel, showTranslation, translationLines.length, player.isPlaying, player.loopEnabled, tracks, canUndo, canRedo, edits]);
 
   // ── Derived display ──────────────────────────────────────────────────────
   const loopLineIds = useMemo(() => {
@@ -591,9 +631,36 @@ function Workspace({ songId }: { songId: string }) {
             Song hints
           </button>
         )}
+        {view === "lyrics" && translationLines.length > 0 && (
+          <button
+            onClick={() => setShowTranslation(!showTranslation)}
+            title="Show the translation under each line"
+            className={`px-[8px] py-[3px] text-[11px] font-medium rounded-[6px] border cursor-pointer ${
+              showTranslation ? "bg-[var(--theme-light)] text-[var(--theme-text)] border-transparent" : "bg-transparent text-[var(--text-muted)] border-[var(--border)]"
+            }`}
+          >
+            Translation
+          </button>
+        )}
         <div ref={setModeTabsEl} className={view === "lead" ? "" : "hidden"} />
 
         <div className="ml-auto flex items-center gap-2">
+          {view === "lyrics" && (
+            <div className="flex p-[2px] rounded-[8px] bg-[var(--bg)] border border-[var(--border)]">
+              {([["takes", `Takes${takes.takes.length ? ` · ${takes.takes.length}` : ""}`], ["line", "Line"]] as const).map(([v, label]) => (
+                <button
+                  key={v}
+                  onClick={() => setPanel((cur) => (cur === v ? null : v))}
+                  title={v === "takes" ? "Your takes and their reviews (Ctrl+J)" : "Timing, melody and marks of the selected line"}
+                  className={`px-3 py-[3px] rounded-[6px] text-[12px] font-medium border-none cursor-pointer ${
+                    panel === v ? "bg-[var(--surface)] text-[var(--text-primary)] shadow-sm" : "bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
           <button
             onClick={() => setPaletteOpen(true)}
             className="flex items-center gap-2 px-3 py-[5px] rounded-[7px] border border-[var(--border)] bg-[var(--bg)] text-[11.5px] text-[var(--text-muted)] hover:border-[#888] cursor-pointer"
@@ -631,6 +698,7 @@ function Workspace({ songId }: { songId: string }) {
                 {[
                   ["Edit song details…", () => setEditOpen(true)],
                   ["Import / paste lyrics…", () => navigate(`/song/${songId}/lyrics`)],
+                  ...(translationLines.length === 0 ? [["Add a translation…", () => navigate(`/song/${songId}/lyrics`)]] : []),
                   ["Delete song…", () => setDeleteOpen(true)],
                 ].map(([label, fn]) => (
                   <button
@@ -667,9 +735,9 @@ function Workspace({ songId }: { songId: string }) {
         disabled={takes.busy || !audioReady}
       />
 
-      <div className="flex flex-1 min-h-0">
+      <div className="relative flex flex-1 min-h-0">
         {/* Center */}
-        <div className="flex-1 min-w-0 flex flex-col min-h-0">
+        <div className="relative flex-1 min-w-0 flex flex-col min-h-0">
         <div
           ref={sheetRef}
           onMouseDown={markInteraction}
@@ -714,7 +782,7 @@ function Workspace({ songId }: { songId: string }) {
               <LyricSheet
                 lines={lines}
                 sections={sections}
-                translationByOrder={translationByOrder}
+                translationById={showTranslation ? translationById : EMPTY_MAP}
                 highlights={highlights}
                 vocalMap={vocalMap}
                 showHints={showHints}
@@ -752,6 +820,18 @@ function Workspace({ songId }: { songId: string }) {
             </div>
           )}
         </div>
+        {view === "lyrics" && lines.length > 0 && (
+          <div className="pointer-events-none absolute left-0 right-0 bottom-[46px] flex justify-center px-4 z-10">
+            <RecordDock
+              t={takes}
+              song={song}
+              lines={lines}
+              startLine={cursorLine}
+              cursorSection={cursorSection}
+              backingLabel={tracks.find((t) => t.key === track)?.label ?? "Original"}
+            />
+          </div>
+        )}
         <KeyHints
           mode={
             takes.busy
@@ -774,33 +854,22 @@ function Workspace({ songId }: { songId: string }) {
         />
         </div>
 
-        {/* Right panel */}
-        {view === "lyrics" && (
-          <aside className="w-[400px] flex-shrink-0 flex flex-col min-h-0 border-l border-[var(--border)] bg-[var(--surface)]">
-            <div className="flex items-center gap-1 px-4 pt-3 flex-shrink-0 border-b border-[var(--border-subtle)]">
-              {([["takes", `Takes${takes.takes.length ? ` · ${takes.takes.length}` : ""}`], ["line", "Line"]] as const).map(([v, label]) => (
-                <button
-                  key={v}
-                  onClick={() => setRightTab(v)}
-                  className={`px-3 pb-[8px] pt-[2px] text-[12px] font-medium border-none bg-transparent cursor-pointer border-b-2 -mb-px ${
-                    rightTab === v ? "text-[var(--text-primary)] border-[var(--theme)]" : "text-[var(--text-muted)] border-transparent hover:text-[var(--text-primary)]"
-                  }`}
-                  style={{ borderBottomStyle: "solid" }}
-                >
-                  {label}
-                </button>
-              ))}
+        {/* Side panel — slides over the lyrics, so they stay centred when it's closed */}
+        {view === "lyrics" && panel && (
+          <aside className="absolute right-0 top-0 bottom-0 z-20 w-[420px] max-w-full flex flex-col min-h-0 border-l border-[var(--border)] bg-[var(--surface)] shadow-[-12px_0_32px_rgba(0,0,0,0.08)] animate-fade-up">
+            <div className="flex items-center gap-2 px-4 py-[10px] flex-shrink-0 border-b border-[var(--border-subtle)]">
+              <span className="text-[12.5px] font-medium">{panel === "takes" ? "Takes" : "Line details"}</span>
+              <span className="text-[11px] text-[var(--text-muted)]">{panel === "takes" ? "Ctrl+J" : ""}</span>
+              <button
+                onClick={() => setPanel(null)}
+                title="Close (Esc)"
+                className="ml-auto w-[26px] h-[26px] rounded-[7px] flex items-center justify-center bg-transparent border-none cursor-pointer text-[var(--text-muted)] hover:bg-[var(--bg)] hover:text-[var(--text-primary)]"
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 6L6 18M6 6l12 12" /></svg>
+              </button>
             </div>
-            {rightTab === "takes" ? (
-              <TakesPanel
-                t={takes}
-                song={song}
-                lines={lines}
-                sections={sections}
-                startLine={cursorLine}
-                cursorSection={cursorSection}
-                backingLabel={tracks.find((t) => t.key === track)?.label ?? "Original"}
-              />
+            {panel === "takes" ? (
+              <TakesPanel t={takes} song={song} lines={lines} sections={sections} />
             ) : (
               <LinePanel
                 song={song}

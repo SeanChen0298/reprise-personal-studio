@@ -74,11 +74,6 @@ function respell(label: string, key?: ChordKey): string {
   return label;
 }
 
-function formatTime(ms: number): string {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-}
-
 /** Scroll the element matching `selector` into view while playing. */
 function useFollow(
   containerRef: React.RefObject<HTMLDivElement | null>,
@@ -1414,6 +1409,7 @@ export function PlayAlongView({
   const [guidePrefs, setGuidePrefs] = useState<GuidePrefs>(readGuidePrefs);
   const [guideSettingsAnchor, setGuideSettingsAnchor] = useState<DOMRect | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   // The strum pattern is the user's choice per song (chord_settings.json).
   const [strumPattern, setStrumPattern] = useState(DEFAULT_STRUM_PATTERN);
   useEffect(() => {
@@ -1434,7 +1430,6 @@ export function PlayAlongView({
     label: string; anchor: DOMRect; index?: number; scope?: { start: number; end: number };
   } | null>(null);
   const [playhead, setPlayhead] = useState<Playhead>({ bar: -1, chord: -1, slot: -1, line: -1 });
-  const [clock, setClock] = useState({ now: 0, total: 0 });
 
   // Track the playhead from the audio element directly, so seeking while
   // paused still moves the highlight. State only changes when a value does.
@@ -1445,7 +1440,6 @@ export function PlayAlongView({
     const beats = analysis.beats_ms ?? [];
     let raf = 0;
     let last = "";
-    let lastSecond = -1;
     const tick = () => {
       const audio = audioRef.current;
       const t = (audio?.currentTime ?? 0) * 1000;
@@ -1463,12 +1457,6 @@ export function PlayAlongView({
       if (key !== last) {
         last = key;
         setPlayhead({ bar, chord, slot, line });
-      }
-      const second = Math.floor(t / 1000);
-      if (second !== lastSecond) {
-        lastSecond = second;
-        const total = audio && Number.isFinite(audio.duration) ? audio.duration * 1000 : analysis.duration_ms ?? 0;
-        setClock({ now: t, total });
       }
       raf = requestAnimationFrame(tick);
     };
@@ -1733,19 +1721,7 @@ export function PlayAlongView({
         )}
 
         {/* Now playing */}
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-6 pt-3 pb-2 bg-[var(--surface)]">
-          <button
-            onClick={onTogglePlay}
-            title={isPlaying ? "Pause (Space)" : "Play (Space)"}
-            className="w-[40px] h-[40px] rounded-full bg-[var(--theme)] text-white flex items-center justify-center border-none cursor-pointer hover:opacity-90 transition-opacity flex-shrink-0"
-          >
-            {isPlaying ? (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="4" width="5" height="16" rx="1" /><rect x="14" y="4" width="5" height="16" rx="1" /></svg>
-            ) : (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" className="ml-[2px]"><path d="M6 4l14 8-14 8z" /></svg>
-            )}
-          </button>
-
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-6 py-3 bg-[var(--surface)] border-b border-[var(--border)]">
           <div className="flex items-baseline gap-2.5 w-[150px] flex-shrink-0">
             {current && current.label !== "N" ? (
               <ChordName
@@ -1792,25 +1768,6 @@ export function PlayAlongView({
                 <><span className="mx-1.5">·</span>{analysis.time_signature.beats_per_bar}/{analysis.time_signature.beat_unit}</>
               )}
             </span>
-            <button
-              onClick={() => setImportOpen(true)}
-              title="Paste a chord chart you trust and line it up with the song"
-              className="h-[28px] px-2.5 rounded-[6px] text-[12px] font-medium border-[1.5px] border-[var(--border)] text-[var(--text-secondary)] bg-transparent hover:border-[#888] cursor-pointer whitespace-nowrap"
-            >
-              Import chart
-            </button>
-            {editCount > 0 && (
-              <button
-                onClick={() => void undoLastEdit()}
-                title={`Undo your most recent chord change (${editCount} change${editCount === 1 ? "" : "s"} in this song)`}
-                className="h-[28px] px-2.5 rounded-[6px] text-[12px] font-medium border-[1.5px] border-[var(--border)] text-[var(--text-secondary)] bg-transparent hover:border-[#888] cursor-pointer flex items-center gap-1 whitespace-nowrap"
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M9 14L4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 010 11H11" />
-                </svg>
-                Undo edit
-              </button>
-            )}
             {capoAvailable && (
               <button
                 onClick={() => setUseCapoShapes((v) => !v)}
@@ -1857,31 +1814,48 @@ export function PlayAlongView({
                 </svg>
               </button>
             </div>
-          </div>
-        </div>
-
-        {/* Seek bar */}
-        <div className="flex items-center gap-3 px-6 pb-3 bg-[var(--surface)] border-b border-[var(--border)]">
-          <span className="text-[11px] tabular-nums text-[var(--text-muted)] w-[34px] text-right">{formatTime(clock.now)}</span>
-          <div
-            className="relative flex-1 h-[14px] flex items-center cursor-pointer group"
-            onClick={(e) => {
-              const r = e.currentTarget.getBoundingClientRect();
-              if (clock.total > 0) onSeek(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * clock.total);
-            }}
-          >
-            <div className="w-full h-[4px] rounded-full bg-[var(--bg)] border border-[var(--border-subtle)] overflow-hidden">
-              <div
-                className="h-full bg-[var(--theme)]"
-                style={{ width: `${clock.total > 0 ? Math.min(100, (clock.now / clock.total) * 100) : 0}%` }}
-              />
+            <div className="relative">
+              <button
+                onClick={() => setMoreOpen((v) => !v)}
+                title="More chord tools"
+                className="h-[28px] w-[28px] rounded-[6px] border-[1.5px] border-[var(--border)] bg-transparent text-[var(--text-secondary)] hover:border-[#888] cursor-pointer"
+              >
+                ⋯
+              </button>
+              {moreOpen && (
+                <div
+                  className="absolute right-0 top-[calc(100%+6px)] z-30 w-[230px] p-1 rounded-[9px] border border-[var(--border)] bg-[var(--surface)] shadow-lg"
+                  onMouseLeave={() => setMoreOpen(false)}
+                >
+                  <button
+                    onClick={() => {
+                      setMoreOpen(false);
+                      setImportOpen(true);
+                    }}
+                    className="w-full text-left px-3 py-[6px] text-[12.5px] rounded-[5px] bg-transparent border-none cursor-pointer hover:bg-[var(--bg)] text-[var(--text-secondary)]"
+                  >
+                    Import a chord chart…
+                    <span className="block text-[10.5px] text-[var(--text-muted)]">Paste chords you trust and line them up</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setMoreOpen(false);
+                      void undoLastEdit();
+                    }}
+                    disabled={editCount === 0}
+                    className="w-full text-left px-3 py-[6px] text-[12.5px] rounded-[5px] bg-transparent border-none cursor-pointer hover:bg-[var(--bg)] text-[var(--text-secondary)] disabled:opacity-40 disabled:cursor-default"
+                  >
+                    Undo last chord edit
+                    {editCount > 0 && (
+                      <span className="block text-[10.5px] text-[var(--text-muted)]">
+                        {editCount} change{editCount === 1 ? "" : "s"} in this song
+                      </span>
+                    )}
+                  </button>
+                </div>
+              )}
             </div>
-            <div
-              className="absolute w-[11px] h-[11px] rounded-full bg-[var(--theme)] border-2 border-[var(--surface)] shadow-[0_0_0_1px_var(--theme)] -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity"
-              style={{ left: `${clock.total > 0 ? Math.min(100, (clock.now / clock.total) * 100) : 0}%` }}
-            />
           </div>
-          <span className="text-[11px] tabular-nums text-[var(--text-muted)] w-[34px]">{formatTime(clock.total)}</span>
         </div>
 
         {/* One scrolling area for whichever view is selected */}

@@ -565,8 +565,10 @@ export function LyricsInputPage() {
         created_at: now,
         updated_at: now,
       }));
-      await setLinesForLanguage(id, translationLang, newLines);
+      // Set translation_language FIRST: setLinesForLanguage treats a save for any other
+      // language as a primary save and would replace the main lyrics with these lines.
       await updateSong(id, { translation_language: translationLang });
+      await setLinesForLanguage(id, translationLang, newLines);
       setTranslationSaveMsg(`${newLines.length} translation lines saved (${translationLang.toUpperCase()})`);
     } catch (err) {
       setTranslationSaveMsg(`Error: ${err instanceof Error ? err.message : "Failed"}`);
