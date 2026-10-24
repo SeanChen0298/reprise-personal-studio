@@ -197,6 +197,10 @@ function Workspace({ songId }: { songId: string }) {
 
   const [editingLineId, setEditingLineId] = useState<string | null>(null);
   const [symbolPickerOpen, setSymbolPickerOpen] = useState(false);
+  /** Line whose note is being written (N with no take open). */
+  const [noteLineId, setNoteLineId] = useState<string | null>(null);
+  /** Bumped by N while a take is open: its note box takes focus. */
+  const [noteFocusNonce, setNoteFocusNonce] = useState(0);
   /** The caret shows only once you work inside a line (←/→, Home/End, clicking into the text). */
   const [caretShown, setCaretShown] = useState(false);
   const [sectionEdit, setSectionEdit] = useState<SectionEdit | null>(null);
@@ -252,9 +256,14 @@ function Workspace({ songId }: { songId: string }) {
   useEffect(() => {
     if (!playingLineId) return;
     if (Date.now() - lastInteractionRef.current < FOLLOW_PAUSE_MS) return;
-    sheetRef.current
-      ?.querySelector(`[data-line-id="${playingLineId}"]`)
-      ?.scrollIntoView({ block: "center", behavior: "smooth" });
+    const box = sheetRef.current;
+    const el = box?.querySelector<HTMLElement>(`[data-line-id="${playingLineId}"]`);
+    if (!box || !el) return;
+    // Centre the line, then one line higher, so more of what's coming next is visible.
+    const r = el.getBoundingClientRect();
+    const b = box.getBoundingClientRect();
+    const top = box.scrollTop + (r.top - b.top) - box.clientHeight / 2 + r.height / 2 + r.height;
+    box.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
   }, [playingLineId]);
 
   // ── Actions ──────────────────────────────────────────────────────────────
@@ -434,7 +443,7 @@ function Workspace({ songId }: { songId: string }) {
     const k = e.key;
     const letter = e.code.startsWith("Key") ? e.code.slice(3) : "";
     const handled = () => e.preventDefault();
-    if (k !== " " && k !== "Enter" && letter !== "E") markInteraction();
+    if (k !== " " && k !== "Enter") markInteraction();
 
     // Global
     if (ctrl && (letter === "E" || letter === "K")) return handled(), setPaletteOpen(true);
@@ -496,6 +505,7 @@ function Workspace({ songId }: { songId: string }) {
       return;
     }
     if (ctrl) {
+      if (k === "Enter") return handled(), playLine(cursorLine.id);
       if (letter === "A") return handled(), setCaretShown(true), setSel(0, len);
       if (k === "ArrowUp" || k === "ArrowDown") return moveLine(k === "ArrowDown", true);
       if (k === "ArrowLeft" || k === "ArrowRight") return moveCaret(k === "ArrowRight", shift, true);
@@ -553,9 +563,6 @@ function Workspace({ songId }: { songId: string }) {
       case "A":
       case "D":
         return moveCaret(letter === "D", shift, false);
-      case "E":
-        handled();
-        return playLine(cursorLine.id);
       case "Q":
       case "L":
         handled();
@@ -574,6 +581,11 @@ function Workspace({ songId }: { songId: string }) {
       case "F":
         handled();
         return setEditingLineId(cursorLine.id);
+      case "N":
+        handled();
+        // A take is open: note a moment in it. Otherwise: note this line.
+        if (panel === "takes" && takes.reviewRec) return setNoteFocusNonce((n) => n + 1);
+        return setNoteLineId(cursorLine.id);
     }
     if (/^[1-9]$/.test(k) && !e.repeat) return handled(), annotate(Number(k));
   };
@@ -606,6 +618,7 @@ function Workspace({ songId }: { songId: string }) {
         shortcut: "C",
         run: () => void insertSymbol(sym.char),
       })),
+      { id: "note", group: "Lyrics", label: panel === "takes" && takes.reviewRec ? "Note a moment in the open take" : "Write a note on this line", shortcut: "N", featured: true, run: () => (panel === "takes" && takes.reviewRec ? setNoteFocusNonce((n) => n + 1) : cursorLine && setNoteLineId(cursorLine.id)) },
       { id: "edit", group: "Lyrics", label: "Edit line text", shortcut: "F", featured: true, run: () => cursorLine && setEditingLineId(cursorLine.id) },
       { id: "section", group: "Lyrics", featured: true, label: cursorLine && sections.some((s) => s.start_line_order === cursorLine.order) ? "Rename this section" : "Start a section at this line", shortcut: "#", run: startSectionEdit },
       ...(cursorSection ? [{ id: "section-rm", group: "Lyrics", label: `Remove section “${cursorSection.name}”`, run: () => edits.removeSection(cursorSection) }] : []),
@@ -613,7 +626,7 @@ function Workspace({ songId }: { songId: string }) {
       { id: "hints", group: "View", label: showHints ? "Hide song hints (long phrases, high notes)" : "Show song hints (long phrases, high notes)", run: () => setShowHints((v) => !v) },
       { id: "view", group: "View", label: view === "lyrics" ? "Switch to lead sheet (chords)" : "Switch to lyrics", run: () => setView((v) => (v === "lyrics" ? "lead" : "lyrics")) },
       { id: "play", group: "Play", label: player.isPlaying ? "Pause" : "Play", shortcut: "Space", run: player.togglePlay },
-      { id: "play-line", group: "Play", label: "Play from selected line", shortcut: "E", featured: true, run: () => cursorLine && playLine(cursorLine.id) },
+      { id: "play-line", group: "Play", label: "Play from selected line", shortcut: "Ctrl+Enter", featured: true, run: () => cursorLine && playLine(cursorLine.id) },
       { id: "loop", group: "Play", label: player.loopEnabled ? "Stop looping" : "Loop selected line", shortcut: "Q", featured: true, run: loopLine },
       { id: "loop-sec", group: "Play", label: "Loop this section", shortcut: "Shift+Q", featured: true, disabled: !cursorSection, run: loopSection },
       ...tracks.map((t) => ({ id: `track-${t.key}`, group: "Play", label: `Play the ${t.label === "Inst." ? "instrumental" : t.label.toLowerCase()} track`, run: () => setTrack(t.key) })),
@@ -633,6 +646,28 @@ function Workspace({ songId }: { songId: string }) {
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlights, selStart, selEnd, cursorLine, cursorSection, sections, view, showHints, panel, symbols, showTranslation, translationLines.length, player.isPlaying, player.loopEnabled, tracks, canUndo, canRedo, edits]);
+
+  // Your take notes, placed under the lyric line they were sung on.
+  const takeNotesByLine = useMemo(() => {
+    const m = new Map<string, { key: string; text: string; when: string }[]>();
+    for (const rec of takes.takes) {
+      if (rec.song_start_ms == null || !rec.notes?.length) continue;
+      const when = new Date(rec.created_at).toLocaleDateString([], { month: "short", day: "numeric" });
+      for (const n of rec.notes) {
+        const songMs = rec.song_start_ms + n.take_ms - (rec.analysis?.lag_ms ?? 0);
+        let line: Line | undefined;
+        for (const l of lines) {
+          if (l.start_ms == null || l.start_ms > songMs + 200) continue;
+          line = l;
+        }
+        if (!line) continue;
+        const arr = m.get(line.id) ?? [];
+        arr.push({ key: `${rec.id}:${n.id}`, text: n.text, when });
+        m.set(line.id, arr);
+      }
+    }
+    return m;
+  }, [takes.takes, lines]);
 
   // ── Derived display ──────────────────────────────────────────────────────
   const loopLineIds = useMemo(() => {
@@ -672,6 +707,12 @@ function Workspace({ songId }: { songId: string }) {
   const onNudge = useStable(nudge);
   const onPickSymbol = useStable((char: string) => void insertSymbol(char));
   const onCloseSymbols = useStable(() => setSymbolPickerOpen(false));
+  const onStartNote = useStable((lineId: string) => setNoteLineId(lineId));
+  const onCommitNote = useStable((lineId: string, text: string) => {
+    setNoteLineId(null);
+    edits.setLineNote(lineId, text);
+  });
+  const onCancelNote = useStable(() => setNoteLineId(null));
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-[var(--bg)]">
@@ -886,6 +927,11 @@ function Workspace({ songId }: { songId: string }) {
                 onIssueClick={onIssueClick}
                 onNudge={onNudge}
                 symbols={symbols}
+                takeNotesByLine={takeNotesByLine}
+                noteLineId={noteLineId}
+                onStartNote={onStartNote}
+                onCommitNote={onCommitNote}
+                onCancelNote={onCancelNote}
                 symbolPickerOpen={symbolPickerOpen}
                 onPickSymbol={onPickSymbol}
                 onCloseSymbols={onCloseSymbols}
@@ -925,7 +971,7 @@ function Workspace({ songId }: { songId: string }) {
           mode={
             takes.busy
               ? "recording"
-              : editingLineId || sectionEdit
+              : editingLineId || sectionEdit || noteLineId
                 ? "editing"
                 : view === "lead"
                   ? "lead"
@@ -958,7 +1004,7 @@ function Workspace({ songId }: { songId: string }) {
               </button>
             </div>
             {panel === "takes" ? (
-              <TakesPanel t={takes} song={song} lines={lines} sections={sections} />
+              <TakesPanel t={takes} song={song} lines={lines} sections={sections} noteFocusNonce={noteFocusNonce} />
             ) : (
               <LinePanel
                 song={song}

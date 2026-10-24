@@ -99,7 +99,7 @@ const SHORTCUTS: [string, [string, string][]][] = [
   ]],
   ["Play", [
     ["Space", "Play / pause"],
-    ["E / double-click", "Play from the line"],
+    ["Ctrl+Enter / double-click", "Play from the line"],
     ["Q / Shift+Q", "Loop the line / the section"],
     ["Alt+W / Alt+S", "Faster / slower (0.5–1.0×)"],
     ["Esc", "Clear selection, close panel, pause"],
@@ -109,6 +109,7 @@ const SHORTCUTS: [string, [string, string][]][] = [
     ["X", "Remove marks in the selection (or under the caret)"],
     ["C, then 1–9", "Insert a symbol (⤴ ⤵ ~ /) at the caret"],
     ["F", "Edit the line's text (Alt+1…9 inserts symbols)"],
+    ["N", "Note on this line — or, with a take open, on that moment of the take"],
     ["#", "Start a section here (or rename it)"],
   ]],
   ["Timing", [

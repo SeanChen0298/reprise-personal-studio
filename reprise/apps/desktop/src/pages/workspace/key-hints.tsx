@@ -81,7 +81,7 @@ export function KeyHints({
     hints = (
       <>
         <Hint k={<Key>Space</Key>} label="play" />
-        <Hint k={<Key>E</Key>} label="play line" />
+        <Hint k={<><Key>Ctrl</Key><Key>Enter</Key></>} label="play line" />
         <Hint k={<Key>Q</Key>} label="loop" />
         <Hint k={<Key>R</Key>} label="record" />
         <Hint k={<><Key>W</Key><Key>S</Key></>} label="lines" />
@@ -90,6 +90,7 @@ export function KeyHints({
         <Hint k={<><Key>Alt</Key><Key>A</Key><Key>D</Key></>} label="shift start" />
         <Hint k={<Key>T</Key>} label="start = now" />
         <Hint k={<Key>C</Key>} label="symbol ⤴ ~" />
+        <Hint k={<Key>N</Key>} label="note" />
         <Hint k={<Key>#</Key>} label="new section" />
       </>
     );

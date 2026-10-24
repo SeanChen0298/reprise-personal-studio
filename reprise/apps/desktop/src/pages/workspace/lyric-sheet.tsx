@@ -188,6 +188,12 @@ interface LineRowProps {
   onIssueClick: (issue: TakeIssue, key: string) => void;
   onNudge: (field: "start_ms" | "end_ms", deltaMs: number) => void;
   symbols: VocalSymbol[];
+  /** Notes pinned to this line in your takes. */
+  takeNotes?: { key: string; text: string; when: string }[];
+  editingNote: boolean;
+  onStartNote: (lineId: string) => void;
+  onCommitNote: (lineId: string, text: string) => void;
+  onCancelNote: () => void;
   /** Symbol picker open under this line. */
   pickingSymbol: boolean;
   onPickSymbol: (char: string) => void;
@@ -198,6 +204,7 @@ const LineRow = memo(function LineRow({
   line, info, translation, highlights, isCursor, anchor, focus, isPlaying, inLoop, editing, showCaret,
   issues, onSelect, onStartEdit, onCommitEdit, onCancelEdit, onPlay, onIssueClick, onNudge,
   symbols, pickingSymbol, onPickSymbol, onCloseSymbols,
+  takeNotes, editingNote, onStartNote, onCommitNote, onCancelNote,
 }: LineRowProps) {
   const text = displayText(line);
   const textRef = useRef<HTMLDivElement>(null);
@@ -238,7 +245,7 @@ const LineRow = memo(function LineRow({
         window.getSelection()?.removeAllRanges();
         onPlay(line.id);
       }}
-      title={line.start_ms != null ? "Double-click (or E) to play from this line · F to edit the text" : "F to edit the text"}
+      title={line.start_ms != null ? "Double-click (or Ctrl+Enter) to play from this line · F to edit the text" : "F to edit the text"}
     >
       {/* Being sung: a small level-meter icon; otherwise ▶ on hover */}
       {isPlaying ? (
@@ -258,7 +265,7 @@ const LineRow = memo(function LineRow({
             e.stopPropagation();
             onPlay(line.id);
           }}
-          title="Play from this line (E)"
+          title="Play from this line (Ctrl+Enter)"
           className="absolute left-[5px] top-[9px] w-[18px] h-[18px] rounded-full flex items-center justify-center border-none cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity bg-[var(--surface)] text-[var(--text-secondary)] shadow-sm"
         >
           <svg width="7" height="7" viewBox="0 0 24 24" fill="currentColor" style={{ marginLeft: 1 }}>
@@ -292,6 +299,17 @@ const LineRow = memo(function LineRow({
           )}
           {translation && <div className="text-[12px] leading-snug text-[var(--text-muted)] mt-0.5 select-none">{translation}</div>}
           {pickingSymbol && !editing && <SymbolPicker symbols={symbols} onPick={onPickSymbol} onClose={onCloseSymbols} />}
+          {editingNote ? (
+            <div className="mt-[5px]" onMouseUp={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+              <InlineInput
+                initial={line.note ?? ""}
+                placeholder="Your note for this line — Enter saves, empty removes"
+                className="w-full px-2 py-[3px] rounded-[6px] border border-[var(--theme)] bg-[var(--surface)] text-[12.5px] outline-none"
+                onCommit={(v) => onCommitNote(line.id, v)}
+                onCancel={onCancelNote}
+              />
+            </div>
+          ) : null}
         </div>
 
         {!editing && (
@@ -351,6 +369,52 @@ const LineRow = memo(function LineRow({
         )}
       </div>
 
+      {/* Notes: a small marker; hovering the line shows them beside the lyrics */}
+      {!editing && !editingNote && (line.note || (takeNotes && takeNotes.length > 0)) && (
+        <>
+          <span
+            className="absolute right-[6px] bottom-[4px] text-[10px] text-amber-700/80 select-none pointer-events-none"
+            aria-hidden
+          >
+            💬{(line.note ? 1 : 0) + (takeNotes?.length ?? 0) > 1 ? ` ${(line.note ? 1 : 0) + (takeNotes?.length ?? 0)}` : ""}
+          </span>
+          <div
+            className="hidden group-hover:flex absolute left-full top-0 ml-3 z-30 w-[260px] flex-col gap-[6px] p-3 rounded-[10px] border border-[var(--border)] bg-[var(--surface)] shadow-lg select-none"
+            onMouseUp={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+          >
+            {line.note && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onStartNote(line.id);
+                }}
+                title="Edit (N)"
+                className="text-left text-[12.5px] leading-snug text-amber-900 bg-amber-50 rounded-[6px] px-2 py-[4px] border-none cursor-pointer"
+              >
+                {line.note}
+              </button>
+            )}
+            {takeNotes?.map((n) => (
+              <div key={n.key} className="text-[12px] leading-snug text-[var(--text-secondary)]">
+                <span className="text-[10.5px] text-[var(--text-muted)]">Take {n.when} · </span>
+                {n.text}
+              </div>
+            ))}
+            {!line.note && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onStartNote(line.id);
+                }}
+                className="text-left text-[11px] text-[var(--theme)] bg-transparent border-none p-0 cursor-pointer hover:underline"
+              >
+                + note on this line (N)
+              </button>
+            )}
+          </div>
+        </>
+      )}
       {issues && issues.length > 0 && (
         <div className="flex flex-wrap gap-1 mt-[3px] select-none">
           {issues.map(({ issue, key }) => (
@@ -454,6 +518,11 @@ export interface LyricSheetProps {
   onIssueClick: (issue: TakeIssue, key: string) => void;
   onNudge: (field: "start_ms" | "end_ms", deltaMs: number) => void;
   symbols: VocalSymbol[];
+  takeNotesByLine: Map<string, { key: string; text: string; when: string }[]>;
+  noteLineId: string | null;
+  onStartNote: (lineId: string) => void;
+  onCommitNote: (lineId: string, text: string) => void;
+  onCancelNote: () => void;
   symbolPickerOpen: boolean;
   onPickSymbol: (char: string) => void;
   onCloseSymbols: () => void;
@@ -531,6 +600,11 @@ export function LyricSheet(p: LyricSheetProps) {
               onIssueClick={p.onIssueClick}
               onNudge={p.onNudge}
               symbols={p.symbols}
+              takeNotes={p.takeNotesByLine.get(line.id)}
+              editingNote={p.noteLineId === line.id}
+              onStartNote={p.onStartNote}
+              onCommitNote={p.onCommitNote}
+              onCancelNote={p.onCancelNote}
               pickingSymbol={isCursor && p.symbolPickerOpen}
               onPickSymbol={p.onPickSymbol}
               onCloseSymbols={p.onCloseSymbols}

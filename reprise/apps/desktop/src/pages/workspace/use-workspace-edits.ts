@@ -153,8 +153,25 @@ export function useWorkspaceEdits(songId: string) {
     [songId, push],
   );
 
+  const setLineNote = useCallback(
+    async (lineId: string, note: string) => {
+      const line = getLine(songId, lineId);
+      if (!line) return;
+      const prev = line.note;
+      const next = note.trim() || undefined;
+      if ((prev ?? "") === (next ?? "")) return;
+      await useSongStore.getState().updateLine(songId, lineId, { note: next });
+      push({
+        label: next ? "Line note" : "Remove line note",
+        undo: () => useSongStore.getState().updateLine(songId, lineId, { note: prev }),
+        redo: () => useSongStore.getState().updateLine(songId, lineId, { note: next }),
+      });
+    },
+    [songId, push],
+  );
+
   return useMemo(
-    () => ({ annotate, clearAnnotations, editText, setTiming, createSection, renameSection, removeSection }),
-    [annotate, clearAnnotations, editText, setTiming, createSection, renameSection, removeSection],
+    () => ({ annotate, clearAnnotations, editText, setTiming, createSection, renameSection, removeSection, setLineNote }),
+    [annotate, clearAnnotations, editText, setTiming, createSection, renameSection, removeSection, setLineNote],
   );
 }

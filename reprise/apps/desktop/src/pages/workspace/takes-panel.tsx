@@ -194,31 +194,67 @@ export function RecordDock({
 }
 
 /** Takes list + review — lives in the slide-over panel. */
-export function TakesPanel({ t, song, lines, sections }: { t: TakesState; song: Song; lines: Line[]; sections: Section[] }) {
+export function TakesPanel({
+  t,
+  song,
+  lines,
+  sections,
+  noteFocusNonce,
+}: {
+  t: TakesState;
+  song: Song;
+  lines: Line[];
+  sections: Section[];
+  /** Bumped by the N key: focus the open take's note box. */
+  noteFocusNonce: number;
+}) {
   const playbackVolume = usePreferencesStore((s) => s.playbackVolume);
   const updateRecording = useSongStore((s) => s.updateRecording);
   const removeRecording = useSongStore((s) => s.removeRecording);
   const [playingId, setPlayingId] = useState<string | null>(null);
+  /** Where each take is playing (ms) — notes are pinned there. */
+  const [playhead, setPlayhead] = useState<Record<string, number>>({});
+  const [seek, setSeek] = useState<{ id: string; ms: number; nonce: number } | null>(null);
+  const open = t.reviewRec;
+
+  const addNote = (rec: Recording, text: string, takeMs: number) => {
+    const notes = [...(rec.notes ?? []), { id: crypto.randomUUID(), take_ms: takeMs, text, created_at: new Date().toISOString() }];
+    updateRecording(song.id, rec.id, { notes });
+  };
+  const deleteNote = (rec: Recording, id: string) => {
+    updateRecording(song.id, rec.id, { notes: (rec.notes ?? []).filter((n) => n.id !== id) });
+  };
+  const playAt = (rec: Recording, ms: number) => {
+    setSeek({ id: rec.id, ms, nonce: Date.now() });
+    setPlayhead((p) => ({ ...p, [rec.id]: ms }));
+    setPlayingId(rec.id);
+  };
   const [deleteTarget, setDeleteTarget] = useState<Recording | null>(null);
   const lineById = new Map(lines.map((l) => [l.id, l]));
   const sectionById = new Map(sections.map((s) => [s.id, s]));
 
   return (
     <div className="flex flex-col min-h-0 flex-1">
-      {t.reviewRec && (
+      {open && (
         <TakeReviewPanel
-          rec={t.reviewRec}
+          rec={open}
+          song={song}
           lines={lines}
-          analyzing={t.reviewRec.id in t.analyzing ? t.analyzing[t.reviewRec.id] : null}
-          error={t.analysisErrors[t.reviewRec.id] ?? null}
+          analyzing={open.id in t.analyzing ? t.analyzing[open.id] : null}
+          error={t.analysisErrors[open.id] ?? null}
           playingKey={t.snippetKey}
+          playheadMs={playhead[open.id] ?? null}
+          noteFocusNonce={noteFocusNonce}
           onPlayYou={t.playIssueYou}
           onPlayOriginal={t.playIssueOriginal}
-          onReanalyze={() => t.runAnalysis(t.reviewRec!)}
+          onReanalyze={() => t.runAnalysis(open)}
           onClose={() => {
             t.stopSnippet();
             t.setReviewId(null);
           }}
+          onAddNote={(text, ms) => addNote(open, text, ms)}
+          onDeleteNote={(id) => deleteNote(open, id)}
+          onPlayNote={(ms) => playAt(open, ms)}
         />
       )}
       <div className="flex-1 overflow-y-auto px-3 py-3" style={{ scrollbarWidth: "thin" }}>
@@ -249,6 +285,9 @@ export function TakesPanel({ t, song, lines, sections }: { t: TakesState; song: 
               comparingId={null}
               volume={playbackVolume}
               review={canReview(rec, song) ? { active: t.reviewId === rec.id, analyzing: rec.id in t.analyzing, onOpen: t.openReview } : undefined}
+              onOpen={(id) => t.reviewId !== id && t.openReview(id)}
+              onTime={(ms) => setPlayhead((p) => (p[rec.id] === ms ? p : { ...p, [rec.id]: ms }))}
+              seek={seek?.id === rec.id ? seek : null}
             />
           ))
         )}

@@ -4,7 +4,7 @@
 import { readTextFile } from "@tauri-apps/plugin-fs";
 import { parsePitchData } from "./audio-analysis";
 import { buildVocalMap, type VocalMap } from "./vocal-map";
-import { ANALYSIS_VERSION, analyzeTake, decodeToMono, extractFeatures } from "./take-analysis";
+import { ANALYSIS_VERSION, analyzeTake, decodeToMono, extractFeatures, type TakeFeatures } from "./take-analysis";
 import type { Line, Recording, Song, TakeAnalysis, TakeIssue, TakeIssueKind } from "../types/song";
 
 const mapCache = new Map<string, Promise<VocalMap>>();
@@ -33,6 +33,19 @@ export function loadVocalMap(song: Pick<Song, "pitch_data_path" | "vocals_path">
   return p;
 }
 
+const featureCache = new Map<string, Promise<TakeFeatures>>();
+
+/** A take's loudness + pitch tracks (cached for the session — used by the review and its pitch charts). */
+export function loadTakeFeatures(filePath: string, onProgress?: (fraction: number) => void): Promise<TakeFeatures> {
+  let p = featureCache.get(filePath);
+  if (!p) {
+    p = decodeToMono(filePath).then((samples) => extractFeatures(samples, onProgress));
+    p.catch(() => featureCache.delete(filePath));
+    featureCache.set(filePath, p);
+  }
+  return p;
+}
+
 export function canReview(rec: Recording, song: Pick<Song, "pitch_data_path">): boolean {
   return rec.song_start_ms != null && !!song.pitch_data_path;
 }
@@ -49,8 +62,7 @@ export async function analyzeRecording(
 ): Promise<TakeAnalysis> {
   const mapPromise = loadVocalMap(song);
   if (!mapPromise || rec.song_start_ms == null) throw new Error("This take can't be reviewed.");
-  const [map, samples] = await Promise.all([mapPromise, decodeToMono(rec.file_path)]);
-  const features = await extractFeatures(samples, onProgress);
+  const [map, features] = await Promise.all([mapPromise, loadTakeFeatures(rec.file_path, onProgress)]);
   return analyzeTake(features, map, rec.song_start_ms, lines);
 }
 

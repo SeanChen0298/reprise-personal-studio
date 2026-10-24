@@ -68,6 +68,8 @@ export interface Line {
   furigana_html?: string; // HTML with <ruby> tags for line.text, auto-generated for language === "ja"
   custom_furigana_html?: string; // HTML with <ruby> tags for custom_text, auto-generated when custom_text is set
   language?: string; // e.g. "en", "ja" — null/undefined means primary/legacy
+  /** The singer's own note on this line ("darker here", "breathe before 'kaerou'"). */
+  note?: string;
   created_at: string;
   updated_at: string;
 }
@@ -106,8 +108,18 @@ export interface Recording {
   backing?: "original" | "vocal" | "instrumental";
   /** Breath / high-note review of a sung-along take. */
   analysis?: TakeAnalysis;
+  /** Your own listen-back notes, pinned to moments in the take. */
+  notes?: TakeNote[];
   created_at: string;
   updated_at: string;
+}
+
+export interface TakeNote {
+  id: string;
+  /** Position in the take (ms). */
+  take_ms: number;
+  text: string;
+  created_at: string;
 }
 
 export type TakeIssueKind =

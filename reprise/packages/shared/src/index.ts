@@ -14,6 +14,7 @@ export type {
   Recording,
   Section,
   TakeAnalysis,
+  TakeNote,
   TakeIssue,
   TakeIssueKind,
   TakeHalfStats,

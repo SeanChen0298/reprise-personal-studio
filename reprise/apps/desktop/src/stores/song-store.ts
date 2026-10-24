@@ -108,7 +108,7 @@ interface SongStore {
   // Recordings management
   addRecording: (songId: string, recording: Recording) => Promise<void>;
   removeRecording: (songId: string, recordingId: string) => Promise<void>;
-  updateRecording: (songId: string, recordingId: string, data: Partial<Pick<Recording, "note" | "is_best_take" | "analysis">>) => Promise<void>;
+  updateRecording: (songId: string, recordingId: string, data: Partial<Pick<Recording, "note" | "is_best_take" | "analysis" | "notes">>) => Promise<void>;
   toggleMasterTake: (songId: string, recordingId: string) => Promise<void>;
   getRecordingsForLine: (songId: string, lineId: string) => Recording[];
 
@@ -1121,6 +1121,7 @@ function dbRowToLine(row: Record<string, unknown>): Line {
     start_ms: row.start_ms as number | undefined,
     end_ms: row.end_ms as number | undefined,
     syllable_times: (row.syllable_times as [number, number, number][] | null) ?? undefined,
+    note: (row.note as string | null) ?? undefined,
     status: row.status as LineStatus,
     play_count: (row.play_count as number | undefined) ?? 0,
     furigana_html: (row.furigana_html as string | undefined) ?? undefined,
@@ -1143,6 +1144,7 @@ function lineToDbRow(line: Line, userId: string): Record<string, unknown> {
     start_ms: line.start_ms ?? null,
     end_ms: line.end_ms ?? null,
     syllable_times: line.syllable_times ?? null,
+    note: line.note ?? null,
     status: line.status,
     play_count: line.play_count ?? 0,
     furigana_html: line.furigana_html ?? null,
@@ -1167,6 +1169,7 @@ function dbRowToRecording(row: Record<string, unknown>): Recording {
     song_start_ms: (row.song_start_ms as number | undefined) ?? undefined,
     backing: (row.backing as Recording["backing"]) ?? undefined,
     analysis: (row.analysis as Recording["analysis"]) ?? undefined,
+    notes: (row.notes as Recording["notes"]) ?? undefined,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -1187,6 +1190,7 @@ function recordingToDbRow(recording: Recording, userId: string): Record<string, 
     song_start_ms: recording.song_start_ms ?? null,
     backing: recording.backing ?? null,
     analysis: recording.analysis ?? null,
+    notes: recording.notes ?? null,
     created_at: recording.created_at,
     updated_at: recording.updated_at,
   };

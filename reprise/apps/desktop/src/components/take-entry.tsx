@@ -15,12 +15,20 @@ function RecordingWaveform({
   isPlaying,
   onEnded,
   volume = 1,
+  onTime,
+  seek,
 }: {
   filePath: string;
   isPlaying: boolean;
   onEnded: () => void;
   volume?: number;
+  /** Playback position (ms) while playing — for pinning notes. */
+  onTime?: (ms: number) => void;
+  /** Jump to a position; a new `nonce` repeats the jump. */
+  seek?: { ms: number; nonce: number } | null;
 }) {
+  const onTimeRef = useRef(onTime);
+  onTimeRef.current = onTime;
   const containerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WaveSurfer | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
@@ -50,6 +58,8 @@ function RecordingWaveform({
     wsRef.current = ws;
     ws.load(convertFileSrc(filePath)).catch(() => {});
     ws.on("finish", () => onEndedRef.current());
+    ws.on("timeupdate", (t: number) => onTimeRef.current?.(Math.round(t * 1000)));
+    ws.on("interaction", (t: number) => onTimeRef.current?.(Math.round(t * 1000)));
 
     // Route audio through Web Audio GainNode so gain can exceed 1.0
     ws.on("ready", () => {
@@ -82,6 +92,14 @@ function RecordingWaveform({
     if (gainNodeRef.current) gainNodeRef.current.gain.value = gain;
   }, [gain]);
 
+  useEffect(() => {
+    const ws = wsRef.current;
+    if (!ws || !seek) return;
+    const go = () => ws.setTime(seek.ms / 1000);
+    if (ws.getDuration() > 0) go();
+    else ws.once("ready", go);
+  }, [seek?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Sync volume
   useEffect(() => {
     wsRef.current?.setVolume(volume);
@@ -99,7 +117,7 @@ function RecordingWaveform({
     }
   }, [isPlaying]);
 
-  return <div ref={containerRef} className="flex-1 min-w-0 overflow-hidden" />;
+  return <div ref={containerRef} data-waveform className="flex-1 min-w-0 overflow-hidden" />;
 }
 
 // ---------------------------------------------------------------------------
@@ -123,6 +141,10 @@ export interface RecordingEntryProps {
   playingId: string | null;
   comparingId: string | null;
   volume: number;
+  /** Clicking the row (not its buttons) opens the take. */
+  onOpen?: (id: string) => void;
+  onTime?: (ms: number) => void;
+  seek?: { ms: number; nonce: number } | null;
   /** Set for sung-along takes that can be reviewed. */
   review?: {
     active: boolean;
@@ -147,6 +169,9 @@ export function RecordingEntry({
   comparingId,
   volume,
   review,
+  onOpen,
+  onTime,
+  seek,
 }: RecordingEntryProps) {
   const isPlaying = playingId === rec.id;
   const isComparing = comparingId === rec.id;
@@ -163,7 +188,11 @@ export function RecordingEntry({
   // Two rows so it fits a side panel: [▶ waveform length] / [date · section · note … review ★ 🗑]
   return (
     <div
-      className={`group flex flex-col gap-[3px] px-2 py-[7px] rounded-[8px] transition-colors ${
+      onClick={(e) => {
+        // Open the take, unless a button / the waveform inside it was used.
+        if (onOpen && !(e.target as HTMLElement).closest("button, input, canvas, [data-waveform]")) onOpen(rec.id);
+      }}
+      className={`group flex flex-col gap-[3px] px-2 py-[7px] rounded-[8px] transition-colors ${onOpen ? "cursor-pointer" : ""} ${
         isPlaying || isComparing || review?.active ? "bg-[var(--theme-light)]" : "hover:bg-[var(--bg)]"
       } ${selected ? "ring-1 ring-[var(--theme)]" : ""}`}
     >
@@ -187,7 +216,7 @@ export function RecordingEntry({
             <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor" style={{ marginLeft: 1 }}><polygon points="5,3 19,12 5,21" /></svg>
           )}
         </button>
-        <RecordingWaveform filePath={rec.file_path} isPlaying={isPlaying} onEnded={() => onPlayEnded(rec.id)} volume={volume} />
+        <RecordingWaveform filePath={rec.file_path} isPlaying={isPlaying} onEnded={() => onPlayEnded(rec.id)} volume={volume} onTime={onTime} seek={seek} />
         <span className="flex-shrink-0 text-[11px] text-[var(--text-secondary)] tabular-nums">{formatMs(rec.duration_ms)}</span>
       </div>
 
