@@ -26,9 +26,11 @@ interface Options {
   backing: Backing;
   /** Track path playing for "Original" snippets. */
   originalPath: string | undefined;
+  /** Microphone chosen in Settings (empty = system default). */
+  inputDeviceId?: string;
 }
 
-export function useTakes({ song, lines, sections, player, backing, originalPath }: Options) {
+export function useTakes({ song, lines, sections, player, backing, originalPath, inputDeviceId }: Options) {
   const recorder = useRecorder();
   const addRecording = useSongStore((s) => s.addRecording);
   const updateRecording = useSongStore((s) => s.updateRecording);
@@ -91,7 +93,7 @@ export function useTakes({ song, lines, sections, player, backing, originalPath 
       syncRef.current = null;
 
       // The mic opens now; the count-in gives you (and it) a moment to settle.
-      await recorder.startRecording("free", song.audio_folder);
+      await recorder.startRecording("free", song.audio_folder, inputDeviceId || undefined);
       cancelCountdownRef.current = false;
       for (let n = recordCountIn; n > 0; n--) {
         setCountdown(n);
@@ -121,7 +123,7 @@ export function useTakes({ song, lines, sections, player, backing, originalPath 
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [song, busy, pending, singAlong, player, recorder, recordCountIn, sectionEndMs, backing],
+    [song, busy, pending, singAlong, player, recorder, recordCountIn, sectionEndMs, backing, inputDeviceId],
   );
 
   const restorePlayer = useCallback(() => {

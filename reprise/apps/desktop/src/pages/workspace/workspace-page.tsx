@@ -14,6 +14,7 @@ import { useHistoryStore } from "../../stores/history-store";
 import { useHighlightStore } from "../../lib/highlight-config";
 import { useLinePlayer } from "../../hooks/use-line-player";
 import { useWaveformData } from "../../hooks/use-waveform-data";
+import { useAudioDevices } from "../../hooks/use-audio-devices";
 import { loadVocalMap } from "../../lib/take-review";
 import { nextWordBoundary } from "../../lib/lyric-edits";
 import type { VocalMap } from "../../lib/vocal-map";
@@ -180,6 +181,13 @@ function Workspace({ songId }: { songId: string }) {
     toastTimer.current = setTimeout(() => setToast(null), 2200);
   }, []);
 
+  // Mic / speakers chosen in Settings.
+  const audioDevices = useAudioDevices();
+  useEffect(() => {
+    const audio = player.audioRef.current as (HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }) | null;
+    if (audio?.setSinkId && audioDevices.selectedOutputId) audio.setSinkId(audioDevices.selectedOutputId).catch(() => {});
+  }, [audioDevices.selectedOutputId, player.audioRef]);
+
   const edits = useWorkspaceEdits(songId);
   const takes = useTakes({
     song,
@@ -188,6 +196,7 @@ function Workspace({ songId }: { songId: string }) {
     player,
     backing: track,
     originalPath: song.audio_path,
+    inputDeviceId: audioDevices.selectedInputId,
   });
 
   // Follow playback: keep the line being sung in view.
