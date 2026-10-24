@@ -130,7 +130,10 @@ function splitAtMarks(segments: Segment[], unsorted: number[]): Segment[] {
   return out;
 }
 
-/** Decorations (the caret) carry this attribute so selection offsets can skip them. */
+/** Highlight type drawn as a breath sign (’) instead of a coloured stretch. */
+export const BREATH_TYPE = "breath";
+
+/** Decorations (the caret, breath signs) carry this attribute so selection offsets can skip them. */
 export const NON_TEXT_ATTR = "data-nontext";
 
 const caretEl = (key: string) => (
@@ -191,6 +194,29 @@ export function AnnotatedText({
       return segFurigana
         ? <span key={i} dangerouslySetInnerHTML={{ __html: segFurigana }} />
         : <span key={i}>{seg.text}</span>;
+    }
+
+    // A breath mark is a point, not a stretch: plain text, then a breath sign
+    // where the marked stretch ends (where the caret was when it was placed).
+    if (seg.type === BREATH_TYPE) {
+      const ann = annotations?.[seg.annotationIndex];
+      const endsHere = ann != null && seg.charStart + seg.text.length === Math.min(ann.end, text.length);
+      return (
+        <span key={i}>
+          {segFurigana ? <span dangerouslySetInnerHTML={{ __html: segFurigana }} /> : seg.text}
+          {endsHere && (
+            <span
+              {...{ [NON_TEXT_ATTR]: "" }}
+              onClick={onClickAnnotation ? (e) => { e.stopPropagation(); onClickAnnotation(seg.annotationIndex!); } : undefined}
+              className="inline-block mx-[2px] font-bold leading-none align-[0.3em] select-none"
+              style={{ color: hl.color }}
+              title="Breathe here"
+            >
+              ’
+            </span>
+          )}
+        </span>
+      );
     }
 
     return (

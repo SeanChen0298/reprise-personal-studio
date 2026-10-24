@@ -157,7 +157,11 @@ const LineRow = memo(function LineRow({
         isCursor ? "bg-[var(--theme-light)]" : inLoop ? "bg-[var(--theme-light)]/40" : "hover:bg-[var(--surface)]"
       }`}
       onMouseUp={handleMouseUp}
-      onDoubleClick={() => onStartEdit(line.id)}
+      onDoubleClick={() => {
+        window.getSelection()?.removeAllRanges();
+        onPlay(line.id);
+      }}
+      title={line.start_ms != null ? "Double-click to play from this line · F2 to edit the text" : "F2 to edit the text"}
     >
       {/* Being sung: a small level-meter icon; otherwise ▶ on hover */}
       {isPlaying ? (
@@ -211,6 +215,22 @@ const LineRow = memo(function LineRow({
           {translation && <div className="text-[12px] leading-snug text-[var(--text-muted)] mt-0.5 select-none">{translation}</div>}
         </div>
 
+        {!editing && (
+          <button
+            onMouseUp={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onStartEdit(line.id);
+            }}
+            title="Edit the text (F2)"
+            className="flex-shrink-0 ml-2 mt-[3px] w-[22px] h-[22px] rounded-[6px] flex items-center justify-center border-none bg-transparent cursor-pointer text-[var(--text-muted)] opacity-0 group-hover:opacity-100 hover:bg-[var(--surface)] hover:text-[var(--text-primary)] transition-opacity select-none"
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z" />
+            </svg>
+          </button>
+        )}
         {isCursor && !editing && line.start_ms != null && (
           <div
             className="flex-shrink-0 flex items-center gap-[1px] ml-2 mt-[3px] px-[2px] h-[22px] rounded-[6px] border border-[var(--border)] bg-[var(--bg)] text-[10.5px] tabular-nums select-none"

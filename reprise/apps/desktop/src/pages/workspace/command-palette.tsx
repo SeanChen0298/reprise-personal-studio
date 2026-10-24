@@ -98,7 +98,7 @@ const SHORTCUTS: [string, [string, string][]][] = [
   ]],
   ["Play", [
     ["Space", "Play / pause"],
-    ["Enter", "Play from the selected line"],
+    ["Enter / double-click", "Play from the line"],
     ["L / Shift+L", "Loop the line / loop the section"],
     ["[ / ]", "Slower / faster (0.5–1.0×)"],
     ["Esc", "Clear selection, then pause"],
@@ -106,7 +106,7 @@ const SHORTCUTS: [string, [string, string][]][] = [
   ["Mark", [
     ["1 – 9", "Mark the selection (falsetto, …); again to remove — Breath mark works at the caret"],
     ["0 / Delete", "Remove marks in the selection (or under the caret)"],
-    ["F2 / double-click", "Edit the line's text"],
+    ["F2", "Edit the line's text"],
     ["#", "Start a section here (or rename it)"],
   ]],
   ["Timing", [

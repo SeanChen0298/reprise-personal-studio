@@ -40,6 +40,9 @@ function useStable<A extends unknown[], R>(fn: (...args: A) => R): (...args: A) 
   return useCallback((...args: A) => ref.current(...args), []);
 }
 
+/** After you touch the lyric sheet, playback stops scrolling it for this long. */
+const FOLLOW_PAUSE_MS = 5000;
+
 const isTyping = (el: EventTarget | null) =>
   el instanceof HTMLElement && !!el.closest("input, textarea, select, [contenteditable=true]");
 
@@ -202,10 +205,16 @@ function Workspace({ songId }: { songId: string }) {
     inputDeviceId: audioDevices.selectedInputId,
   });
 
-  // Follow playback: keep the line being sung in view.
+  // Follow playback: keep the line being sung in view — but not while you're
+  // working in the sheet (selecting, clicking, scrolling, moving with keys).
   const sheetRef = useRef<HTMLDivElement>(null);
+  const lastInteractionRef = useRef(0);
+  const markInteraction = useCallback(() => {
+    lastInteractionRef.current = Date.now();
+  }, []);
   useEffect(() => {
     if (!playingLineId) return;
+    if (Date.now() - lastInteractionRef.current < FOLLOW_PAUSE_MS) return;
     sheetRef.current
       ?.querySelector(`[data-line-id="${playingLineId}"]`)
       ?.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -364,6 +373,7 @@ function Workspace({ songId }: { songId: string }) {
   keyRef.current = (e: KeyboardEvent) => {
     if (paletteOpen || shortcutsOpen || editOpen || deleteOpen || setupOpen) return;
     if (isTyping(e.target)) return;
+    if (e.key !== " " && e.key !== "Enter") markInteraction();
     const ctrl = e.ctrlKey || e.metaKey;
     const k = e.key;
     const handled = () => e.preventDefault();
@@ -524,10 +534,11 @@ function Workspace({ songId }: { songId: string }) {
   const audioReady = !!song.audio_path && song.download_status === "done";
 
   const onSelect = useCallback((lineId: string, a: number, f: number) => {
+    markInteraction();
     setCursor({ lineId, anchor: a, focus: f });
     setCaretShown(true);
     setEditingLineId(null);
-  }, []);
+  }, [markInteraction]);
   const onCommitEdit = useStable((lineId: string, text: string) => {
     setEditingLineId(null);
     edits.editText(lineId, text.trim());
@@ -659,7 +670,13 @@ function Workspace({ songId }: { songId: string }) {
       <div className="flex flex-1 min-h-0">
         {/* Center */}
         <div className="flex-1 min-w-0 flex flex-col min-h-0">
-        <div ref={sheetRef} className="flex-1 min-h-0 overflow-y-auto" style={{ scrollbarWidth: "thin" }}>
+        <div
+          ref={sheetRef}
+          onMouseDown={markInteraction}
+          onWheel={markInteraction}
+          className="flex-1 min-h-0 overflow-y-auto"
+          style={{ scrollbarWidth: "thin" }}
+        >
           {!audioReady && (
             <div className="mx-auto max-w-[760px] mt-5 px-4 py-3 rounded-[9px] border border-amber-300/60 bg-amber-50/60 text-[12.5px] text-amber-800 flex items-center gap-3">
               <span className="flex-1">The song's audio isn't downloaded yet{song.download_status === "downloading" ? " — downloading now…" : "."}</span>
