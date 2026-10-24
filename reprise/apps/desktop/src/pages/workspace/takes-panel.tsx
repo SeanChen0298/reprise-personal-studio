@@ -130,6 +130,11 @@ export function RecordDock({
 
   return (
     <div className={`${shell} relative`}>
+      {t.recorder.error && (
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 whitespace-nowrap px-3 py-[5px] rounded-[8px] bg-[var(--surface)] border border-red-300 text-[11.5px] text-red-600 shadow-sm">
+          Couldn't open the microphone: {t.recorder.error} — check Settings → Audio.
+        </div>
+      )}
       <button
         onClick={() => t.start(startLine)}
         disabled={!song.audio_folder}

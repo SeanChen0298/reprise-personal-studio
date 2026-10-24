@@ -10,7 +10,8 @@ export interface RecordingResult {
 export interface UseRecorderResult {
   isRecording: boolean;
   error: string | null;
-  startRecording: (lineId: string, songFolder: string, inputDeviceId?: string) => Promise<void>;
+  /** Resolves false (and sets `error`) if the microphone couldn't be opened. */
+  startRecording: (lineId: string, songFolder: string, inputDeviceId?: string) => Promise<boolean>;
   stopRecording: () => Promise<RecordingResult | null>;
   /** Returns current mic input level 0–1 (call in RAF loop during recording) */
   getInputLevel: () => number;
@@ -46,7 +47,7 @@ export function useRecorder(): UseRecorderResult {
     return sum / (data.length * 255);
   }, []);
 
-  const startRecording = useCallback(async (lineId: string, songFolder: string, inputDeviceId?: string) => {
+  const startRecording = useCallback(async (lineId: string, songFolder: string, inputDeviceId?: string): Promise<boolean> => {
     setError(null);
     lineIdRef.current = lineId;
     songFolderRef.current = songFolder;
@@ -61,7 +62,16 @@ export function useRecorder(): UseRecorderResult {
         channelCount: 1,
         ...(inputDeviceId ? { deviceId: { exact: inputDeviceId } } : {}),
       };
-      const stream = await navigator.mediaDevices.getUserMedia({ audio });
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio });
+      } catch (err) {
+        // The mic chosen in Settings is gone (unplugged / renamed) — use the default one.
+        const name = err instanceof DOMException ? err.name : "";
+        if (!inputDeviceId || !/Overconstrained|NotFound/.test(name)) throw err;
+        const { deviceId: _gone, ...fallback } = audio;
+        stream = await navigator.mediaDevices.getUserMedia({ audio: fallback });
+      }
       streamRef.current = stream;
 
       // Set up analyser for input level meter
@@ -86,9 +96,11 @@ export function useRecorder(): UseRecorderResult {
       startTimeRef.current = Date.now();
       startedAtRef.current = performance.now();
       setIsRecording(true);
+      return true;
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Microphone access denied";
       setError(msg);
+      return false;
     }
   }, []);
 

@@ -93,7 +93,11 @@ export function useTakes({ song, lines, sections, player, backing, originalPath,
       syncRef.current = null;
 
       // The mic opens now; the count-in gives you (and it) a moment to settle.
-      await recorder.startRecording("free", song.audio_folder, inputDeviceId || undefined);
+      if (!(await recorder.startRecording("free", song.audio_folder, inputDeviceId || undefined))) {
+        // No mic — don't count in and play the song as if recording.
+        restorePlayer();
+        return;
+      }
       cancelCountdownRef.current = false;
       for (let n = recordCountIn; n > 0; n--) {
         setCountdown(n);
