@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { remove } from "@tauri-apps/plugin-fs";
 import { RecordingEntry } from "../../components/take-entry";
 import { TakeReviewPanel } from "../../components/take-review-panel";
 import { ConfirmDialog } from "../../components/confirm-dialog";
 import { useSongStore } from "../../stores/song-store";
+import { useHistoryStore } from "../../stores/history-store";
+import { restoreTakeFile, trashTakeFile } from "../../lib/take-trash";
 import { usePreferencesStore } from "../../stores/preferences-store";
 import { formatMs } from "../../lib/status-config";
 import { canReview } from "../../lib/take-review";
@@ -218,6 +219,8 @@ export function TakesPanel({
   const playbackVolume = usePreferencesStore((s) => s.playbackVolume);
   const updateRecording = useSongStore((s) => s.updateRecording);
   const removeRecording = useSongStore((s) => s.removeRecording);
+  const addRecording = useSongStore((s) => s.addRecording);
+  const pushHistory = useHistoryStore((s) => s.push);
   const [playingId, setPlayingId] = useState<string | null>(null);
   /** Where each take is playing (ms) — notes are pinned there. */
   const [playhead, setPlayhead] = useState<Record<string, number>>({});
@@ -304,15 +307,27 @@ export function TakesPanel({
       <ConfirmDialog
         open={deleteTarget !== null}
         title="Delete take?"
-        message="This recording will be permanently removed from disk."
+        message="Ctrl+Z brings it back while you're on this song. After that its file is removed from disk."
         confirmLabel="Delete"
         destructive
         onConfirm={() => {
           if (deleteTarget) {
             if (playingId === deleteTarget.id) setPlayingId(null);
             if (t.reviewId === deleteTarget.id) t.setReviewId(null);
-            remove(deleteTarget.file_path).catch(() => {});
-            removeRecording(song.id, deleteTarget.id);
+            const rec = deleteTarget;
+            trashTakeFile(rec.file_path);
+            void removeRecording(song.id, rec.id);
+            pushHistory({
+              label: "Delete take",
+              undo: async () => {
+                restoreTakeFile(rec.file_path);
+                await addRecording(song.id, rec);
+              },
+              redo: async () => {
+                trashTakeFile(rec.file_path);
+                await removeRecording(song.id, rec.id);
+              },
+            });
           }
           setDeleteTarget(null);
         }}

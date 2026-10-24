@@ -19,6 +19,7 @@ import { useAudioDevices } from "../../hooks/use-audio-devices";
 import { loadVocalMap } from "../../lib/take-review";
 import { nextWordBoundary } from "../../lib/lyric-edits";
 import { collapseRepeats } from "../../lib/translate";
+import { emptyTakeTrash } from "../../lib/take-trash";
 import type { VocalMap } from "../../lib/vocal-map";
 import { SongSetupPanel } from "../../components/song-setup-panel";
 import { EditSongModal } from "../../components/edit-song-modal";
@@ -84,6 +85,8 @@ function Workspace({ songId }: { songId: string }) {
   const canUndo = useHistoryStore((s) => s.past.length > 0);
   const canRedo = useHistoryStore((s) => s.future.length > 0);
   useEffect(() => setScope(songId), [songId, setScope]);
+  // Undo can't reach deleted takes once you leave the song — remove their files then.
+  useEffect(() => () => void emptyTakeTrash(), [songId]);
 
   // ── Data ─────────────────────────────────────────────────────────────────
   const transLang = song.translation_language;

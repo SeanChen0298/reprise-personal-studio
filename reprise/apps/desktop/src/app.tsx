@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { emptyTakeTrash } from "./lib/take-trash";
 import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { useSongStore } from "./stores/song-store";
 import { useTaskQueueProcessor } from "./hooks/use-task-queue-processor";
@@ -26,6 +27,8 @@ export function App() {
   // (Previously triggered by auth-store.initialize(), which is now removed.)
   useEffect(() => {
     loadAllData();
+    // Files of takes deleted last time (undo history doesn't survive a restart).
+    void emptyTakeTrash();
   }, [loadAllData]);
 
   useTaskQueueProcessor();
