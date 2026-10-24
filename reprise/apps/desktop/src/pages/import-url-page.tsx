@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Sidebar } from "../components/sidebar";
 import { useSongStore } from "../stores/song-store";
 import { isValidYouTubeUrl, fetchYouTubeMetadata, cleanYouTubeUrl } from "../lib/youtube";
+import { parseSongTitle } from "../lib/suggestions";
 import type { YouTubeMetadata } from "../types/song";
 
 type FetchStatus = "idle" | "loading" | "done" | "error";
@@ -42,11 +43,12 @@ export function ImportUrlPage() {
 
   function handleContinue() {
     if (!metadata) return;
-    // Pre-populate the draft with fetched metadata
+    // Pre-populate the draft with fetched metadata, tidied from the raw YouTube title
+    const { title, artist } = parseSongTitle(metadata.title, metadata.author);
     setImportDraft({
       metadata,
-      title: metadata.title,
-      artist: metadata.author,
+      title: title || metadata.title,
+      artist: artist || metadata.author,
       bpm: "",
       language: "",
       tags: [],

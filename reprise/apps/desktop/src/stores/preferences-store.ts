@@ -35,6 +35,8 @@ interface PreferencesState {
   playbackVolume: number;
   autoDemucs: boolean;
   autoPitch: boolean;
+  /** Library "raw YouTube titles" banner dismissed. */
+  titleTidyDismissed: boolean;
   setTheme: (v: string) => void;
   setShowWaveform: (v: boolean) => void;
   setShowPitchCurve: (v: boolean) => void;
@@ -51,6 +53,7 @@ interface PreferencesState {
   setPlaybackVolume: (v: number) => void;
   setAutoDemucs: (v: boolean) => void;
   setAutoPitch: (v: boolean) => void;
+  setTitleTidyDismissed: (v: boolean) => void;
 }
 
 export const usePreferencesStore = create<PreferencesState>()(
@@ -65,6 +68,7 @@ export const usePreferencesStore = create<PreferencesState>()(
       playbackVolume: 1.0,
       autoDemucs: false,
       autoPitch: false,
+      titleTidyDismissed: false,
       libraryView: "grid" as const,
       librarySort: "custom" as const,
       libraryGroup: "none" as const,
@@ -93,6 +97,7 @@ export const usePreferencesStore = create<PreferencesState>()(
       setPlaybackVolume: (v) => set({ playbackVolume: Math.round(Math.min(1, Math.max(0, v)) * 100) / 100 }),
       setAutoDemucs: (v) => set({ autoDemucs: v }),
       setAutoPitch: (v) => set({ autoPitch: v }),
+      setTitleTidyDismissed: (v) => set({ titleTidyDismissed: v }),
     }),
     {
       name: "reprise-preferences",

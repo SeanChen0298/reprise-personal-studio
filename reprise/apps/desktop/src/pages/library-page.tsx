@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { Sidebar } from "../components/sidebar";
@@ -7,48 +7,20 @@ import { usePreferencesStore } from "../stores/preferences-store";
 import { useQueueStore } from "../stores/queue-store";
 import { useSortedGroupedSongs } from "../hooks/use-sorted-grouped-songs";
 import { QueuePlayerBar } from "../components/queue-player-bar";
+import { TidyTitlesDialog, findTitleFixes } from "../components/tidy-titles-dialog";
 import { computeSongProgress } from "../lib/status-config";
 import type { Song } from "../types/song";
 import type { SongGroup } from "../hooks/use-sorted-grouped-songs";
 
-function masteryColor(value: number): string {
-  if (value === 0) return "#9CA3AF";       // gray — untouched
-  if (value <= 30) return "#3B82F6";       // blue — early practice
-  if (value <= 70) return "#F59E0B";       // amber — halfway
-  return "#22C55E";                        // green — mastered
-}
-
-function MasteryRing({ value }: { value: number }) {
-  const r = 12;
-  const circ = 2 * Math.PI * r;
-  const dash = (value / 100) * circ;
-  const color = masteryColor(value);
+/** Thin practice-progress line — quiet when untouched. */
+function ProgressLine({ value, className = "" }: { value: number; className?: string }) {
   return (
-    <svg width="34" height="34" viewBox="0 0 34 34" className="flex-shrink-0">
-      <circle cx="17" cy="17" r={r} fill="none" stroke="var(--border)" strokeWidth="2.5" />
-      <circle
-        cx="17"
-        cy="17"
-        r={r}
-        fill="none"
-        stroke={color}
-        strokeWidth="2.5"
-        strokeDasharray={`${dash} ${circ}`}
-        strokeDashoffset={circ / 4}
-        strokeLinecap="round"
-      />
-      <text
-        x="17"
-        y="17"
-        textAnchor="middle"
-        dominantBaseline="central"
-        fontSize="6.5"
-        fontWeight="700"
-        fill={value === 0 ? "var(--text-muted)" : color}
-      >
-        {value}%
-      </text>
-    </svg>
+    <div
+      className={`h-[3px] rounded-full bg-[var(--border-subtle)] overflow-hidden ${className}`}
+      title={value > 0 ? `${value}% practised` : "Not practised yet"}
+    >
+      {value > 0 && <div className="h-full rounded-full bg-[var(--theme)]" style={{ width: `${value}%` }} />}
+    </div>
   );
 }
 
@@ -60,16 +32,6 @@ function DownloadBadge({ status }: { status?: string }) {
           <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
         </svg>
         Downloading
-      </div>
-    );
-  }
-  if (status === "done") {
-    return (
-      <div className="absolute bottom-2 left-2 flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/60 text-[#22C55E] text-[10px] font-medium">
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-          <polyline points="20 6 9 17 4 12" />
-        </svg>
-        Ready
       </div>
     );
   }
@@ -112,8 +74,8 @@ function SongCard({
       onDragOver={onDragOver}
       onDragEnd={onDragEnd}
       onDrop={onDrop}
-      className={`group bg-[var(--surface)] border rounded-[var(--radius)] overflow-hidden hover:shadow-md transition-all cursor-pointer ${
-        dragOver ? "border-[var(--theme)] shadow-md" : "border-[var(--border)]"
+      className={`group bg-[var(--surface)] border rounded-[var(--radius)] overflow-hidden hover:border-[var(--border)] hover:shadow-sm transition-all cursor-pointer ${
+        dragOver ? "border-[var(--theme)] shadow-md" : "border-[var(--border-subtle)]"
       } ${draggable ? "select-none" : ""}`}
     >
       {/* Thumbnail */}
@@ -156,24 +118,11 @@ function SongCard({
         <DownloadBadge status={song.download_status} />
       </div>
 
-      {/* Info */}
-      <div className="p-3">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <div className="text-[13.5px] font-medium text-[var(--text-primary)] truncate">{song.title}</div>
-            <div className="text-[12px] text-[var(--text-muted)] truncate mt-0.5">{song.artist}</div>
-          </div>
-          <MasteryRing value={mastery} />
-        </div>
-        {song.tags.length > 0 && (
-          <div className="flex gap-1 mt-2 flex-wrap">
-            {song.tags.slice(0, 2).map((tag) => (
-              <span key={tag} className="text-[10.5px] px-2 py-0.5 rounded-full bg-[var(--bg)] border border-[var(--border-subtle)] text-[var(--text-secondary)]">
-                {tag}
-              </span>
-            ))}
-          </div>
-        )}
+      {/* Info — fixed layout so every card is the same height */}
+      <div className="px-3 pt-[10px] pb-3">
+        <div className="text-[13.5px] font-medium text-[var(--text-primary)] truncate" title={song.title}>{song.title}</div>
+        <div className="text-[12px] text-[var(--text-muted)] truncate mt-[1px]">{song.artist}</div>
+        <ProgressLine value={mastery} className="mt-[10px]" />
       </div>
     </div>
   );
@@ -253,8 +202,8 @@ function SongListRow({
         </span>
       )}
 
-      {/* Mastery ring */}
-      <MasteryRing value={mastery} />
+      {/* Practice progress */}
+      <ProgressLine value={mastery} className="w-[72px] flex-shrink-0" />
 
       {/* Hover actions */}
       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
@@ -436,49 +385,106 @@ function GroupHeader({ group, onToggle }: { group: SongGroup; onToggle: () => vo
 }
 
 // ---------------------------------------------------------------------------
-// Sort bar
+// View menu — sort, group and layout in one place
 // ---------------------------------------------------------------------------
 
-function SortBar() {
+const SORT_LABELS: Record<string, string> = {
+  custom: "Custom",
+  title: "Title",
+  artist: "Artist",
+  mastery: "Progress",
+  date_added: "Date added",
+};
+
+function ViewMenu({ tidyCount, onTidy }: { tidyCount: number; onTidy: () => void }) {
   const librarySort = usePreferencesStore((s) => s.librarySort);
   const libraryGroup = usePreferencesStore((s) => s.libraryGroup);
+  const libraryView = usePreferencesStore((s) => s.libraryView);
   const setLibrarySort = usePreferencesStore((s) => s.setLibrarySort);
   const setLibraryGroup = usePreferencesStore((s) => s.setLibraryGroup);
+  const setLibraryView = usePreferencesStore((s) => s.setLibraryView);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
 
   const canCustomSort = libraryGroup === "none";
 
-  const pill = (label: string, active: boolean, onClick: () => void, disabled = false) => (
+  const option = (label: string, active: boolean, onClick: () => void, disabled = false) => (
     <button
       key={label}
       onClick={onClick}
       disabled={disabled}
-      className={`px-[10px] py-[4px] rounded-full text-[11px] font-medium transition-all cursor-pointer border-none ${
-        active
-          ? "bg-[var(--text-primary)] text-[var(--bg)] shadow-sm"
-          : "bg-transparent text-[var(--text-muted)] hover:bg-[var(--surface)] hover:text-[var(--text-primary)]"
-      } ${disabled ? "opacity-30 cursor-not-allowed" : ""}`}
+      className={`w-full flex items-center justify-between px-3 py-[6px] text-left text-[12.5px] rounded-[5px] border-none cursor-pointer transition-colors ${
+        active ? "text-[var(--text-primary)] font-medium" : "text-[var(--text-secondary)]"
+      } ${disabled ? "opacity-35 cursor-not-allowed" : "bg-transparent hover:bg-[var(--bg)]"}`}
     >
       {label}
+      {active && (
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--theme)" strokeWidth="3">
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+      )}
     </button>
   );
 
+  const heading = (label: string) => (
+    <div className="px-3 pt-2 pb-1 text-[9.5px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">{label}</div>
+  );
+
   return (
-    <div className="px-7 py-2 flex items-center gap-4 flex-shrink-0">
-      <div className="flex items-center gap-0.5">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.07em] text-[var(--text-muted)] mr-2">Sort</span>
-        {pill("Custom", librarySort === "custom", () => setLibrarySort("custom"), !canCustomSort)}
-        {pill("Title", librarySort === "title", () => setLibrarySort("title"))}
-        {pill("Artist", librarySort === "artist", () => setLibrarySort("artist"))}
-        {pill("Mastery", librarySort === "mastery", () => setLibrarySort("mastery"))}
-        {pill("Date added", librarySort === "date_added", () => setLibrarySort("date_added"))}
-      </div>
-      <div className="w-px h-4 bg-[var(--border)]" />
-      <div className="flex items-center gap-0.5">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.07em] text-[var(--text-muted)] mr-2">Group</span>
-        {pill("None", libraryGroup === "none", () => setLibraryGroup("none"))}
-        {pill("Artist", libraryGroup === "artist", () => setLibraryGroup("artist"))}
-        {pill("Last practiced", libraryGroup === "last_practiced", () => setLibraryGroup("last_practiced"))}
-      </div>
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className={`flex items-center gap-[6px] px-3 py-[6px] rounded-[7px] border text-[12.5px] cursor-pointer transition-colors ${
+          open
+            ? "border-[var(--text-muted)] text-[var(--text-primary)] bg-[var(--surface)]"
+            : "border-[var(--border)] text-[var(--text-secondary)] bg-[var(--surface)] hover:border-[#888] hover:text-[var(--text-primary)]"
+        }`}
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+          <line x1="4" y1="6" x2="20" y2="6" /><line x1="7" y1="12" x2="17" y2="12" /><line x1="10" y1="18" x2="14" y2="18" />
+        </svg>
+        {SORT_LABELS[librarySort]}
+        {libraryGroup !== "none" && <span className="text-[var(--text-muted)]">· by {libraryGroup === "artist" ? "artist" : "last practised"}</span>}
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-[calc(100%+6px)] z-40 w-[210px] p-1 rounded-[9px] border border-[var(--border)] bg-[var(--surface)] shadow-lg animate-fade-up">
+          {heading("Sort")}
+          {option("Custom", librarySort === "custom", () => setLibrarySort("custom"), !canCustomSort)}
+          {option("Title", librarySort === "title", () => setLibrarySort("title"))}
+          {option("Artist", librarySort === "artist", () => setLibrarySort("artist"))}
+          {option("Progress", librarySort === "mastery", () => setLibrarySort("mastery"))}
+          {option("Date added", librarySort === "date_added", () => setLibrarySort("date_added"))}
+          <div className="h-px bg-[var(--border-subtle)] my-1" />
+          {heading("Group")}
+          {option("None", libraryGroup === "none", () => setLibraryGroup("none"))}
+          {option("Artist", libraryGroup === "artist", () => setLibraryGroup("artist"))}
+          {option("Last practised", libraryGroup === "last_practiced", () => setLibraryGroup("last_practiced"))}
+          <div className="h-px bg-[var(--border-subtle)] my-1" />
+          {heading("Layout")}
+          {option("Grid", libraryView === "grid", () => setLibraryView("grid"))}
+          {option("List", libraryView === "list", () => setLibraryView("list"))}
+          <div className="h-px bg-[var(--border-subtle)] my-1" />
+          {option(tidyCount > 0 ? `Tidy up titles (${tidyCount})…` : "Tidy up titles…", false, () => {
+            setOpen(false);
+            onTidy();
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -518,7 +524,6 @@ export function LibraryPage() {
   const togglePin = useSongStore((s) => s.togglePin);
   const markStaleAnalysesAsFailed = useSongStore((s) => s.markStaleAnalysesAsFailed);
   const libraryView = usePreferencesStore((s) => s.libraryView);
-  const setLibraryView = usePreferencesStore((s) => s.setLibraryView);
   const libraryGroup = usePreferencesStore((s) => s.libraryGroup);
   const librarySort = usePreferencesStore((s) => s.librarySort);
   const setSongOrder = usePreferencesStore((s) => s.setSongOrder);
@@ -530,6 +535,14 @@ export function LibraryPage() {
   const setLibrarySearch = usePreferencesStore((s) => s.setLibrarySearch);
 
   const searchRef = useRef<HTMLInputElement>(null);
+
+  // Raw YouTube titles → offer a one-time rename.
+  const allSongs = useSongStore((s) => s.songs);
+  const updateSong = useSongStore((s) => s.updateSong);
+  const titleFixes = useMemo(() => findTitleFixes(allSongs), [allSongs]);
+  const [tidyOpen, setTidyOpen] = useState(false);
+  const tidyDismissed = usePreferencesStore((s) => s.titleTidyDismissed);
+  const setTidyDismissed = usePreferencesStore((s) => s.setTitleTidyDismissed);
 
   const sortedGrouped = useSortedGroupedSongs();
   const flatSongs = sortedGrouped.type === "flat" ? sortedGrouped.songs : sortedGrouped.groups.flatMap((g) => g.songs);
@@ -777,36 +790,7 @@ export function LibraryPage() {
           </div>
 
           <div className="flex items-center gap-3 ml-auto">
-            {/* View toggle */}
-            <div className="flex items-center gap-[2px] bg-[var(--bg)] border border-[var(--border)] rounded-[7px] p-[3px]">
-              <button
-                onClick={() => setLibraryView("grid")}
-                title="Grid view"
-                className={`w-[26px] h-[26px] rounded-[5px] flex items-center justify-center transition-colors cursor-pointer border-none ${
-                  libraryView === "grid"
-                    ? "bg-[var(--surface)] text-[var(--text-primary)] shadow-sm"
-                    : "bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                }`}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                  <rect x="3" y="3" width="8" height="8" rx="1" /><rect x="13" y="3" width="8" height="8" rx="1" />
-                  <rect x="3" y="13" width="8" height="8" rx="1" /><rect x="13" y="13" width="8" height="8" rx="1" />
-                </svg>
-              </button>
-              <button
-                onClick={() => setLibraryView("list")}
-                title="List view"
-                className={`w-[26px] h-[26px] rounded-[5px] flex items-center justify-center transition-colors cursor-pointer border-none ${
-                  libraryView === "list"
-                    ? "bg-[var(--surface)] text-[var(--text-primary)] shadow-sm"
-                    : "bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                }`}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
-                </svg>
-              </button>
-            </div>
+            <ViewMenu tidyCount={titleFixes.length} onTidy={() => setTidyOpen(true)} />
 
             <button
               onClick={() => navigate("/import")}
@@ -820,10 +804,30 @@ export function LibraryPage() {
           </div>
         </header>
 
-        <SortBar />
-
         {/* Content */}
-        <main className="flex-1 overflow-y-auto px-7 py-7" style={{ scrollbarWidth: "none" }}>
+        <main className="flex-1 overflow-y-auto px-7 pt-4 pb-7" style={{ scrollbarWidth: "none" }}>
+          {titleFixes.length > 0 && !tidyDismissed && (
+            <div className="mb-5 flex items-center gap-3 px-4 py-[9px] rounded-[9px] bg-[var(--surface)] border border-[var(--border-subtle)] text-[12.5px] text-[var(--text-secondary)]">
+              <span className="flex-1">
+                {titleFixes.length} song {titleFixes.length === 1 ? "title looks" : "titles look"} like raw YouTube titles.
+              </span>
+              <button
+                onClick={() => setTidyOpen(true)}
+                className="font-medium text-[var(--theme)] bg-transparent border-none cursor-pointer hover:underline"
+              >
+                Tidy up
+              </button>
+              <button
+                onClick={() => setTidyDismissed(true)}
+                title="Dismiss"
+                className="w-5 h-5 flex items-center justify-center bg-transparent border-none cursor-pointer text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          )}
           <FadeWrapper fadeKey={`${librarySort}|${libraryGroup}|${libraryView}`}>
             {renderContent()}
           </FadeWrapper>
@@ -831,6 +835,15 @@ export function LibraryPage() {
 
         <QueuePlayerBar allSongs={filterSongs(flatSongs)} />
       </div>
+
+      <TidyTitlesDialog
+        open={tidyOpen}
+        songs={allSongs}
+        onApply={async (fixes) => {
+          for (const f of fixes) await updateSong(f.songId, { title: f.title, artist: f.artist });
+        }}
+        onClose={() => setTidyOpen(false)}
+      />
 
       {/* Context menu portal */}
       {contextMenu && (

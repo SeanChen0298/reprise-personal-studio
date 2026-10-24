@@ -314,27 +314,34 @@ function stripNoise(text: string, isArtist = false): string {
 
 /** Keep the native name when a romanisation follows ("米津玄師 Kenshi Yonezu" → "米津玄師"). */
 function cleanArtist(artist: string): string {
-  let a = stripNoise(artist.split(/\s{2,}|\u3000/)[0], true);
+  // "Kenshi Yonezu  \u7c73\u6d25\u7384\u5e2b" / "\u30ad\u30bf\u30cb\u30bf\u30c4\u30e4 / Tatsuya Kitani": prefer the native-script name
+  // so the same artist is spelled one way across the library.
+  const parts = artist.split(/\s{2,}|\u3000|\s+\/\s+/).filter((p) => p.trim());
+  let a = stripNoise(parts.find((p) => containsJapanese(p)) ?? parts[0] ?? "", true);
   if (JAPANESE.test(a.charAt(0))) a = a.match(/^[^\x00-\x7F]+(?:[\s.][^\x00-\x7F]+)*/)?.[0] ?? a;
   return a.trim();
 }
 
-/** Clean a song title; `romanised` is the artist's Latin name to drop from Japanese titles. */
+/**
+ * Clean a song title. `romanised` is the artist's Latin name when the channel also
+ * has a native-script one ("Kenshi Yonezu 米津玄師") — it's dropped from the title.
+ */
 function cleanTitle(title: string, romanised?: string): string {
   let t = title.trim();
   if (containsJapanese(t)) {
     // "馬と鹿   Kenshi Yonezu - Uma to Shika" / "さよーならまたいつか！ Kenshi Yonezu - Sayonara…"
     t = t.split(/\s{2,}|\u3000|\s+[-–—]\s+/)[0];
-    const at = romanised ? t.toLowerCase().indexOf(romanised.toLowerCase()) : -1;
-    if (at > 0) t = t.slice(0, at) + t.slice(at + romanised!.length);
   }
-  return stripNoise(t);
+  // "LOSER , Kenshi Yonezu"
+  const at = romanised ? t.toLowerCase().indexOf(romanised.toLowerCase()) : -1;
+  if (at > 0) t = t.slice(0, at) + t.slice(at + romanised!.length);
+  return stripNoise(t).replace(/[\s,、]+$/, "");
 }
 
 /** Best-effort split of a YouTube title into song title + artist. */
 export function parseSongTitle(rawTitle: string, channel: string): { title: string; artist: string } {
   const channelArtist = cleanChannel(channel);
-  const romanised = channel.match(/[A-Za-z][A-Za-z .'&]*[A-Za-z]/)?.[0];
+  const romanised = containsJapanese(channel) ? channel.match(/[A-Za-z][A-Za-z .'&]*[A-Za-z]/)?.[0] : undefined;
   const isChannel = (part: string) => {
     const p = norm(cleanArtist(part));
     return p.length >= 2 && norm(channel).includes(p);
