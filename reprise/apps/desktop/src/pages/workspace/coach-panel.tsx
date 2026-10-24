@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-shell";
-import { useCoachStore, searchesToday } from "../../stores/coach-store";
+import { backupChain, useCoachStore, searchesToday } from "../../stores/coach-store";
 import { askCoach, CoachError } from "../../lib/coach/providers";
 import { COACH_SYSTEM, SONG_CARD_PROMPT, TIDY_MEMORY_PROMPT } from "../../lib/coach/persona";
 import {
@@ -143,7 +143,7 @@ export function CoachPanel({
         history: [],
         prompt: SONG_CARD_PROMPT,
         maxSearches: coach.searchMode === "off" ? null : coach.maxSearchesPerAnswer,
-        fallbackModel: coach.fallbackModels?.[coach.provider],
+        fallbackModels: backupChain(coach),
       });
       coach.addSearches(r.searches);
       const card = parseSongCard(r.text);
@@ -181,7 +181,7 @@ export function CoachPanel({
         history: knowledge.chat.slice(-16).map(({ role, text }) => ({ role, text })),
         prompt: q,
         maxSearches: coach.searchMode === "auto" ? coach.maxSearchesPerAnswer : null,
-        fallbackModel: coach.fallbackModels?.[coach.provider],
+        fallbackModels: backupChain(coach),
         quick: true,
         onText: setStreaming,
       });

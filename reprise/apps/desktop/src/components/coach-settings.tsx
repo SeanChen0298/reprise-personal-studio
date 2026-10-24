@@ -29,6 +29,7 @@ export function CoachSettings() {
     try {
       const list = await listModels(p, s.keys[p]);
       setModels((m) => ({ ...m, [p]: list }));
+      s.setModelList(p, list);
       if (!s.models[p] && list.length) {
         // Gemini: default to the first "pro" model offered; else the first.
         s.setModel(p, list.find((id) => /pro/i.test(id)) ?? list[0]);
@@ -157,7 +158,7 @@ export function CoachSettings() {
             </div>
             {p.key === "gemini" && (
               <label className="flex items-center gap-2 text-[12px] text-[var(--text-secondary)]">
-                <span className="flex-shrink-0">If it's busy or out of free quota, use</span>
+                <span className="flex-shrink-0">If it's busy or out of free quota, try first</span>
                 <select
                   value={s.fallbackModels?.gemini ?? ""}
                   onChange={(e) => s.setFallbackModel("gemini", e.target.value)}
@@ -170,6 +171,11 @@ export function CoachSettings() {
                   ))}
                 </select>
               </label>
+            )}
+            {p.key === "gemini" && (
+              <span className="text-[11.5px] text-[var(--text-muted)]">
+                Then up to three other Flash models from your account — each Gemini model has its own free limit.
+              </span>
             )}
             {test?.provider === p.key && (
               <span className={`text-[12px] ${test.ok ? "text-emerald-700" : "text-red-600"}`}>{test.msg}</span>

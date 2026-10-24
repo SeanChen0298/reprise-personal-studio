@@ -21,8 +21,8 @@ export interface CoachRequest {
   prompt: string;
   /** null = no web search; otherwise the most searches allowed for this answer. */
   maxSearches: number | null;
-  /** Tried when the main model stays busy / overloaded after retries. */
-  fallbackModel?: string;
+  /** Tried in order when the main model is busy or out of quota (each has its own quota). */
+  fallbackModels?: string[];
   /** Chat: think less, answer sooner. Song cards leave this off. */
   quick?: boolean;
   /** Called with the answer so far as it streams in. */
@@ -42,7 +42,23 @@ export interface CoachReply {
 
 export class CoachError extends Error {}
 /** The key's quota for this model is used up (free tier: per minute / per day). */
-class CoachLimitError extends CoachError {}
+class CoachLimitError extends CoachError {
+  constructor(
+    message: string,
+    readonly daily: boolean,
+    /** Seconds Google says to wait, when it says. */
+    readonly retrySec: number | null,
+  ) {
+    super(message);
+  }
+}
+
+/** Read the quota kind and retry delay out of a Gemini 429 message. */
+function limitInfo(msg: string): { daily: boolean; retrySec: number | null } {
+  const daily = /PerDay|per day|daily/i.test(msg);
+  const m = msg.match(/retry(?:Delay)?["\s:]*["']?(\d+(?:\.\d+)?)s/i) ?? msg.match(/retry in (\d+(?:\.\d+)?)\s*s/i);
+  return { daily, retrySec: m ? Math.ceil(Number(m[1])) : null };
+}
 
 export async function askCoach(req: CoachRequest): Promise<CoachReply> {
   if (!req.apiKey) throw new CoachError(`Add your ${req.provider === "gemini" ? "Gemini" : "Claude"} API key in Settings → Coach.`);
@@ -140,34 +156,36 @@ const isBusy = (msg: string) => /\b503\b|UNAVAILABLE|overloaded|high demand/i.te
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function askGemini(req: CoachRequest): Promise<CoachReply> {
-  const fallback = req.fallbackModel && req.fallbackModel !== req.model ? req.fallbackModel : null;
-  // Busy (503): retry the model twice. Busy again, or out of quota (429 — each model has
-  // its own free-tier quota): go to the backup model.
-  const waits = [0, 1500, 4000];
-  for (let i = 0; i < waits.length; i++) {
-    if (waits[i]) await sleep(waits[i]);
-    try {
-      return await askGeminiOnce(req, req.model);
-    } catch (err) {
-      if (err instanceof CoachLimitError) break;
-      const msg = err instanceof Error ? err.message : String(err);
-      if (!isBusy(msg)) throw err;
-    }
-  }
-  if (fallback) {
-    try {
-      return await askGeminiOnce(req, fallback);
-    } catch (err) {
-      if (err instanceof CoachLimitError) {
-        throw new CoachError(`The free-tier limit is used up for ${req.model} and the backup ${fallback} — wait a minute (or until tomorrow for daily limits), or pick another model in Settings → Coach.`);
+  // Each Gemini model has its own free-tier quota: on "busy" (503) retry once, then —
+  // or straight away on "out of quota" (429) — move down the chain of backups.
+  const chain = [req.model, ...(req.fallbackModels ?? []).filter((m, i, all) => m && m !== req.model && all.indexOf(m) === i)];
+  const limited: CoachLimitError[] = [];
+  for (const model of chain) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await askGeminiOnce(req, model);
+      } catch (err) {
+        if (err instanceof CoachLimitError) {
+          limited.push(err);
+          break;
+        }
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!isBusy(msg)) throw err;
+        if (attempt === 0) await sleep(1500);
       }
-      const msg = err instanceof Error ? err.message : String(err);
-      if (!isBusy(msg)) throw err;
     }
   }
-  throw new CoachError(
-    `Gemini ${req.model} is busy or out of free quota right now${fallback ? `, and so is the backup ${fallback}` : ""}. Try again in a minute, ${fallback ? "or" : "set a backup model or"} pick another model in Settings → Coach.`,
-  );
+  const tried = chain.join(", ");
+  if (limited.length === chain.length) {
+    const allDaily = limited.every((l) => l.daily);
+    const wait = Math.min(...limited.map((l) => l.retrySec ?? Infinity));
+    throw new CoachError(
+      allDaily
+        ? `Today's free Gemini limit is used up for every model tried (${tried}). It resets tomorrow — or add a paid key in Settings → Coach.`
+        : `Free Gemini limit reached for ${tried}${Number.isFinite(wait) ? ` — try again in about ${wait} s` : " — try again in a minute"}.`,
+    );
+  }
+  throw new CoachError(`Gemini is busy or out of free quota right now (tried ${tried}). Try again in a minute.`);
 }
 
 /** Gemini 3 and newer take a thinking level; 2.5 models don't. */
@@ -227,7 +245,10 @@ async function askGeminiOnce(req: CoachRequest, model: string, withThinkingLevel
     }
     if (isBusy(msg) && !text) throw err; // handled by the retry loop
     if (/API key|PERMISSION_DENIED|401|403/i.test(msg)) throw new CoachError("Gemini rejected the API key — check it in Settings → Coach.");
-    if (/429|RESOURCE_EXHAUSTED/i.test(msg)) throw new CoachLimitError(`Free-tier limit reached for ${model}.`);
+    if (/429|RESOURCE_EXHAUSTED/i.test(msg)) {
+      const { daily, retrySec } = limitInfo(msg);
+      throw new CoachLimitError(`Free-tier limit reached for ${model}.`, daily, retrySec);
+    }
     throw new CoachError(`Gemini error: ${msg}`);
   }
 }
