@@ -65,6 +65,7 @@ export function KeyHints({
           </button>
         ))}
         <Hint k={<Key>0</Key>} label="remove" />
+        <Hint k={<Key>S</Key>} label="symbol" />
         <Hint k={<><Key>Ctrl</Key><Key>Z</Key></>} label="undo" />
       </>
     );
@@ -87,6 +88,7 @@ export function KeyHints({
         {breathKey != null && <Hint k={<Key>{breathKey}</Key>} label="breath mark here" />}
         <Hint k={<><Key>Alt</Key><Key>←</Key><Key>→</Key></>} label="shift line start" />
         <Hint k={<Key>T</Key>} label="start = now" />
+        <Hint k={<Key>S</Key>} label="symbol ⤴ ~" />
         <Hint k={<Key>#</Key>} label="new section" />
       </>
     );

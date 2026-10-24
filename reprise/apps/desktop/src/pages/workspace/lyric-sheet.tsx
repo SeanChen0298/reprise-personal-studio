@@ -3,6 +3,7 @@ import { AnnotatedText, NON_TEXT_ATTR } from "../../components/annotated-text";
 import { LONG_PHRASE_MS, lineVocalInfo, semitoneToNoteName, type LineVocalInfo, type VocalMap } from "../../lib/vocal-map";
 import { ISSUE_LABEL, isBreathIssue } from "../../lib/take-review";
 import { displayText } from "./use-workspace-edits";
+import type { VocalSymbol } from "../../lib/symbol-config";
 import type { HighlightType } from "../../lib/highlight-config";
 import type { Line, Section, TakeIssue } from "../../types/song";
 
@@ -58,12 +59,15 @@ function InlineInput({
   className,
   onCommit,
   onCancel,
+  symbols,
 }: {
   initial: string;
   placeholder?: string;
   className: string;
   onCommit: (v: string) => void;
   onCancel: () => void;
+  /** Vocal symbols to offer under the box (Alt+1…9 inserts them at the cursor). */
+  symbols?: VocalSymbol[];
 }) {
   const [value, setValue] = useState(initial);
   const ref = useRef<HTMLInputElement>(null);
@@ -72,7 +76,17 @@ function InlineInput({
     ref.current?.focus();
     ref.current?.select();
   }, []);
-  return (
+  const insert = (char: string) => {
+    const el = ref.current;
+    const start = el?.selectionStart ?? value.length;
+    const end = el?.selectionEnd ?? start;
+    setValue(value.slice(0, start) + char + value.slice(end));
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(start + char.length, start + char.length);
+    });
+  };
+  const input = (
     <input
       ref={ref}
       value={value}
@@ -80,7 +94,11 @@ function InlineInput({
       onChange={(e) => setValue(e.target.value)}
       onKeyDown={(e) => {
         e.stopPropagation();
-        if (e.key === "Enter") {
+        const n = symbols && e.altKey && /^[1-9]$/.test(e.key) ? Number(e.key) : 0;
+        if (n && symbols![n - 1]) {
+          e.preventDefault();
+          insert(symbols![n - 1].char);
+        } else if (e.key === "Enter") {
           done.current = true;
           onCommit(value);
         } else if (e.key === "Escape") {
@@ -92,6 +110,59 @@ function InlineInput({
       onClick={(e) => e.stopPropagation()}
       className={className}
     />
+  );
+  if (!symbols?.length) return input;
+  return (
+    <div>
+      {input}
+      <div className="flex flex-wrap items-center gap-1 mt-[5px] select-none">
+        {symbols.slice(0, 9).map((sym, i) => (
+          <button
+            key={sym.id}
+            // Keep focus (and the cursor position) in the text box.
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={(e) => {
+              e.stopPropagation();
+              insert(sym.char);
+            }}
+            title={`${sym.label} (Alt+${i + 1})`}
+            className="flex items-center gap-[5px] px-[7px] py-[2px] rounded-[6px] border border-[var(--border)] bg-[var(--surface)] text-[11px] text-[var(--text-secondary)] hover:border-[var(--theme)] cursor-pointer"
+          >
+            <span className="text-[14px] leading-none text-[var(--text-primary)]">{sym.char}</span>
+            {sym.label}
+          </button>
+        ))}
+        <span className="text-[10.5px] text-[var(--text-muted)] ml-1">Alt+1…{Math.min(9, symbols.length)} · Enter save · Esc cancel</span>
+      </div>
+    </div>
+  );
+}
+
+/** Quick symbol picker under the selected line (S): number keys insert at the caret. */
+function SymbolPicker({ symbols, onPick, onClose }: { symbols: VocalSymbol[]; onPick: (char: string) => void; onClose: () => void }) {
+  return (
+    <div
+      className="flex flex-wrap items-center gap-1 mt-[5px] px-2 py-[5px] rounded-[9px] border border-[var(--border)] bg-[var(--surface)] shadow-sm select-none"
+      onMouseUp={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+    >
+      <span className="text-[10.5px] text-[var(--text-muted)] mr-1">Insert at the caret:</span>
+      {symbols.slice(0, 9).map((sym, i) => (
+        <button
+          key={sym.id}
+          onClick={() => onPick(sym.char)}
+          title={sym.label}
+          className="flex items-center gap-[5px] px-[7px] py-[2px] rounded-[6px] border border-[var(--border)] bg-[var(--bg)] text-[11px] text-[var(--text-secondary)] hover:border-[var(--theme)] cursor-pointer"
+        >
+          <kbd className="font-sans text-[10px] text-[var(--text-muted)]">{i + 1}</kbd>
+          <span className="text-[14px] leading-none text-[var(--text-primary)]">{sym.char}</span>
+          {sym.label}
+        </button>
+      ))}
+      <button onClick={onClose} className="ml-auto text-[10.5px] text-[var(--text-muted)] hover:text-[var(--text-primary)] bg-transparent border-none cursor-pointer">
+        Esc
+      </button>
+    </div>
   );
 }
 
@@ -116,11 +187,17 @@ interface LineRowProps {
   onPlay: (lineId: string) => void;
   onIssueClick: (issue: TakeIssue, key: string) => void;
   onNudge: (field: "start_ms" | "end_ms", deltaMs: number) => void;
+  symbols: VocalSymbol[];
+  /** Symbol picker open under this line. */
+  pickingSymbol: boolean;
+  onPickSymbol: (char: string) => void;
+  onCloseSymbols: () => void;
 }
 
 const LineRow = memo(function LineRow({
   line, info, translation, highlights, isCursor, anchor, focus, isPlaying, inLoop, editing, showCaret,
   issues, onSelect, onStartEdit, onCommitEdit, onCancelEdit, onPlay, onIssueClick, onNudge,
+  symbols, pickingSymbol, onPickSymbol, onCloseSymbols,
 }: LineRowProps) {
   const text = displayText(line);
   const textRef = useRef<HTMLDivElement>(null);
@@ -198,6 +275,7 @@ const LineRow = memo(function LineRow({
               className="w-full px-2 py-[2px] -mx-2 rounded-[5px] border border-[var(--theme)] bg-[var(--surface)] text-[15px] leading-[1.6] outline-none"
               onCommit={(v) => onCommitEdit(line.id, v)}
               onCancel={onCancelEdit}
+              symbols={symbols}
             />
           ) : (
             <div className={`text-[15px] leading-[1.65] transition-colors ${isPlaying ? "text-[var(--theme-text)] font-medium" : "text-[var(--text-primary)]"}`}>
@@ -213,6 +291,7 @@ const LineRow = memo(function LineRow({
             </div>
           )}
           {translation && <div className="text-[12px] leading-snug text-[var(--text-muted)] mt-0.5 select-none">{translation}</div>}
+          {pickingSymbol && !editing && <SymbolPicker symbols={symbols} onPick={onPickSymbol} onClose={onCloseSymbols} />}
         </div>
 
         {!editing && (
@@ -374,6 +453,10 @@ export interface LyricSheetProps {
   onPlay: (lineId: string) => void;
   onIssueClick: (issue: TakeIssue, key: string) => void;
   onNudge: (field: "start_ms" | "end_ms", deltaMs: number) => void;
+  symbols: VocalSymbol[];
+  symbolPickerOpen: boolean;
+  onPickSymbol: (char: string) => void;
+  onCloseSymbols: () => void;
   onSectionClick: (section: Section) => void;
   onSectionEdit: (edit: SectionEdit | null) => void;
   onCommitNewSection: (lineId: string, name: string) => void;
@@ -447,6 +530,10 @@ export function LyricSheet(p: LyricSheetProps) {
               onPlay={p.onPlay}
               onIssueClick={p.onIssueClick}
               onNudge={p.onNudge}
+              symbols={p.symbols}
+              pickingSymbol={isCursor && p.symbolPickerOpen}
+              onPickSymbol={p.onPickSymbol}
+              onCloseSymbols={p.onCloseSymbols}
             />
           </div>
         );

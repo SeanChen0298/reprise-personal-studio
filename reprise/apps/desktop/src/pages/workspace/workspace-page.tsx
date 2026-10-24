@@ -12,6 +12,7 @@ import { useSongStore } from "../../stores/song-store";
 import { usePreferencesStore } from "../../stores/preferences-store";
 import { useHistoryStore } from "../../stores/history-store";
 import { useHighlightStore } from "../../lib/highlight-config";
+import { useSymbolStore } from "../../lib/symbol-config";
 import { useLinePlayer } from "../../hooks/use-line-player";
 import { useWaveformData } from "../../hooks/use-waveform-data";
 import { useAudioDevices } from "../../hooks/use-audio-devices";
@@ -71,6 +72,7 @@ function Workspace({ songId }: { songId: string }) {
   const removeSong = useSongStore((s) => s.removeSong);
   const incrementPlayCount = useSongStore((s) => s.incrementPlayCount);
   const highlights = useHighlightStore((s) => s.highlights);
+  const symbols = useSymbolStore((s) => s.symbols);
   const queueTasks = useTaskQueueStore((s) => s.tasks);
   const setScope = useHistoryStore((s) => s.setScope);
   const undo = useHistoryStore((s) => s.undo);
@@ -194,6 +196,7 @@ function Workspace({ songId }: { songId: string }) {
   const cursorSection = sectionOf(cursorLine);
 
   const [editingLineId, setEditingLineId] = useState<string | null>(null);
+  const [symbolPickerOpen, setSymbolPickerOpen] = useState(false);
   /** The caret shows only once you work inside a line (←/→, Home/End, clicking into the text). */
   const [caretShown, setCaretShown] = useState(false);
   const [sectionEdit, setSectionEdit] = useState<SectionEdit | null>(null);
@@ -392,6 +395,20 @@ function Workspace({ songId }: { songId: string }) {
     [takes, cursorSection, sectionRange, lines, cursorLine, say],
   );
 
+  /** Insert a vocal symbol (⤴, ~, …) at the caret, replacing any selection. */
+  const insertSymbol = useCallback(
+    async (char: string) => {
+      setSymbolPickerOpen(false);
+      if (!cursorLine) return;
+      const next = cursorText.slice(0, selStart) + char + cursorText.slice(selEnd);
+      await edits.editText(cursorLine.id, next);
+      const pos = selStart + char.length;
+      setCursor({ lineId: cursorLine.id, anchor: pos, focus: pos });
+      setCaretShown(true);
+    },
+    [cursorLine, cursorText, selStart, selEnd, edits],
+  );
+
   const doUndo = useCallback(async () => {
     const label = await undo();
     say(label ? `Undid: ${label}` : "Nothing to undo");
@@ -426,6 +443,10 @@ function Workspace({ songId }: { songId: string }) {
     // The lead sheet has its own keys (Space plays there).
     if (view === "lead") return;
     if (!cursorLine) return;
+    if (symbolPickerOpen) {
+      if (/^[1-9]$/.test(k) && symbols[Number(k) - 1]) return handled(), void insertSymbol(symbols[Number(k) - 1].char);
+      if (k === "Escape" || k === "s" || k === "S") return handled(), setSymbolPickerOpen(false);
+    }
     const len = cursorText.length;
     const setSel = (a: number, f: number) => setCursor({ lineId: cursorLine.id, anchor: a, focus: f });
 
@@ -435,6 +456,7 @@ function Workspace({ songId }: { songId: string }) {
         if (e.altKey) return;
         handled();
         setCaretShown(false);
+        setSymbolPickerOpen(false);
         const down = k === "ArrowDown";
         if (ctrl) {
           const starts = sections.map((s) => lines.find((l) => l.order >= s.start_line_order)).filter(Boolean) as Line[];
@@ -499,6 +521,7 @@ function Workspace({ songId }: { songId: string }) {
     if (ctrl || e.altKey) return;
     if (k === "l" || k === "L") return handled(), e.shiftKey ? loopSection() : loopLine();
     if (k === "t" || k === "T") return handled(), void tapStart();
+    if ((k === "s" || k === "S") && symbols.length) return handled(), setCaretShown(true), setSymbolPickerOpen(true);
     if (/^[1-9]$/.test(k) && !e.repeat) return handled(), annotate(Number(k));
   };
   useEffect(() => {
@@ -523,6 +546,13 @@ function Workspace({ songId }: { songId: string }) {
         },
       })),
       { id: "unmark", group: "Mark", label: "Remove marks in selection", shortcut: "0", run: () => void clearMarks() },
+      ...symbols.map((sym) => ({
+        id: `sym-${sym.id}`,
+        group: "Lyrics",
+        label: `Insert ${sym.char} ${sym.label}`,
+        shortcut: "S",
+        run: () => void insertSymbol(sym.char),
+      })),
       { id: "edit", group: "Lyrics", label: "Edit line text", shortcut: "F2", featured: true, run: () => cursorLine && setEditingLineId(cursorLine.id) },
       { id: "section", group: "Lyrics", featured: true, label: cursorLine && sections.some((s) => s.start_line_order === cursorLine.order) ? "Rename this section" : "Start a section at this line", shortcut: "#", run: startSectionEdit },
       ...(cursorSection ? [{ id: "section-rm", group: "Lyrics", label: `Remove section “${cursorSection.name}”`, run: () => edits.removeSection(cursorSection) }] : []),
@@ -549,7 +579,7 @@ function Workspace({ songId }: { songId: string }) {
       { id: "keys", group: "Help", label: "Keyboard shortcuts", shortcut: "?", featured: true, run: () => setShortcutsOpen(true) },
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [highlights, selStart, selEnd, cursorLine, cursorSection, sections, view, showHints, panel, showTranslation, translationLines.length, player.isPlaying, player.loopEnabled, tracks, canUndo, canRedo, edits]);
+  }, [highlights, selStart, selEnd, cursorLine, cursorSection, sections, view, showHints, panel, symbols, showTranslation, translationLines.length, player.isPlaying, player.loopEnabled, tracks, canUndo, canRedo, edits]);
 
   // ── Derived display ──────────────────────────────────────────────────────
   const loopLineIds = useMemo(() => {
@@ -587,6 +617,8 @@ function Workspace({ songId }: { songId: string }) {
   const onIssueClick = useStable(takes.playIssueYou);
   const onPlay = useStable(playLine);
   const onNudge = useStable(nudge);
+  const onPickSymbol = useStable((char: string) => void insertSymbol(char));
+  const onCloseSymbols = useStable(() => setSymbolPickerOpen(false));
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-[var(--bg)]">
@@ -800,6 +832,10 @@ function Workspace({ songId }: { songId: string }) {
                 onPlay={onPlay}
                 onIssueClick={onIssueClick}
                 onNudge={onNudge}
+                symbols={symbols}
+                symbolPickerOpen={symbolPickerOpen}
+                onPickSymbol={onPickSymbol}
+                onCloseSymbols={onCloseSymbols}
                 onSectionClick={(sec) => {
                   const first = lines.find((l) => l.order >= sec.start_line_order);
                   moveTo(first, false);

@@ -106,7 +106,8 @@ const SHORTCUTS: [string, [string, string][]][] = [
   ["Mark", [
     ["1 – 9", "Mark the selection (falsetto, …); again to remove — Breath mark works at the caret"],
     ["0 / Delete", "Remove marks in the selection (or under the caret)"],
-    ["F2", "Edit the line's text"],
+    ["F2", "Edit the line's text (Alt+1…9 inserts symbols)"],
+    ["S, then 1–9", "Insert a symbol (⤴ ⤵ ~ /) at the caret"],
     ["#", "Start a section here (or rename it)"],
   ]],
   ["Timing", [
