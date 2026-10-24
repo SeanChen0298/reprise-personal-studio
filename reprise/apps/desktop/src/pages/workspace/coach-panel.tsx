@@ -1,15 +1,16 @@
-import { SongCardView } from "../../components/song-card-view";
+import { LineRefContext, SongCardView, WithLineRefs } from "../../components/song-card-view";
 import { useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-shell";
 import { backupChain, useCoachStore, searchesToday } from "../../stores/coach-store";
 import { askCoach, CoachError } from "../../lib/coach/providers";
-import { COACH_SYSTEM, SONG_CARD_PROMPT, TIDY_MEMORY_PROMPT } from "../../lib/coach/persona";
+import { COACH_SYSTEM, SECTIONS_PROMPT, SONG_CARD_PROMPT, TIDY_MEMORY_PROMPT } from "../../lib/coach/persona";
 import {
   MAX_SINGER_FACTS,
   MAX_SONG_MEMORY,
   buildContext,
   memoryIndex,
   parseReply,
+  parseSectionPlan,
   parseSongCard,
   saveKnowledge,
   saveProfile,
@@ -23,7 +24,15 @@ import type { Line, Recording, Section, Song } from "../../types/song";
 function Markdown({ text }: { text: string }) {
   const bold = (s: string) =>
     s.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
-      part.startsWith("**") && part.endsWith("**") ? <strong key={i}>{part.slice(2, -2)}</strong> : <span key={i}>{part}</span>,
+      part.startsWith("**") && part.endsWith("**") ? (
+        <strong key={i}>
+          <WithLineRefs text={part.slice(2, -2)} />
+        </strong>
+      ) : (
+        <span key={i}>
+          <WithLineRefs text={part} />
+        </span>
+      ),
     );
   const blocks = text.split(/\n{2,}/);
   return (
@@ -86,6 +95,9 @@ export function CoachPanel({
   setProfile,
   request,
   cardTabNonce,
+  sectionsNonce,
+  onJumpToLine,
+  onApplySections,
   onApplyLineNote,
 }: {
   song: Song;
@@ -102,11 +114,18 @@ export function CoachPanel({
   request: { text: string; nonce: number } | null;
   /** Bumped by Shift+G: show the song card's next page. */
   cardTabNonce?: number;
+  /** Bumped from the command palette: suggest sections. */
+  sectionsNonce?: number;
+  onJumpToLine: (lineIndex: number) => void;
+  /** Sections the user approved: names with the line index (0-based) each starts at. */
+  onApplySections: (plan: { name: string; startIndex: number }[]) => void;
   onApplyLineNote: (lineIndex: number, note: string) => void;
 }) {
   const coach = useCoachStore();
   const [input, setInput] = useState("");
-  const [busy, setBusy] = useState<null | "card" | "chat">(null);
+  const [busy, setBusy] = useState<null | "card" | "chat" | "sections">(null);
+  /** The coach's suggested section split, waiting for approval. */
+  const [sectionPlan, setSectionPlan] = useState<{ name: string; start: number }[] | null>(null);
   /** The answer so far while it streams in. */
   const [streaming, setStreaming] = useState("");
   /** When the current request started — for the live seconds counter. */
@@ -165,6 +184,45 @@ export function CoachPanel({
       setStartedAt(null);
     }
   };
+
+  const suggestSections = async () => {
+    if (!knowledge || busy) return;
+    setBusy("sections");
+    setStartedAt(Date.now());
+    setError(null);
+    setSectionPlan(null);
+    try {
+      const r = await askCoach({
+        provider: coach.provider,
+        apiKey,
+        model,
+        system: COACH_SYSTEM,
+        context: context(),
+        history: [],
+        prompt: SECTIONS_PROMPT,
+        maxSearches: null,
+        fallbackModels: backupChain(coach),
+        quick: true,
+      });
+      const plan = parseSectionPlan(r.text, lines.length);
+      if (!plan) throw new CoachError("The coach's sections came back in an unexpected shape — try again.");
+      setSectionPlan(plan);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+      setStreaming("");
+      setStartedAt(null);
+    }
+  };
+  const lastSectionsNonce = useRef(0);
+  useEffect(() => {
+    if (sectionsNonce && sectionsNonce !== lastSectionsNonce.current && knowledge && apiKey && model) {
+      lastSectionsNonce.current = sectionsNonce;
+      void suggestSections();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sectionsNonce, knowledge !== null]);
 
   const send = async (text: string) => {
     const q = text.trim();
@@ -276,6 +334,7 @@ export function CoachPanel({
   const card = knowledge.card;
 
   return (
+    <LineRefContext.Provider value={{ lines, onJump: onJumpToLine }}>
     <div className="flex-1 min-h-0 flex flex-col">
       <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 flex flex-col gap-4" style={{ scrollbarWidth: "thin" }}>
         {/* Song card */}
@@ -310,6 +369,79 @@ export function CoachPanel({
             )
           )}
         </div>
+
+        {/* Sections: the coach can suggest a split when the song has none */}
+        {(sections.length === 0 || sectionPlan) && (
+          <div className="rounded-[10px] border border-[var(--border)] bg-[var(--bg)] p-3">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.09em] text-[var(--text-muted)]">Sections</span>
+              {!sectionPlan && (
+                <button
+                  onClick={() => void suggestSections()}
+                  disabled={busy != null}
+                  className="ml-auto text-[11px] text-[var(--theme)] bg-transparent border-none cursor-pointer hover:underline disabled:opacity-40"
+                >
+                  {busy === "sections" ? "Reading the lyrics…" : "Suggest sections"}
+                </button>
+              )}
+            </div>
+            {!sectionPlan ? (
+              <p className="text-[12px] text-[var(--text-muted)] mt-2 leading-relaxed">
+                This song has no sections yet. The coach can split it into verses, chorus and so on from the lyrics — you check it first.
+              </p>
+            ) : (
+              <>
+                <ol className="mt-2 flex flex-col gap-[5px]">
+                  {sectionPlan.map((s, i) => {
+                    const end = (sectionPlan[i + 1]?.start ?? lines.length + 1) - 1;
+                    const first = lines[s.start - 1];
+                    return (
+                      <li key={i} className="flex items-baseline gap-2 text-[12px]">
+                        <span className="w-[86px] flex-shrink-0 font-medium text-[var(--text-primary)] truncate">{s.name}</span>
+                        <button
+                          onClick={() => onJumpToLine(s.start - 1)}
+                          title="Go to this line"
+                          className="min-w-0 truncate text-left text-[var(--text-secondary)] bg-transparent border-none p-0 cursor-pointer hover:text-[var(--text-primary)]"
+                        >
+                          {first ? (first.custom_text ?? first.text) : ""}
+                        </button>
+                        <span className="ml-auto flex-shrink-0 text-[10px] text-[var(--text-muted)] tabular-nums">
+                          L{s.start}
+                          {end > s.start ? `–${end}` : ""}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ol>
+                <div className="mt-3 flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      onApplySections(sectionPlan.map((s) => ({ name: s.name, startIndex: s.start - 1 })));
+                      setSectionPlan(null);
+                    }}
+                    className="px-3 py-[4px] rounded-[6px] bg-[var(--theme)] text-white text-[11.5px] font-medium border-none cursor-pointer"
+                  >
+                    Add these sections
+                  </button>
+                  <button
+                    onClick={() => void suggestSections()}
+                    disabled={busy != null}
+                    className="text-[11.5px] text-[var(--text-muted)] bg-transparent border-none cursor-pointer hover:text-[var(--text-primary)] disabled:opacity-40"
+                  >
+                    Try again
+                  </button>
+                  <button
+                    onClick={() => setSectionPlan(null)}
+                    className="ml-auto text-[11.5px] text-[var(--text-muted)] bg-transparent border-none cursor-pointer hover:text-[var(--text-primary)]"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+                <p className="mt-2 text-[10.5px] text-[var(--text-muted)]">Ctrl+Z undoes it.</p>
+              </>
+            )}
+          </div>
+        )}
 
         {/* What the coach remembers — fixed size, with ids it can refer to */}
         <div>
@@ -488,6 +620,7 @@ export function CoachPanel({
         </div>
       </div>
     </div>
+    </LineRefContext.Provider>
   );
 }
 

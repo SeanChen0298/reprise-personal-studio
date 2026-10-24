@@ -291,6 +291,28 @@ export function parseReply(text: string): { body: string; proposals: CoachPropos
 }
 
 /** The song card from a reply that should be JSON (tolerates fences / stray prose). */
+/** The coach's section split: names with the L# (1-based) each starts at, in order and in range. */
+export function parseSectionPlan(text: string, lineCount: number): { name: string; start: number }[] | null {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end <= start) return null;
+  try {
+    const raw = JSON.parse(text.slice(start, end + 1)) as { sections?: unknown };
+    if (!Array.isArray(raw.sections)) return null;
+    const out: { name: string; start: number }[] = [];
+    for (const s of raw.sections as Record<string, unknown>[]) {
+      const name = typeof s?.name === "string" ? s.name.trim() : "";
+      const at = Math.round(Number(s?.start));
+      if (!name || !Number.isFinite(at) || at < 1 || at > lineCount) continue;
+      if (out.length && at <= out[out.length - 1].start) continue;
+      out.push({ name, start: at });
+    }
+    return out.length ? out : null;
+  } catch {
+    return null;
+  }
+}
+
 export function parseSongCard(text: string): SongCard | null {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");

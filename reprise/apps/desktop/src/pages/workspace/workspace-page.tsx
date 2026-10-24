@@ -227,6 +227,7 @@ function Workspace({ songId }: { songId: string }) {
   const [profile, setProfile] = useState<SingerProfile>({ facts: [] });
   const [coachRequest, setCoachRequest] = useState<{ text: string; nonce: number } | null>(null);
   const [cardTabNonce, setCardTabNonce] = useState(0);
+  const [sectionsNonce, setSectionsNonce] = useState(0);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const setupOpen = searchParams.get("setup") === "1";
@@ -600,6 +601,9 @@ function Workspace({ songId }: { songId: string }) {
       case "F":
         handled();
         return setEditingLineId(cursorLine.id);
+      case "V":
+        handled();
+        return setShowHints((v) => !v);
       case "G":
         handled();
         // Shift+G: next page of the song card (opening the coach first if needed).
@@ -650,7 +654,10 @@ function Workspace({ songId }: { songId: string }) {
       { id: "section", group: "Lyrics", featured: true, label: cursorLine && sections.some((s) => s.start_line_order === cursorLine.order) ? "Rename this section" : "Start a section at this line", shortcut: "#", run: startSectionEdit },
       ...(cursorSection ? [{ id: "section-rm", group: "Lyrics", label: `Remove section “${cursorSection.name}”`, run: () => edits.removeSection(cursorSection) }] : []),
       { id: "lyrics", group: "Lyrics", label: "Import / paste lyrics…", run: () => navigate(`/song/${songId}/lyrics`) },
-      { id: "hints", group: "View", label: showHints ? "Hide song hints (long phrases, high notes)" : "Show song hints (long phrases, high notes)", run: () => setShowHints((v) => !v) },
+      { id: "hints", group: "View", label: showHints ? "Focus on the lyrics (hide song hints and coach notes)" : "Show song hints and coach notes", shortcut: "V", run: () => setShowHints((v) => !v) },
+      ...(sections.length === 0
+        ? [{ id: "coach-sections", group: "Coach", label: "Suggest sections (coach)", run: () => (setPanel("coach"), setSectionsNonce((n) => n + 1)) }]
+        : []),
       { id: "view", group: "View", label: view === "lyrics" ? "Switch to lead sheet (chords)" : "Switch to lyrics", run: () => setView((v) => (v === "lyrics" ? "lead" : "lyrics")) },
       { id: "play", group: "Play", label: player.isPlaying ? "Pause" : "Play", shortcut: "Space", run: player.togglePlay },
       { id: "play-line", group: "Play", label: "Play from selected line", shortcut: "Ctrl+Enter", featured: true, run: () => cursorLine && playLine(cursorLine.id) },
@@ -774,10 +781,10 @@ function Workspace({ songId }: { songId: string }) {
             </button>
           ))}
         </div>
-        {view === "lyrics" && vocalMap && (
+        {view === "lyrics" && (vocalMap || knowledge?.card) && (
           <button
             onClick={() => setShowHints((v) => !v)}
-            title="Mark the song's highest notes and long phrases (from the original vocal)"
+            title="High notes and long phrases, the song's mood and the coach's notes under each section. Off = just the lyrics (V)"
             className={`px-[8px] py-[3px] text-[11px] font-medium rounded-[6px] border cursor-pointer ${
               showHints ? "bg-[var(--theme-light)] text-[var(--theme-text)] border-transparent" : "bg-transparent text-[var(--text-muted)] border-[var(--border)]"
             }`}
@@ -1064,6 +1071,30 @@ function Workspace({ songId }: { songId: string }) {
                 setProfile={setProfile}
                 request={coachRequest}
                 cardTabNonce={cardTabNonce}
+                sectionsNonce={sectionsNonce}
+                onJumpToLine={(idx) => {
+                  markInteraction();
+                  moveTo(lines[idx], false);
+                }}
+                onApplySections={(plan) => {
+                  const now = new Date().toISOString();
+                  const list = plan
+                    .filter((s) => lines[s.startIndex])
+                    .map((s, i, all) => {
+                      const nextStart = all[i + 1] ? lines[all[i + 1].startIndex] : undefined;
+                      const endLine = nextStart ? lines[all[i + 1].startIndex - 1] : lines[lines.length - 1];
+                      return {
+                        id: crypto.randomUUID(),
+                        song_id: songId,
+                        name: s.name,
+                        start_line_order: lines[s.startIndex].order,
+                        end_line_order: Math.max(lines[s.startIndex].order, endLine.order),
+                        created_at: now,
+                        updated_at: now,
+                      };
+                    });
+                  void edits.addSections(list);
+                }}
                 onApplyLineNote={(idx, note) => {
                   const line = lines[idx];
                   if (!line) return;

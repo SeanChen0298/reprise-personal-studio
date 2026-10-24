@@ -1,5 +1,72 @@
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import type { SongCard } from "../lib/coach/knowledge";
+import type { Line } from "../types/song";
+
+/** The song's lines (L1 = index 0) and how to jump to one — for showing "L19" as the lyric itself. */
+export const LineRefContext = createContext<{ lines: Line[]; onJump?: (index: number) => void }>({ lines: [] });
+
+const lineText = (l: Line | undefined) => (l ? (l.custom_text ?? l.text).trim() : "");
+const snippet = (s: string, n = 12) => (s.length > n ? `${s.slice(0, n)}…` : s);
+
+/** "L15-22, L36–45" → [[15, 22], [36, 45]] (1-based, inclusive). */
+export function parseLineRefs(s: string): [number, number][] {
+  const out: [number, number][] = [];
+  for (const m of s.matchAll(/L?\s*(\d+)(?:\s*[-–—~]\s*L?\s*(\d+))?/gi)) {
+    const a = Number(m[1]);
+    const b = m[2] ? Number(m[2]) : a;
+    if (a > 0) out.push([Math.min(a, b), Math.max(a, b)]);
+  }
+  return out;
+}
+
+/** One line reference: the lyric's opening words, the line numbers muted; click jumps there. */
+function LineRef({ from, to }: { from: number; to: number }) {
+  const { lines, onJump } = useContext(LineRefContext);
+  const first = lineText(lines[from - 1]);
+  const full = lines
+    .slice(from - 1, to)
+    .map((l, i) => `L${from + i}  ${lineText(l)}`)
+    .join("\n");
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onJump?.(from - 1);
+      }}
+      title={full || `L${from}`}
+      className="inline-flex items-baseline gap-[4px] max-w-full px-[6px] py-[1px] rounded-[4px] bg-[var(--bg)] border border-[var(--border-subtle)] hover:border-[var(--theme)] text-[11.5px] text-[var(--text-primary)] cursor-pointer align-baseline"
+    >
+      {first && <span className="truncate">{snippet(first)}</span>}
+      <span className="text-[10px] text-[var(--text-muted)] tabular-nums flex-shrink-0">
+        L{from}
+        {to > from ? `–${to}` : ""}
+      </span>
+    </button>
+  );
+}
+
+/** A list of line refs ("L15-22, L36-45"), or the raw text if it has none. */
+export function LineRefs({ refs }: { refs: string }) {
+  const parsed = parseLineRefs(refs);
+  if (!parsed.length) return <span className="text-[10.5px] text-[var(--text-muted)]">{refs}</span>;
+  return (
+    <span className="inline-flex flex-wrap gap-[4px]">
+      {parsed.map(([a, b], i) => (
+        <LineRef key={i} from={a} to={b} />
+      ))}
+    </span>
+  );
+}
+
+/** Free text with "L12" / "L3–5" turned into clickable lyric refs. */
+export function WithLineRefs({ text }: { text: string }): ReactNode {
+  const parts = text.split(/(\bL\d+(?:\s*[-–—]\s*L?\d+)?)/g);
+  return parts.map((part, i) => {
+    const r = i % 2 === 1 ? parseLineRefs(part)[0] : null;
+    return r ? <LineRef key={i} from={r[0]} to={r[1]} /> : <span key={i}>{part}</span>;
+  });
+}
 
 const Chip = ({ children, tone = "plain" }: { children: React.ReactNode; tone?: "plain" | "voice" }) => (
   <span
@@ -76,7 +143,7 @@ export function SongCardView({ card, nextTab }: { card: SongCard; nextTab?: numb
                 {card.practice_focus.map((p, i) => (
                   <li key={i} className="flex gap-2">
                     <span className="text-[var(--text-muted)]">☐</span>
-                    <span>{p}</span>
+                    <span><WithLineRefs text={p} /></span>
                   </li>
                 ))}
               </ul>
@@ -90,8 +157,11 @@ export function SongCardView({ card, nextTab }: { card: SongCard; nextTab?: numb
           <ol className="flex flex-col gap-[5px]">
             {card.arc.map((a, i) => (
               <li key={i} className="flex gap-2">
-                <span className="flex-shrink-0 w-[52px] text-[10.5px] tabular-nums text-[var(--text-muted)] pt-[1px]">{a.lines}</span>
-                <span>{a.text}</span>
+                <span className="flex-shrink-0 w-[16px] text-[10.5px] tabular-nums text-[var(--text-muted)] pt-[1px]">{i + 1}.</span>
+                <span className="flex flex-col gap-[3px] min-w-0">
+                  <span><WithLineRefs text={a.text} /></span>
+                  {a.lines && <LineRefs refs={a.lines} />}
+                </span>
               </li>
             ))}
           </ol>
@@ -141,12 +211,16 @@ export function SongCardView({ card, nextTab }: { card: SongCard; nextTab?: numb
               <div key={i} className="rounded-[8px] border border-[var(--border-subtle)] p-[8px]">
                 <div className="flex flex-wrap items-center gap-[5px]">
                   <span className="text-[12px] font-medium text-[var(--text-primary)] mr-[2px]">{t.name}</span>
-                  {t.lines && <span className="text-[10.5px] text-[var(--text-muted)] tabular-nums">{t.lines}</span>}
                   {t.register && <Chip tone="voice">{t.register}</Chip>}
                   {t.placement && <Chip tone="voice">{t.placement}</Chip>}
                 </div>
+                {t.lines && (
+                  <div className="mt-[5px]">
+                    <LineRefs refs={t.lines} />
+                  </div>
+                )}
                 {t.image && <div className="mt-[4px] text-[12px]"><span className="text-[var(--text-muted)]">Imagine · </span>{t.image}</div>}
-                {t.drill && <div className="mt-[2px] text-[12px]"><span className="text-[var(--text-muted)]">Drill · </span>{t.drill}</div>}
+                {t.drill && <div className="mt-[2px] text-[12px]"><span className="text-[var(--text-muted)]">Drill · </span><WithLineRefs text={t.drill} /></div>}
               </div>
             ))}
             {card.techniques.length === 0 && card.singer.techniques.map((t, i) => <div key={i}>• {t}</div>)}

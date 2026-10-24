@@ -40,6 +40,11 @@ Memory: you keep two small, fixed-size memories — facts about the singer (P1, 
 - When a memory is FULL, never add: merge into an existing item with update_, or forget one first.`;
 
 /** Tidy the memories: merge duplicates, drop outdated items, keep within the limits. */
+/** Split the lyrics into sections — JSON only; the user previews and approves. */
+export const SECTIONS_PROMPT = `Split this song's lyrics into sections (intro, verses, pre-chorus, chorus, bridge, outro…) from the lyrics' structure: repeated lines are usually the chorus. If there's a song card, use its section names. Reply with ONLY a JSON object, no prose:
+{"sections": [{"name": "Verse 1", "start": 1}, {"name": "Chorus", "start": 9}]}
+"start" is the L# where the section begins; list them in order; each runs until the next one starts. Number repeated sections (Verse 1, Verse 2, Chorus 2).`;
+
 export const TIDY_MEMORY_PROMPT = `Tidy your memory of me and of this song. Merge duplicates, rewrite vague items to be specific, and drop anything outdated or wrong — using update_ and forget_ in the reprise block. Keep within the limits. In the answer, just list briefly what you changed and why.`;
 
 /** The song-card job: a structured brief, returned as JSON only. */

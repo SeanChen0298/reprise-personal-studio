@@ -140,6 +140,25 @@ export function useWorkspaceEdits(songId: string) {
     [songId, push],
   );
 
+  /** Add several sections at once (e.g. the coach's split) — one undo step. */
+  const addSections = useCallback(
+    async (list: Section[]) => {
+      if (!list.length) return;
+      const add = async () => {
+        for (const s of list) await useSongStore.getState().addSection(songId, s);
+      };
+      await add();
+      push({
+        label: `Add ${list.length} sections`,
+        undo: async () => {
+          for (const s of list) await useSongStore.getState().removeSection(songId, s.id);
+        },
+        redo: add,
+      });
+    },
+    [songId, push],
+  );
+
   /** Remove a section; its lines become ungrouped. */
   const removeSection = useCallback(
     async (section: Section) => {
@@ -171,7 +190,7 @@ export function useWorkspaceEdits(songId: string) {
   );
 
   return useMemo(
-    () => ({ annotate, clearAnnotations, editText, setTiming, createSection, renameSection, removeSection, setLineNote }),
-    [annotate, clearAnnotations, editText, setTiming, createSection, renameSection, removeSection, setLineNote],
+    () => ({ annotate, clearAnnotations, editText, setTiming, createSection, addSections, renameSection, removeSection, setLineNote }),
+    [annotate, clearAnnotations, editText, setTiming, createSection, addSections, renameSection, removeSection, setLineNote],
   );
 }

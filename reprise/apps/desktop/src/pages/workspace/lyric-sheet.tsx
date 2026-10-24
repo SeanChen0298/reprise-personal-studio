@@ -610,7 +610,7 @@ export function LyricSheet(p: LyricSheetProps) {
 
   return (
     <div className="flex flex-col pb-[40vh]">
-      {p.songCard?.summary && <SongAbout summary={p.songCard.summary} mood={p.songCard.mood} onOpenCoach={p.onOpenCoach} />}
+      {p.showHints && p.songCard?.summary && <SongAbout summary={p.songCard.summary} mood={p.songCard.mood} onOpenCoach={p.onOpenCoach} />}
       {p.lines.map((line) => {
         const sec = sectionAt.get(line.order);
         const isCursor = p.cursor?.lineId === line.id;
@@ -632,7 +632,7 @@ export function LyricSheet(p: LyricSheetProps) {
             {sec && (
               <SectionHeading
                 section={sec}
-                intent={intents.get(sec.name.trim().toLowerCase())}
+                intent={p.showHints ? intents.get(sec.name.trim().toLowerCase()) : undefined}
                 active={cursorSection?.id === sec.id}
                 renaming={p.sectionEdit?.mode === "rename" && p.sectionEdit.sectionId === sec.id}
                 onClick={() => p.onSectionClick(sec)}
