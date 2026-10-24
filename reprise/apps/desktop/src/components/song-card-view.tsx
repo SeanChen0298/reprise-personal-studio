@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { SongCard } from "../lib/coach/knowledge";
 
 const Chip = ({ children, tone = "plain" }: { children: React.ReactNode; tone?: "plain" | "voice" }) => (
@@ -17,22 +17,76 @@ const Label = ({ children }: { children: React.ReactNode }) => (
   <div className="text-[10px] font-semibold uppercase tracking-[0.09em] text-[var(--text-muted)] mb-[5px]">{children}</div>
 );
 
-/** The coach's song card, laid out to be read at a glance. */
-export function SongCardView({ card }: { card: SongCard }) {
+type Tab = "overview" | "story" | "sections" | "voice";
+const TAB_LABEL: Record<Tab, string> = { overview: "Overview", story: "Story", sections: "Sections", voice: "Voice" };
+
+/**
+ * The coach's song card as short pages (tabs), so it stays a card rather than a long article.
+ * `nextTab` changes (Shift+G) step to the next page.
+ */
+export function SongCardView({ card, nextTab }: { card: SongCard; nextTab?: number }) {
   const [openSection, setOpenSection] = useState<number | null>(null);
+  const tabs = (["overview", "story", "sections", "voice"] as Tab[]).filter((t) =>
+    t === "overview"
+      ? true
+      : t === "story"
+        ? card.arc.length > 0 || !!card.story
+        : t === "sections"
+          ? card.sections.length > 0
+          : !!card.singer.style || card.techniques.length > 0 || card.singer.techniques.length > 0,
+  );
+  const [tab, setTab] = useState<Tab>("overview");
+  useEffect(() => {
+    if (nextTab) setTab((cur) => tabs[(tabs.indexOf(cur) + 1) % tabs.length]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nextTab]);
+  const shown = tabs.includes(tab) ? tab : "overview";
 
   return (
-    <div className="flex flex-col gap-4 text-[12.5px] leading-snug text-[var(--text-secondary)]">
-      {/* At a glance */}
-      <div>
-        <p className="text-[13.5px] leading-snug text-[var(--text-primary)]">{card.summary}</p>
-        {card.mood && <p className="mt-[5px] text-[12px] text-[var(--text-muted)]">{card.mood}</p>}
-      </div>
+    <div className="flex flex-col gap-3 text-[12.5px] leading-snug text-[var(--text-secondary)]">
+      {tabs.length > 1 && (
+        <div className="flex gap-[2px] border-b border-[var(--border-subtle)]" title="Shift+G: next page">
+          {tabs.map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`px-2 pb-[5px] -mb-px text-[11.5px] bg-transparent border-none border-b-2 cursor-pointer ${
+                shown === t
+                  ? "border-solid border-[var(--theme)] text-[var(--text-primary)] font-medium"
+                  : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+              }`}
+              style={{ borderBottomStyle: "solid", borderBottomColor: shown === t ? "var(--theme)" : "transparent" }}
+            >
+              {TAB_LABEL[t]}
+            </button>
+          ))}
+        </div>
+      )}
 
-      {/* Story */}
-      {card.arc.length > 0 ? (
+      {shown === "overview" && (
+        <>
+          <div>
+            <p className="text-[13.5px] leading-snug text-[var(--text-primary)]">{card.summary}</p>
+            {card.mood && <p className="mt-[5px] text-[12px] text-[var(--text-muted)]">{card.mood}</p>}
+          </div>
+          {card.practice_focus.length > 0 && (
+            <div>
+              <Label>Practise</Label>
+              <ul className="flex flex-col gap-[4px]">
+                {card.practice_focus.map((p, i) => (
+                  <li key={i} className="flex gap-2">
+                    <span className="text-[var(--text-muted)]">☐</span>
+                    <span>{p}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </>
+      )}
+
+      {shown === "story" && (card.arc.length > 0 ? (
         <div>
-          <Label>Story</Label>
           <ol className="flex flex-col gap-[5px]">
             {card.arc.map((a, i) => (
               <li key={i} className="flex gap-2">
@@ -45,16 +99,13 @@ export function SongCardView({ card }: { card: SongCard }) {
       ) : (
         card.story && (
           <div>
-            <Label>Story</Label>
-            <p>{card.story}</p>
+              <p>{card.story}</p>
           </div>
         )
-      )}
+      ))}
 
-      {/* Sections */}
-      {card.sections.length > 0 && (
+      {shown === "sections" && (
         <div>
-          <Label>Sections</Label>
           <div className="flex flex-col">
             {card.sections.map((s, i) => {
               const open = openSection === i;
@@ -81,8 +132,7 @@ export function SongCardView({ card }: { card: SongCard }) {
         </div>
       )}
 
-      {/* Voice */}
-      {(card.singer.style || card.techniques.length > 0) && (
+      {shown === "voice" && (
         <div>
           <Label>{card.singer.name ? `${card.singer.name}'s voice` : "Voice"}</Label>
           {card.singer.style && <p className="mb-2">{card.singer.style}</p>}
@@ -104,20 +154,6 @@ export function SongCardView({ card }: { card: SongCard }) {
         </div>
       )}
 
-      {/* Practise */}
-      {card.practice_focus.length > 0 && (
-        <div>
-          <Label>Practise</Label>
-          <ul className="flex flex-col gap-[4px]">
-            {card.practice_focus.map((p, i) => (
-              <li key={i} className="flex gap-2">
-                <span className="text-[var(--text-muted)]">☐</span>
-                <span>{p}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
     </div>
   );
 }

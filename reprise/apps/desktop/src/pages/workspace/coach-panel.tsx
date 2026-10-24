@@ -85,6 +85,7 @@ export function CoachPanel({
   profile,
   setProfile,
   request,
+  cardTabNonce,
   onApplyLineNote,
 }: {
   song: Song;
@@ -99,6 +100,8 @@ export function CoachPanel({
   setProfile: (p: SingerProfile) => void;
   /** A question sent from elsewhere (e.g. "Ask the coach about this take"). */
   request: { text: string; nonce: number } | null;
+  /** Bumped by Shift+G: show the song card's next page. */
+  cardTabNonce?: number;
   onApplyLineNote: (lineIndex: number, note: string) => void;
 }) {
   const coach = useCoachStore();
@@ -301,7 +304,7 @@ export function CoachPanel({
           ) : (
             cardOpen && (
               <div className="mt-3">
-                <SongCardView card={card} />
+                <SongCardView card={card} nextTab={cardTabNonce} />
                 <Sources sources={knowledge.card_sources} />
               </div>
             )

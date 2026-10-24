@@ -124,6 +124,7 @@ const SHORTCUTS: [string, [string, string][]][] = [
   ["General", [
     ["Tab / Shift+Tab", "Takes / line details panel"],
     ["G", "Coach"],
+    ["Shift+G", "Song card: next page"],
     ["Ctrl+Z / Ctrl+Shift+Z", "Undo / redo"],
     ["Ctrl+E", "Command palette"],
     ["F1", "This list"],

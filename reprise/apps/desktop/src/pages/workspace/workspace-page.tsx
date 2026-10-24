@@ -224,6 +224,7 @@ function Workspace({ songId }: { songId: string }) {
   const [knowledge, setKnowledge] = useState<SongKnowledge | null>(null);
   const [profile, setProfile] = useState<SingerProfile>({ facts: [] });
   const [coachRequest, setCoachRequest] = useState<{ text: string; nonce: number } | null>(null);
+  const [cardTabNonce, setCardTabNonce] = useState(0);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const setupOpen = searchParams.get("setup") === "1";
@@ -599,6 +600,11 @@ function Workspace({ songId }: { songId: string }) {
         return setEditingLineId(cursorLine.id);
       case "G":
         handled();
+        // Shift+G: next page of the song card (opening the coach first if needed).
+        if (shift) {
+          if (panel === "coach") return setCardTabNonce((n) => n + 1);
+          return setPanel("coach");
+        }
         return setPanel((cur) => (cur === "coach" ? null : "coach"));
       case "N":
         handled();
@@ -1016,7 +1022,12 @@ function Workspace({ songId }: { songId: string }) {
           <aside className="absolute right-0 top-0 bottom-0 z-20 w-[420px] max-w-full flex flex-col min-h-0 border-l border-[var(--border)] bg-[var(--surface)] shadow-[-12px_0_32px_rgba(0,0,0,0.08)] animate-fade-up">
             <div className="flex items-center gap-2 px-4 py-[10px] flex-shrink-0 border-b border-[var(--border-subtle)]">
               <span className="text-[12.5px] font-medium">{panel === "takes" ? "Takes" : panel === "line" ? "Line details" : "Coach"}</span>
-              <span className="text-[11px] text-[var(--text-muted)]">{panel === "takes" ? "Tab" : panel === "line" ? "Shift+Tab" : "G"}</span>
+              <kbd
+                title={`Press ${panel === "takes" ? "Tab" : panel === "line" ? "Shift+Tab" : "G"} to open or close this panel`}
+                className="font-sans text-[10.5px] px-[5px] py-[1px] rounded-[4px] border border-[var(--border)] bg-[var(--bg)] text-[var(--text-muted)]"
+              >
+                {panel === "takes" ? "Tab" : panel === "line" ? "Shift+Tab" : "G"}
+              </kbd>
               <button
                 onClick={() => setPanel(null)}
                 title="Close (Esc)"
@@ -1050,6 +1061,7 @@ function Workspace({ songId }: { songId: string }) {
                 profile={profile}
                 setProfile={setProfile}
                 request={coachRequest}
+                cardTabNonce={cardTabNonce}
                 onApplyLineNote={(idx, note) => {
                   const line = lines[idx];
                   if (!line) return;
