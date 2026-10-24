@@ -604,6 +604,11 @@ function Workspace({ songId }: { songId: string }) {
       case "F":
         handled();
         return setEditingLineId(cursorLine.id);
+      case "E":
+        // The open take, with the instrumental under it.
+        if (!takes.reviewRec || !takes.canPlayMix(takes.reviewRec)) return;
+        handled();
+        return void takes.playMix(takes.reviewRec);
       case "V":
         handled();
         return setShowHints((v) => !v);

@@ -266,6 +266,18 @@ export function TakesPanel({
           onDeleteNote={(id) => deleteNote(open, id)}
           onPlayNote={(ms) => playAt(open, ms)}
           onAskCoach={() => onAskCoach(open)}
+          mix={
+            t.canPlayMix(open)
+              ? {
+                  playing: t.mixId === open.id,
+                  label: t.backingIsInstrumental ? "instrumental" : "the song",
+                  onToggle: () => {
+                    setPlayingId(null);
+                    void t.playMix(open, playhead[open.id] ?? 0);
+                  },
+                }
+              : undefined
+          }
         />
       )}
       <div className="flex-1 overflow-y-auto px-3 py-3" style={{ scrollbarWidth: "thin" }}>
@@ -289,7 +301,10 @@ export function TakesPanel({
               onToggleSelect={() => {}}
               onToggleBestTake={(id) => updateRecording(song.id, id, { is_best_take: !rec.is_best_take })}
               onDelete={() => setDeleteTarget(rec)}
-              onPlay={(r) => setPlayingId((cur) => (cur === r.id ? null : r.id))}
+              onPlay={(r) => {
+                t.stopMix();
+                setPlayingId((cur) => (cur === r.id ? null : r.id));
+              }}
               onPlayEnded={(id) => setPlayingId((cur) => (cur === id ? null : cur))}
               onCompare={(r) => setPlayingId((cur) => (cur === r.id ? null : r.id))}
               playingId={playingId}

@@ -69,7 +69,10 @@ export function TakeReviewPanel({
   onDeleteNote,
   onPlayNote,
   onAskCoach,
+  mix,
 }: {
+  /** Play the take over the backing — only for sung-along takes. */
+  mix?: { playing: boolean; label: string; onToggle: () => void };
   rec: Recording;
   song: Song;
   lines: Line[];
@@ -117,10 +120,26 @@ export function TakeReviewPanel({
           {date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
         </span>
         <span className="text-[11px] text-[var(--text-muted)] tabular-nums">{formatMs(rec.duration_ms)}</span>
+        {mix && (
+          <button
+            onClick={mix.onToggle}
+            title={`Hear your take with the ${mix.label} under it, lined up with the song (E)`}
+            className={`ml-auto flex items-center gap-[5px] text-[11px] font-medium px-[8px] py-[2px] rounded-[6px] border cursor-pointer ${
+              mix.playing
+                ? "bg-[var(--theme)] text-white border-[var(--theme)]"
+                : "bg-transparent text-[var(--text-secondary)] border-[var(--border)] hover:border-[var(--theme)] hover:text-[var(--theme)]"
+            }`}
+          >
+            <svg width="7" height="7" viewBox="0 0 24 24" fill="currentColor">
+              {mix.playing ? <rect x="5" y="5" width="14" height="14" /> : <polygon points="5,3 19,12 5,21" />}
+            </svg>
+            With {mix.label}
+          </button>
+        )}
         <button
           onClick={onAskCoach}
           title="Send your notes and the check for this take to your coach"
-          className="ml-auto text-[11px] font-medium px-[8px] py-[2px] rounded-[6px] border border-[var(--border)] bg-transparent text-[var(--theme)] hover:border-[var(--theme)] cursor-pointer"
+          className={`${mix ? "" : "ml-auto "}text-[11px] font-medium px-[8px] py-[2px] rounded-[6px] border border-[var(--border)] bg-transparent text-[var(--theme)] hover:border-[var(--theme)] cursor-pointer`}
         >
           Ask the coach
         </button>

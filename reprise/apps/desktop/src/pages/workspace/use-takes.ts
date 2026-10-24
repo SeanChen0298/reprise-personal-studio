@@ -263,6 +263,10 @@ export function useTakes({ song, lines, sections, player, backing, originalPath,
     (key: string, path: string, fromMs: number, volume: number) => {
       if (snippetKey === key) return stopSnippet();
       stopSnippet();
+      mixRef.current?.take.pause();
+      mixRef.current?.backing.pause();
+      mixRef.current = null;
+      setMixId(null);
       player.pause();
       const el = new Audio(convertFileSrc(path));
       el.volume = volume;
@@ -278,6 +282,53 @@ export function useTakes({ song, lines, sections, player, backing, originalPath,
   );
 
   const reviewRec = reviewId ? takes.find((r) => r.id === reviewId) ?? null : null;
+
+  // ── Your take over the backing, lined up with the song ───────────────────
+  const mixRef = useRef<{ take: HTMLAudioElement; backing: HTMLAudioElement } | null>(null);
+  const [mixId, setMixId] = useState<string | null>(null);
+  const backingPath = song.instrumental_path || song.audio_path || null;
+  const stopMix = useCallback(() => {
+    const m = mixRef.current;
+    mixRef.current = null;
+    if (m) {
+      m.take.pause();
+      m.backing.pause();
+    }
+    setMixId(null);
+  }, []);
+  useEffect(() => () => stopMix(), [stopMix]);
+  const canPlayMix = (rec: Recording) => rec.song_start_ms != null && !!backingPath;
+
+  /** Play a sung-along take with the instrumental (or the song) under it, from `fromTakeMs`. */
+  const playMix = useCallback(
+    async (rec: Recording, fromTakeMs = 0) => {
+      if (mixId === rec.id) return stopMix();
+      stopMix();
+      stopSnippet();
+      player.pause();
+      if (rec.song_start_ms == null || !backingPath) return;
+      const take = new Audio(convertFileSrc(rec.file_path));
+      const backing = new Audio(convertFileSrc(backingPath));
+      backing.volume = Math.min(1, player.volume * 0.8);
+      // take time t ↔ song time t + song_start_ms − lag (the measured mic/output delay)
+      const songMs = fromTakeMs + rec.song_start_ms - (rec.analysis?.lag_ms ?? 0);
+      take.currentTime = Math.max(0, fromTakeMs / 1000);
+      backing.currentTime = Math.max(0, songMs / 1000);
+      take.onended = () => stopMix();
+      backing.onended = () => stopMix();
+      mixRef.current = { take, backing };
+      setMixId(rec.id);
+      try {
+        await Promise.all([take.play(), backing.play()]);
+        // Starting two elements is never perfectly simultaneous — line them up once more.
+        const drift = take.currentTime * 1000 - fromTakeMs - (backing.currentTime * 1000 - songMs);
+        if (Math.abs(drift) > 30) backing.currentTime += drift / 1000;
+      } catch {
+        stopMix();
+      }
+    },
+    [mixId, stopMix, stopSnippet, player, backingPath],
+  );
 
   const playIssueYou = useCallback(
     (issue: TakeIssue, key: string) => {
@@ -340,6 +391,11 @@ export function useTakes({ song, lines, sections, player, backing, originalPath,
     playIssueYou,
     playIssueOriginal,
     issuesByLine,
+    mixId,
+    playMix,
+    stopMix,
+    canPlayMix,
+    backingIsInstrumental: !!song.instrumental_path,
   };
 }
 
