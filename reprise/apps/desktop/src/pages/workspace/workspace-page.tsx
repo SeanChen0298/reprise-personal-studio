@@ -18,6 +18,7 @@ import { useWaveformData } from "../../hooks/use-waveform-data";
 import { useAudioDevices } from "../../hooks/use-audio-devices";
 import { loadVocalMap } from "../../lib/take-review";
 import { nextWordBoundary } from "../../lib/lyric-edits";
+import { collapseRepeats } from "../../lib/translate";
 import type { VocalMap } from "../../lib/vocal-map";
 import { SongSetupPanel } from "../../components/song-setup-panel";
 import { EditSongModal } from "../../components/edit-song-modal";
@@ -115,7 +116,8 @@ function Workspace({ songId }: { songId: string }) {
         if (parts.length) text = parts.join(" ");
       }
       text ??= byOrder.get(line.order);
-      if (text) m.set(line.id, text);
+      // Older machine translations can contain runaway repeats — tidy them for display.
+      if (text) m.set(line.id, collapseRepeats(text));
     }
     return m;
   }, [lines, translationLines]);

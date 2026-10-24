@@ -228,6 +228,12 @@ Auto-generated via `kuroshiro` + `kuromoji` analyzer. Output is `<ruby>` HTML st
 
 ---
 
+## Translation
+
+Machine translation of lyrics (`lib/translate.ts`) runs locally with Helsinki-NLP **Opus-MT** models (`Xenova/opus-mt-<lang>-en`, fp32) through `@huggingface/transformers` (ONNX Runtime Web); a model downloads once on first use. Small Marian models can loop on repeated words, so generation is bounded (`max_new_tokens`, `repetition_penalty`, `no_repeat_ngram_size`) and `collapseRepeats()` trims runs of more than 3 repeats — also applied when translations are displayed, which fixes older saved ones.
+
+---
+
 ## Theme System
 
 6 built-in themes: `blue`, `midnight`, `violet`, `emerald`, `red`, `amber`.

@@ -32,6 +32,38 @@ export type TranslateProgress = {
 
 const pipelineCache = new Map<string, Promise<any>>();
 
+/**
+ * Small Marian models can loop on repeated words (ください ください → "please" × 100).
+ * Keep generation bounded and discourage repeats; `collapseRepeats` cleans up what slips through.
+ */
+function generateOptions(text: string) {
+  return { max_new_tokens: Math.min(128, text.length * 4 + 16), repetition_penalty: 1.3, no_repeat_ngram_size: 4 };
+}
+
+/** Collapse a word or short phrase repeated more than 3 times in a row to 3. */
+export function collapseRepeats(text: string): string {
+  const words = text.split(/\s+/).filter(Boolean);
+  const norm = (w: string) => w.toLowerCase().replace(/[^\p{L}\p{N}']/gu, "");
+  for (let n = 1; n <= 4; n++) {
+    const out: string[] = [];
+    for (let i = 0; i < words.length; ) {
+      const gram = words.slice(i, i + n).map(norm).join(" ");
+      let reps = 1;
+      while (
+        i + (reps + 1) * n <= words.length &&
+        words.slice(i + reps * n, i + (reps + 1) * n).map(norm).join(" ") === gram
+      )
+        reps++;
+      const keep = gram && reps > 3 ? 3 : reps;
+      out.push(...words.slice(i, i + keep * n));
+      i += reps * n;
+    }
+    // Finish a collapsed run cleanly ("please, please, please," → "please, please, please").
+    words.splice(0, words.length, ...out);
+  }
+  return words.join(" ").replace(/[,;]\s*$/, "");
+}
+
 function normalizeLang(code: string): string {
   return code.split("-")[0].toLowerCase();
 }
@@ -81,10 +113,10 @@ export async function translateToEnglish(
   }
 
   const translator = await getTranslator(modelId, onProgress);
-  const out = await translator(trimmed);
+  const out = await translator(trimmed, generateOptions(trimmed));
   const first = Array.isArray(out) ? out[0] : out;
   if (first && typeof first === "object" && "translation_text" in first) {
-    return String((first as { translation_text: unknown }).translation_text);
+    return collapseRepeats(String((first as { translation_text: unknown }).translation_text));
   }
   throw new Error("Unexpected translation output shape");
 }
@@ -109,10 +141,10 @@ export async function translateLinesToEnglish(
       results.push("");
       continue;
     }
-    const out = await translator(trimmed);
+    const out = await translator(trimmed, generateOptions(trimmed));
     const first = Array.isArray(out) ? out[0] : out;
     if (first && typeof first === "object" && "translation_text" in first) {
-      results.push(String((first as { translation_text: unknown }).translation_text));
+      results.push(collapseRepeats(String((first as { translation_text: unknown }).translation_text)));
     } else {
       results.push("");
     }
