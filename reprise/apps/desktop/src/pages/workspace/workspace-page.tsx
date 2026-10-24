@@ -133,9 +133,9 @@ function Workspace({ songId }: { songId: string }) {
   const nowMs = player.currentTime * 1000;
   const playingLineId = player.isPlaying ? lines[player.currentLineIndex]?.id ?? null : null;
 
-  // ── Vocal map (breath marks, long phrases, high notes) ──────────────────
+  // ── Vocal map (long phrases, high notes) ─────────────────────────────────
   const [vocalMap, setVocalMap] = useState<VocalMap | null>(null);
-  const [showBreathMap, setShowBreathMap] = useState(true);
+  const [showHints, setShowHints] = useState(true);
   useEffect(() => {
     let cancelled = false;
     loadVocalMap(song)
@@ -262,10 +262,17 @@ function Workspace({ songId }: { songId: string }) {
     (n: number) => {
       const hl = highlights[n - 1];
       if (!cursorLine || !hl) return;
-      if (selEnd <= selStart) return say("Select some words first — drag, or Shift+←/→");
+      if (selEnd <= selStart) {
+        // A breath goes at a point: mark the character just before the caret.
+        if (hl.id === "breath" && cursorText.length > 0) {
+          const at = Math.max(0, Math.min(cursorText.length - 1, focus - 1));
+          return void edits.annotate(cursorLine.id, at, at + 1, hl.id, hl.name);
+        }
+        return say("Select some words first — drag, or Shift+←/→");
+      }
       edits.annotate(cursorLine.id, selStart, selEnd, hl.id, hl.name);
     },
-    [highlights, cursorLine, selStart, selEnd, edits, say],
+    [highlights, cursorLine, cursorText, focus, selStart, selEnd, edits, say],
   );
 
   const clearMarks = useCallback(async () => {
@@ -449,7 +456,7 @@ function Workspace({ songId }: { songId: string }) {
       { id: "section", group: "Lyrics", featured: true, label: cursorLine && sections.some((s) => s.start_line_order === cursorLine.order) ? "Rename this section" : "Start a section at this line", shortcut: "#", run: startSectionEdit },
       ...(cursorSection ? [{ id: "section-rm", group: "Lyrics", label: `Remove section “${cursorSection.name}”`, run: () => edits.removeSection(cursorSection) }] : []),
       { id: "lyrics", group: "Lyrics", label: "Import / paste lyrics…", run: () => navigate(`/song/${songId}/lyrics`) },
-      { id: "breath", group: "View", label: showBreathMap ? "Hide breath map" : "Show breath map", run: () => setShowBreathMap((v) => !v) },
+      { id: "hints", group: "View", label: showHints ? "Hide song hints (long phrases, high notes)" : "Show song hints (long phrases, high notes)", run: () => setShowHints((v) => !v) },
       { id: "view", group: "View", label: view === "lyrics" ? "Switch to lead sheet (chords)" : "Switch to lyrics", run: () => setView((v) => (v === "lyrics" ? "lead" : "lyrics")) },
       { id: "play", group: "Play", label: player.isPlaying ? "Pause" : "Play", shortcut: "Space", run: player.togglePlay },
       { id: "play-line", group: "Play", label: "Play from selected line", shortcut: "Enter", featured: true, run: () => cursorLine && playLine(cursorLine.id) },
@@ -466,7 +473,7 @@ function Workspace({ songId }: { songId: string }) {
       { id: "keys", group: "Help", label: "Keyboard shortcuts", shortcut: "?", featured: true, run: () => setShortcutsOpen(true) },
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [highlights, selStart, selEnd, cursorLine, cursorSection, sections, view, showBreathMap, player.isPlaying, player.loopEnabled, tracks, canUndo, canRedo, edits]);
+  }, [highlights, selStart, selEnd, cursorLine, cursorSection, sections, view, showHints, player.isPlaying, player.loopEnabled, tracks, canUndo, canRedo, edits]);
 
   // ── Derived display ──────────────────────────────────────────────────────
   const loopLineIds = useMemo(() => {
@@ -536,13 +543,13 @@ function Workspace({ songId }: { songId: string }) {
         </div>
         {view === "lyrics" && vocalMap && (
           <button
-            onClick={() => setShowBreathMap((v) => !v)}
-            title="Where the original singer breathes (’ blue = breath, amber = quick breath), long phrases and the highest notes"
+            onClick={() => setShowHints((v) => !v)}
+            title="Mark the song's highest notes and long phrases (from the original vocal)"
             className={`px-[8px] py-[3px] text-[11px] font-medium rounded-[6px] border cursor-pointer ${
-              showBreathMap ? "bg-[var(--theme-light)] text-[var(--theme-text)] border-transparent" : "bg-transparent text-[var(--text-muted)] border-[var(--border)]"
+              showHints ? "bg-[var(--theme-light)] text-[var(--theme-text)] border-transparent" : "bg-transparent text-[var(--text-muted)] border-[var(--border)]"
             }`}
           >
-            Breath map
+            Song hints
           </button>
         )}
         <div ref={setModeTabsEl} className={view === "lead" ? "" : "hidden"} />
@@ -664,7 +671,7 @@ function Workspace({ songId }: { songId: string }) {
                 translationByOrder={translationByOrder}
                 highlights={highlights}
                 vocalMap={vocalMap}
-                showBreathMap={showBreathMap}
+                showHints={showHints}
                 cursor={cursor ? { ...cursor, anchor, focus } : null}
                 editingLineId={editingLineId}
                 sectionEdit={sectionEdit}
@@ -711,6 +718,10 @@ function Workspace({ songId }: { songId: string }) {
                     : "idle"
           }
           highlights={highlights}
+          breathKey={(() => {
+            const i = highlights.findIndex((h) => h.id === "breath");
+            return i >= 0 && i < 9 ? i + 1 : null;
+          })()}
           onMark={annotate}
           onShowAll={() => setShortcutsOpen(true)}
         />

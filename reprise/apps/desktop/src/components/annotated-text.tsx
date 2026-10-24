@@ -9,8 +9,6 @@ interface Props {
   className?: string;
   /** Full-line ruby HTML for `text`. Used to show furigana on non-annotated segments. */
   lineFuriganaHtml?: string;
-  /** Character positions in `text` to draw a breath mark before (with a tooltip each). */
-  breathMarks?: { pos: number; title: string }[];
   /** Keyboard selection [start, end) to highlight. */
   selection?: [number, number];
   /** Caret position to draw (character index, 0..text.length). */
@@ -132,7 +130,7 @@ function splitAtMarks(segments: Segment[], unsorted: number[]): Segment[] {
   return out;
 }
 
-/** Decorations (breath marks, caret) carry this attribute so selection offsets can skip them. */
+/** Decorations (the caret) carry this attribute so selection offsets can skip them. */
 export const NON_TEXT_ATTR = "data-nontext";
 
 const caretEl = (key: string) => (
@@ -144,11 +142,10 @@ const caretEl = (key: string) => (
 );
 
 export function AnnotatedText({
-  text, annotations, highlights, onClickAnnotation, className, lineFuriganaHtml, breathMarks, selection, caret,
+  text, annotations, highlights, onClickAnnotation, className, lineFuriganaHtml, selection, caret,
 }: Props) {
-  const marks = breathMarks ?? [];
   const sel = selection && selection[1] > selection[0] ? selection : null;
-  const bounds = marks.map((m) => m.pos);
+  const bounds: number[] = [];
   if (sel) bounds.push(sel[0], sel[1]);
   if (caret != null) bounds.push(caret);
   const segments = splitAtMarks(buildSegments(text, annotations), bounds);
@@ -157,7 +154,6 @@ export function AnnotatedText({
   return (
     <span className={className}>
       {segments.map((seg, i) => {
-        const mark = marks.find((m) => m.pos === seg.charStart && m.pos > 0);
         let node = renderSegment(seg, i);
         if (sel && seg.charStart >= sel[0] && seg.charStart < sel[1]) {
           node = (
@@ -167,19 +163,10 @@ export function AnnotatedText({
           );
         }
         const withCaret = caret != null && caret === seg.charStart;
-        if (!mark && !withCaret) return node;
+        if (!withCaret) return node;
         return (
           <span key={i}>
-            {mark && (
-              <span
-                {...{ [NON_TEXT_ATTR]: "" }}
-                className="inline-block mx-[3px] text-sky-600 font-bold leading-none align-[0.35em] select-none"
-                title={mark.title}
-              >
-                ’
-              </span>
-            )}
-            {withCaret && caretEl("c")}
+            {caretEl("c")}
             {node}
           </span>
         );

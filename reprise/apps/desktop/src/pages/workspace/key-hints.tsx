@@ -20,11 +20,14 @@ const Hint = ({ k, label }: { k: React.ReactNode; label: string }) => (
 export function KeyHints({
   mode,
   highlights,
+  breathKey,
   onMark,
   onShowAll,
 }: {
   mode: "idle" | "selection" | "editing" | "recording" | "lead";
   highlights: HighlightType[];
+  /** Number key of the "Breath mark" type — works at the caret, no selection needed. */
+  breathKey: number | null;
   /** Mark the selection with highlight #n (1-based) — the chips are clickable too. */
   onMark: (n: number) => void;
   onShowAll: () => void;
@@ -81,6 +84,7 @@ export function KeyHints({
         <Hint k={<Key>L</Key>} label="loop" />
         <Hint k={<Key>R</Key>} label="record" />
         <Hint k={<><Key>Shift</Key><Key>→</Key></>} label="select words to mark" />
+        {breathKey != null && <Hint k={<Key>{breathKey}</Key>} label="breath mark here" />}
         <Hint k={<Key>#</Key>} label="new section" />
       </>
     );

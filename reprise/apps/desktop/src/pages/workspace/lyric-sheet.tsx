@@ -189,30 +189,11 @@ const LineRow = memo(function LineRow({
             />
           ) : (
             <div className={`text-[15px] leading-[1.65] ${isPlaying ? "text-[var(--theme-text)] font-medium" : "text-[var(--text-primary)]"}`}>
-              {info?.breathBefore && (
-                <span
-                  {...{ [NON_TEXT_ATTR]: "" }}
-                  className={`inline-block mr-[5px] font-bold leading-none align-[0.35em] select-none ${
-                    info.breathBefore.quick ? "text-amber-600" : "text-sky-600/35"
-                  }`}
-                  title={
-                    info.breathBefore.quick
-                      ? `Quick breath — the original singer has only ${((info.breathBefore.endMs - info.breathBefore.startMs) / 1000).toFixed(1)} s`
-                      : `Breathe before this line (${((info.breathBefore.endMs - info.breathBefore.startMs) / 1000).toFixed(1)} s gap)`
-                  }
-                >
-                  ’
-                </span>
-              )}
               <AnnotatedText
                 text={text}
                 annotations={line.annotations}
                 highlights={highlights}
                 lineFuriganaHtml={line.custom_text ? line.custom_furigana_html : line.furigana_html}
-                breathMarks={info?.midBreaths.map((m) => ({
-                  pos: m.pos,
-                  title: `${m.breath.quick ? "Quick breath" : "Breath"} inside the line (${((m.breath.endMs - m.breath.startMs) / 1000).toFixed(1)} s)`,
-                }))}
                 selection={selection}
                 caret={isCursor && anchor === focus ? focus : undefined}
               />
@@ -324,7 +305,7 @@ export interface LyricSheetProps {
   translationByOrder: Map<number, string>;
   highlights: HighlightType[];
   vocalMap: VocalMap | null;
-  showBreathMap: boolean;
+  showHints: boolean;
   cursor: Cursor | null;
   editingLineId: string | null;
   sectionEdit: SectionEdit | null;
@@ -355,9 +336,9 @@ export function LyricSheet(p: LyricSheetProps) {
   // Vocal info only changes with the map or the lines — not on every playback frame.
   const infos = useMemo(() => {
     const m = new Map<string, LineVocalInfo | null>();
-    if (p.vocalMap && p.showBreathMap) for (const l of p.lines) m.set(l.id, lineVocalInfo(p.vocalMap, l, displayText(l)));
+    if (p.vocalMap && p.showHints) for (const l of p.lines) m.set(l.id, lineVocalInfo(p.vocalMap, l));
     return m;
-  }, [p.vocalMap, p.showBreathMap, p.lines]);
+  }, [p.vocalMap, p.showHints, p.lines]);
 
   return (
     <div className="flex flex-col pb-[40vh]">

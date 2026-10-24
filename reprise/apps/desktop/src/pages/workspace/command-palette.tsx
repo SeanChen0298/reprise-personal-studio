@@ -104,7 +104,7 @@ const SHORTCUTS: [string, [string, string][]][] = [
     ["Esc", "Clear selection, then pause"],
   ]],
   ["Mark", [
-    ["1 – 9", "Mark the selection (falsetto, breath, …); again to remove"],
+    ["1 – 9", "Mark the selection (falsetto, …); again to remove — Breath mark works at the caret"],
     ["0 / Delete", "Remove marks in the selection (or under the caret)"],
     ["F2 / double-click", "Edit the line's text"],
     ["#", "Start a section here (or rename it)"],
