@@ -25,7 +25,7 @@ export const COOKIES_EXPIRED_MESSAGE =
   "3. Save to C:/Reprise/cookies.txt\n" +
   "4. Try again";
 
-function isBotDetectionError(stderr: string): boolean {
+export function isBotDetectionError(stderr: string): boolean {
   return (
     stderr.includes("Sign in to confirm") ||
     stderr.includes("not a bot") ||

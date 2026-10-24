@@ -55,6 +55,23 @@ export function Sidebar() {
             <circle cx="18" cy="16" r="3" />
           </svg>
         )}
+        {navItem(
+          "/discover",
+          "Discover",
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
+          </svg>
+        )}
       </nav>
 
       {/* Task queue panel */}

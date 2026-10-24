@@ -28,6 +28,7 @@ class RepriseDB extends Dexie {
   lines!: Table<Row, string>;
   recordings!: Table<Row, string>;
   sections!: Table<Row, string>;
+  suggestions!: Table<Row, string>;
   meta!: Table<MetaRow, string>;
 
   constructor() {
@@ -38,6 +39,10 @@ class RepriseDB extends Dexie {
       recordings: "id, song_id, line_id",
       sections: "id, song_id",
       meta: "key",
+    });
+    // v2: YouTube song suggestions (Discover page), keyed by video id.
+    this.version(2).stores({
+      suggestions: "video_id, status, batch_id",
     });
   }
 }
@@ -213,6 +218,27 @@ export const localDb = {
   async deleteSection(id: string): Promise<Result> {
     try {
       await dexie.sections.delete(id);
+      return ok(null);
+    } catch (e) {
+      return fail(e);
+    }
+  },
+
+  // ---- suggestions (Discover) -----------------------------------------
+  async getAllSuggestions(): Promise<Row[]> {
+    return dexie.suggestions.toArray();
+  },
+  async putSuggestions(rows: Row[]): Promise<Result> {
+    try {
+      await dexie.suggestions.bulkPut(rows);
+      return ok(null);
+    } catch (e) {
+      return fail(e);
+    }
+  },
+  async updateSuggestion(videoId: string, patch: Row): Promise<Result> {
+    try {
+      await dexie.suggestions.update(videoId, patch);
       return ok(null);
     } catch (e) {
       return fail(e);

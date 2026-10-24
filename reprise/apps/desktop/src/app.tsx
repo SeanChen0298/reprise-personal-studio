@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useSongStore } from "./stores/song-store";
 import { useTaskQueueProcessor } from "./hooks/use-task-queue-processor";
 import { useAutoProcess } from "./hooks/use-auto-process";
+import { useSuggestionsPreload } from "./hooks/use-suggestions-preload";
 import { ProtectedRoute } from "./components/protected-route";
 import { LibraryPage } from "./pages/library-page";
 import { ImportUrlPage } from "./pages/import-url-page";
@@ -14,6 +15,7 @@ import { SettingsPage } from "./pages/settings-page";
 import { PracticePage } from "./pages/practice";
 import { TimestampPage } from "./pages/timestamp-page";
 import { RecordingsPage } from "./pages/recordings-page";
+import { DiscoverPage } from "./pages/discover-page";
 
 export function App() {
   const loadAllData = useSongStore((s) => s.loadAllData);
@@ -26,6 +28,7 @@ export function App() {
 
   useTaskQueueProcessor();
   useAutoProcess();
+  useSuggestionsPreload();
 
   return (
     <BrowserRouter>
@@ -47,6 +50,14 @@ export function App() {
           element={
             <ProtectedRoute>
               <LibraryPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/discover"
+          element={
+            <ProtectedRoute>
+              <DiscoverPage />
             </ProtectedRoute>
           }
         />
