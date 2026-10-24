@@ -453,7 +453,7 @@ function SectionHeading({
 }: {
   section: Section;
   /** From the song card: how this section should feel. */
-  intent?: { mood: string; intent: string };
+  intent?: { mood: string; intent: string; voice?: { register: string; placement: string; image: string } };
   active: boolean;
   renaming: boolean;
   onClick: () => void;
@@ -496,9 +496,56 @@ function SectionHeading({
         </div>
       )}
       {intent && !renaming && (
-        <div className="basis-full text-[11.5px] italic text-[var(--text-muted)] leading-snug -mt-[2px]" title="From the song card">
-          {intent.mood && <span className="not-italic text-[var(--text-secondary)]">{intent.mood} · </span>}
-          {intent.intent}
+        <div
+          className="basis-full flex flex-wrap items-center gap-x-[6px] gap-y-[2px] text-[11px] leading-snug text-[var(--text-muted)] -mt-[1px]"
+          title={intent.voice?.image ? `Imagine: ${intent.voice.image}` : "From the song card"}
+        >
+          {intent.mood && <span>{intent.mood}</span>}
+          {intent.voice?.register && <span className="px-[5px] rounded-[3px] bg-[var(--bg)] border border-[var(--border-subtle)]">{intent.voice.register}</span>}
+          {intent.voice?.placement && <span className="px-[5px] rounded-[3px] bg-[var(--bg)] border border-[var(--border-subtle)]">{intent.voice.placement}</span>}
+          {intent.intent && <span className="italic">— {intent.intent}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const ABOUT_OPEN_KEY = "reprise-song-about-open";
+
+/** One quiet line above the lyrics; the summary only when you open it (remembered). */
+function SongAbout({ summary, mood, onOpenCoach }: { summary: string; mood: string; onOpenCoach: () => void }) {
+  const [open, setOpen] = useState(() => {
+    try {
+      return localStorage.getItem(ABOUT_OPEN_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggle = () => {
+    setOpen((v) => {
+      try {
+        localStorage.setItem(ABOUT_OPEN_KEY, v ? "0" : "1");
+      } catch {
+        /* per-machine convenience only */
+      }
+      return !v;
+    });
+  };
+  return (
+    <div className="mx-7 mb-3">
+      <button
+        onClick={toggle}
+        className="flex items-center gap-[6px] text-[11.5px] text-[var(--text-muted)] hover:text-[var(--text-primary)] bg-transparent border-none p-0 cursor-pointer"
+      >
+        <svg width="7" height="7" viewBox="0 0 24 24" fill="currentColor" className={`transition-transform ${open ? "rotate-90" : ""}`}><polygon points="6,3 20,12 6,21" /></svg>
+        About this song{mood && <span className="text-[var(--text-secondary)]"> · {mood}</span>}
+      </button>
+      {open && (
+        <div className="mt-[6px] pl-[13px] border-l-2 border-[var(--border-subtle)] text-[12.5px] leading-snug text-[var(--text-secondary)]">
+          {summary}{" "}
+          <button onClick={onOpenCoach} className="text-[11.5px] text-[var(--theme)] bg-transparent border-none p-0 cursor-pointer hover:underline">
+            full card (G)
+          </button>
         </div>
       )}
     </div>
@@ -563,16 +610,7 @@ export function LyricSheet(p: LyricSheetProps) {
 
   return (
     <div className="flex flex-col pb-[40vh]">
-      {p.songCard?.summary && (
-        <button
-          onClick={p.onOpenCoach}
-          title="From your coach's song card — click to open the coach (G)"
-          className="mx-7 mb-2 text-left px-4 py-3 rounded-[10px] border border-[var(--border-subtle)] bg-[var(--surface)] hover:border-[var(--border)] cursor-pointer"
-        >
-          <div className="text-[13px] leading-snug text-[var(--text-primary)]">{p.songCard.summary}</div>
-          {p.songCard.mood && <div className="text-[11.5px] text-[var(--text-muted)] mt-1">Mood · {p.songCard.mood}</div>}
-        </button>
-      )}
+      {p.songCard?.summary && <SongAbout summary={p.songCard.summary} mood={p.songCard.mood} onOpenCoach={p.onOpenCoach} />}
       {p.lines.map((line) => {
         const sec = sectionAt.get(line.order);
         const isCursor = p.cursor?.lineId === line.id;

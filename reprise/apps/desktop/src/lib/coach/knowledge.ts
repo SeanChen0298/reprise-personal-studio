@@ -18,12 +18,28 @@ const MAX_SAVED_TURNS = 40;
 export const MAX_SINGER_FACTS = 20;
 export const MAX_SONG_MEMORY = 15;
 
+/** Where a sound sits (resonance) and which register carries it — the coach's fixed vocabulary. */
+export const REGISTERS = ["chest", "mix", "head", "falsetto", "breathy"] as const;
+export const PLACEMENTS = ["forward", "nasal", "top", "back", "chest"] as const;
+
+export interface VoiceSpec {
+  register: string;
+  placement: string;
+  /** A picture to imagine to find the sound. */
+  image: string;
+}
+
 export interface SongCard {
   summary: string;
-  story: string;
+  /** Short, e.g. "resigned → grateful release". */
   mood: string;
-  sections: { name: string; mood: string; intent: string }[];
+  /** The story in steps, each tied to lines. (Older cards have `story` text instead.) */
+  arc: { lines: string; text: string }[];
+  story: string;
+  sections: { name: string; mood: string; intent: string; voice?: VoiceSpec }[];
   singer: { name: string; style: string; techniques: string[] };
+  /** Key techniques for this song, each with where, how it should sit, and a drill. */
+  techniques: { name: string; lines: string; register: string; placement: string; image: string; drill: string }[];
   practice_focus: string[];
 }
 
@@ -59,15 +75,19 @@ export async function loadKnowledge(song: Song): Promise<SongKnowledge> {
   try {
     if (song.audio_folder) {
       const path = `${song.audio_folder}/coach.json`;
-      if (await exists(path)) return { ...EMPTY, ...JSON.parse(await readTextFile(path)) };
+      if (await exists(path)) return withCard({ ...EMPTY, ...JSON.parse(await readTextFile(path)) });
       return { ...EMPTY };
     }
     const v = (await localDb.getMeta(`coach:${song.id}`)) as SongKnowledge | undefined;
-    return v ? { ...EMPTY, ...v } : { ...EMPTY };
+    return v ? withCard({ ...EMPTY, ...v }) : { ...EMPTY };
   } catch (err) {
     console.warn("[coach] couldn't read song knowledge:", err);
     return { ...EMPTY };
   }
+}
+
+function withCard(k: SongKnowledge): SongKnowledge {
+  return { ...k, card: k.card ? normaliseCard(k.card as unknown as Record<string, unknown>) : null };
 }
 
 export async function saveKnowledge(song: Song, k: SongKnowledge): Promise<void> {
@@ -100,10 +120,22 @@ function knowledgeMarkdown(song: Song, k: SongKnowledge): string {
   const out: string[] = [`# ${song.title} — ${song.artist}`, ""];
   if (k.card) {
     const c = k.card;
-    out.push(`> ${c.summary}`, "", `**Mood:** ${c.mood}`, "", "## Story", c.story, "", "## Sections");
-    for (const s of c.sections) out.push(`- **${s.name}** (${s.mood}) — ${s.intent}`);
-    out.push("", `## ${c.singer.name}'s style`, c.singer.style);
+    out.push(`> ${c.summary}`, "", `**Mood:** ${c.mood}`, "", "## Story");
+    if (c.arc.length) for (const a of c.arc) out.push(`- ${a.lines ? `**${a.lines}** ` : ""}${a.text}`);
+    else out.push(c.story);
+    out.push("", "## Sections");
+    for (const s of c.sections) {
+      const v = s.voice ? ` · ${[s.voice.register, s.voice.placement].filter(Boolean).join(", ")}` : "";
+      out.push(`- **${s.name}** (${s.mood}${v}) — ${s.intent}${s.voice?.image ? ` _Imagine: ${s.voice.image}_` : ""}`);
+    }
+    out.push("", `## ${c.singer.name}'s voice`, c.singer.style);
     for (const t of c.singer.techniques) out.push(`- ${t}`);
+    if (c.techniques.length) {
+      out.push("", "## Techniques");
+      for (const t of c.techniques) {
+        out.push(`- **${t.name}**${t.lines ? ` (${t.lines})` : ""} — ${[t.register, t.placement].filter(Boolean).join(", ")}. Imagine: ${t.image} Drill: ${t.drill}`);
+      }
+    }
     out.push("", "## Practice focus");
     for (const p of c.practice_focus) out.push(`- ${p}`);
     if (k.card_sources.length) {
@@ -143,9 +175,15 @@ export function buildContext(opts: {
   );
   if (knowledge.card) {
     const c = knowledge.card;
-    out.push("", "SONG CARD (written earlier):", `Summary: ${c.summary}`, `Mood: ${c.mood}`, `Story: ${c.story}`);
-    for (const s of c.sections) out.push(`- ${s.name}: ${s.mood} — ${s.intent}`);
+    out.push("", "SONG CARD (written earlier):", `Summary: ${c.summary}`, `Mood: ${c.mood}`);
+    if (c.arc.length) out.push(`Arc: ${c.arc.map((a) => `${a.lines} ${a.text}`).join(" / ")}`);
+    else if (c.story) out.push(`Story: ${c.story}`);
+    for (const s of c.sections) {
+      const v = s.voice ? ` [${[s.voice.register, s.voice.placement].filter(Boolean).join(", ")}]` : "";
+      out.push(`- ${s.name}: ${s.mood}${v} — ${s.intent}`);
+    }
     out.push(`Original singer: ${c.singer.name} — ${c.singer.style}`);
+    for (const t of c.techniques) out.push(`Technique: ${t.name} (${t.lines}) — ${t.register}, ${t.placement}`);
   }
   out.push(
     "",
@@ -258,20 +296,44 @@ export function parseSongCard(text: string): SongCard | null {
   const end = text.lastIndexOf("}");
   if (start < 0 || end <= start) return null;
   try {
-    const raw = JSON.parse(text.slice(start, end + 1));
-    const str = (v: unknown) => (typeof v === "string" ? v : "");
-    const arr = (v: unknown) => (Array.isArray(v) ? v.filter((x) => typeof x === "string") : []);
-    return {
-      summary: str(raw.summary),
-      story: str(raw.story),
-      mood: str(raw.mood),
-      sections: Array.isArray(raw.sections)
-        ? raw.sections.map((s: Record<string, unknown>) => ({ name: str(s?.name), mood: str(s?.mood), intent: str(s?.intent) })).filter((s: { name: string }) => s.name)
-        : [],
-      singer: { name: str(raw.singer?.name), style: str(raw.singer?.style), techniques: arr(raw.singer?.techniques) },
-      practice_focus: arr(raw.practice_focus),
-    };
+    return normaliseCard(JSON.parse(text.slice(start, end + 1)));
   } catch {
     return null;
   }
+}
+
+/** Accepts new and older card shapes (older saved cards have no arc / voice / techniques). */
+export function normaliseCard(raw: Record<string, unknown> | null | undefined): SongCard | null {
+  if (!raw || typeof raw !== "object") return null;
+  const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+  const arr = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+  const objs = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is Record<string, unknown> => !!x && typeof x === "object") : []);
+  const voice = (v: unknown): VoiceSpec | undefined => {
+    if (!v || typeof v !== "object") return undefined;
+    const o = v as Record<string, unknown>;
+    const spec = { register: str(o.register).toLowerCase(), placement: str(o.placement).toLowerCase(), image: str(o.image) };
+    return spec.register || spec.placement || spec.image ? spec : undefined;
+  };
+  const singer = (raw.singer ?? {}) as Record<string, unknown>;
+  return {
+    summary: str(raw.summary),
+    mood: str(raw.mood),
+    arc: objs(raw.arc).map((a) => ({ lines: str(a.lines), text: str(a.text) })).filter((a) => a.text),
+    story: str(raw.story),
+    sections: objs(raw.sections)
+      .map((s) => ({ name: str(s.name), mood: str(s.mood), intent: str(s.intent), voice: voice(s.voice) }))
+      .filter((s) => s.name),
+    singer: { name: str(singer.name), style: str(singer.style), techniques: arr(singer.techniques) },
+    techniques: objs(raw.techniques)
+      .map((t) => ({
+        name: str(t.name),
+        lines: str(t.lines),
+        register: str(t.register).toLowerCase(),
+        placement: str(t.placement).toLowerCase(),
+        image: str(t.image),
+        drill: str(t.drill),
+      }))
+      .filter((t) => t.name),
+    practice_focus: arr(raw.practice_focus),
+  };
 }

@@ -19,6 +19,8 @@ export function CoachSettings() {
   const [test, setTest] = useState<{ provider: CoachProvider; msg: string; ok: boolean } | null>(null);
   const [facts, setFacts] = useState<string[] | null>(null);
   const [newFact, setNewFact] = useState("");
+  /** Typing a model id by hand (e.g. one that isn't listed). */
+  const [otherModel, setOtherModel] = useState<Record<CoachProvider, boolean>>({ gemini: false, claude: false });
 
   useEffect(() => {
     loadProfile().then((p) => setFacts(p.facts));
@@ -129,18 +131,35 @@ export function CoachSettings() {
             />
             <span className="text-[11.5px] text-[var(--text-muted)]">{p.keyHelp}</span>
             <div className="flex items-center gap-2">
-              <select
-                value={s.models[p.key]}
-                onChange={(e) => s.setModel(p.key, e.target.value)}
-                className={`${field} flex-1`}
-                disabled={!s.keys[p.key]}
-              >
-                {!s.models[p.key] && <option value="">Choose a model…</option>}
-                {s.models[p.key] && !models[p.key].includes(s.models[p.key]) && <option value={s.models[p.key]}>{s.models[p.key]}</option>}
-                {models[p.key].map((id) => (
-                  <option key={id} value={id}>{id}</option>
-                ))}
-              </select>
+              {otherModel[p.key] ? (
+                <input
+                  autoFocus
+                  value={s.models[p.key]}
+                  onChange={(e) => s.setModel(p.key, e.target.value.trim())}
+                  onBlur={() => setOtherModel((o) => ({ ...o, [p.key]: false }))}
+                  onKeyDown={(e) => e.key === "Enter" && setOtherModel((o) => ({ ...o, [p.key]: false }))}
+                  placeholder={p.key === "gemini" ? "model id, e.g. gemma-4-31b-it" : "model id"}
+                  className={`${field} flex-1`}
+                  spellCheck={false}
+                />
+              ) : (
+                <select
+                  value={s.models[p.key]}
+                  onChange={(e) => {
+                    if (e.target.value === "__other") setOtherModel((o) => ({ ...o, [p.key]: true }));
+                    else s.setModel(p.key, e.target.value);
+                  }}
+                  className={`${field} flex-1`}
+                  disabled={!s.keys[p.key]}
+                >
+                  {!s.models[p.key] && <option value="">Choose a model…</option>}
+                  {s.models[p.key] && !models[p.key].includes(s.models[p.key]) && <option value={s.models[p.key]}>{s.models[p.key]}</option>}
+                  {models[p.key].map((id) => (
+                    <option key={id} value={id}>{id}</option>
+                  ))}
+                  <option value="__other">Other model… (type its id)</option>
+                </select>
+              )}
               <button
                 onClick={() => void refreshModels(p.key)}
                 disabled={!s.keys[p.key] || loadingModels === p.key}

@@ -1,3 +1,4 @@
+import { SongCardView } from "../../components/song-card-view";
 import { useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-shell";
 import { backupChain, useCoachStore, searchesToday } from "../../stores/coach-store";
@@ -299,23 +300,8 @@ export function CoachPanel({
             </p>
           ) : (
             cardOpen && (
-              <div className="mt-2 flex flex-col gap-2 text-[12.5px] leading-snug text-[var(--text-secondary)]">
-                <p className="text-[13px] text-[var(--text-primary)]">{card.summary}</p>
-                <p><span className="text-[var(--text-muted)]">Mood · </span>{card.mood}</p>
-                <p>{card.story}</p>
-                {card.sections.length > 0 && (
-                  <ul className="flex flex-col gap-[3px]">
-                    {card.sections.map((s, i) => (
-                      <li key={i}><strong className="text-[var(--text-primary)]">{s.name}</strong> <span className="text-[var(--text-muted)]">({s.mood})</span> — {s.intent}</li>
-                    ))}
-                  </ul>
-                )}
-                {card.singer.name && (
-                  <p><span className="text-[var(--text-muted)]">{card.singer.name} · </span>{card.singer.style}</p>
-                )}
-                {card.practice_focus.length > 0 && (
-                  <p><span className="text-[var(--text-muted)]">Practise · </span>{card.practice_focus.join(" · ")}</p>
-                )}
+              <div className="mt-3">
+                <SongCardView card={card} />
                 <Sources sources={knowledge.card_sources} />
               </div>
             )

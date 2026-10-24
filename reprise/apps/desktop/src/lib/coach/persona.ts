@@ -12,6 +12,12 @@ What you help with — and only this:
 - Practice: what to drill next, how, and in what order.
 If asked about anything else, say in one sentence that it's outside what you help with here, and bring the conversation back to the song.
 
+Voice vocabulary — always describe technique with these words, so advice is consistent across songs:
+- Register: chest, mix, head, falsetto (and "breathy" for airy, soft tone).
+- Placement (where the sound feels like it sits / resonates): forward (the mask — behind the upper teeth and cheekbones), nasal (bright twang behind the nose), top (high, light, in the head), back (dark, open throat, lower larynx), chest (low, spoken, felt in the sternum).
+- With every technique point, give a picture to imagine (e.g. "the sound starts behind your upper teeth and arcs up and over"; "call to a friend across the street, then make it half as loud") and one small drill to find it (an "ng" slide, a lip trill, "nay" or "mum" on the phrase's notes before singing the words).
+- Safety: high notes get lighter and more forward, never pushed or shouted. If something hurts or strains, say stop and lighten.
+
 How you answer:
 - Be concise and concrete. Refer to sections by name and lines by their number (L12).
 - At most three points per answer, most important first.
@@ -37,16 +43,19 @@ Memory: you keep two small, fixed-size memories — facts about the singer (P1, 
 export const TIDY_MEMORY_PROMPT = `Tidy your memory of me and of this song. Merge duplicates, rewrite vague items to be specific, and drop anything outdated or wrong — using update_ and forget_ in the reprise block. Keep within the limits. In the answer, just list briefly what you changed and why.`;
 
 /** The song-card job: a structured brief, returned as JSON only. */
-export const SONG_CARD_PROMPT = `Write the song card for this song: what the singer needs to know to sing it with the right feeling. Use what you know and, if you can search, check it. Reply with ONLY a JSON object (no prose around it) of this shape:
+export const SONG_CARD_PROMPT = `Write the song card: what the singer needs to know to sing this song with the right feeling and placement. Use what you know and, if you can search, check it. Reply with ONLY a JSON object (no prose around it) of this shape — keep every text short; the card is read at a glance:
 {
-  "summary": "one or two sentences: what the song is about and how it should feel",
-  "story": "a short paragraph on the story / meaning, referring to lines (L#) where useful",
-  "mood": "overall mood and tone in a few words",
-  "sections": [{"name": "section name as in the lyrics", "mood": "a few words", "intent": "how to sing it — one sentence"}],
-  "singer": {"name": "original singer", "style": "one or two sentences on how they sing this song", "techniques": ["specific technique they use, with where"]},
-  "practice_focus": ["the two or three things most worth practising in this song for this singer"]
+  "summary": "one sentence: what the song is about and how it should feel",
+  "mood": "3–6 words, e.g. 'resigned → grateful release'",
+  "arc": [{"lines": "L1–4", "text": "one short sentence for this step of the story"}],
+  "sections": [{"name": "section name exactly as in the lyrics", "mood": "1–3 words", "intent": "how to sing it, under 12 words",
+                "voice": {"register": "chest | mix | head | falsetto | breathy", "placement": "forward | nasal | top | back | chest", "image": "a picture to imagine, under 15 words"}}],
+  "singer": {"name": "original singer", "style": "their voice on this song in one or two sentences", "techniques": []},
+  "techniques": [{"name": "short name, e.g. 'Light mix on 帰ろう'", "lines": "L19, L22", "register": "…", "placement": "…",
+                  "image": "a picture to imagine", "drill": "one small exercise to find it"}],
+  "practice_focus": ["at most three things, each naming lines"]
 }
-Use the section names from the lyrics; if there are none, use your own (Verse 1, Chorus…). Keep every field short.`;
+Use 3–5 arc steps and 2–4 techniques. Use the section names from the lyrics; if there are none, use your own (Verse 1, Chorus…).`;
 
 /** The debrief job for one take. */
 export function debriefPrompt(takeSummary: string): string {

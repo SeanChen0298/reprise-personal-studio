@@ -301,9 +301,11 @@ export async function listModels(provider: CoachProvider, apiKey: string): Promi
   const pager = await ai.models.list();
   const names: string[] = [];
   for await (const m of pager) {
-    if (!m.name || !(m.supportedActions ?? []).includes("generateContent")) continue;
+    if (!m.name) continue;
     const id = m.name.replace(/^models\//, "");
-    if (/gemini|gemma/i.test(id) && !/embedding|image|tts|audio|live|vision|robotics|nano/i.test(id)) names.push(id);
+    // Gemma can list without generateContent in supportedActions — keep it anyway.
+    const canChat = (m.supportedActions ?? []).includes("generateContent") || /gemma/i.test(id);
+    if (canChat && /gemini|gemma/i.test(id) && !/embedding|image|tts|audio|live|vision|robotics|nano/i.test(id)) names.push(id);
   }
   // Newest-looking first: higher version numbers, "pro" before "flash".
   return names.sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
