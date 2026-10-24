@@ -14,6 +14,9 @@ const REPRISE_ROOT = "C:/Reprise";
 const PROFILE_PATH = `${REPRISE_ROOT}/coach-profile.json`;
 /** Turns kept in the saved conversation (older ones live on as "remember" insights). */
 const MAX_SAVED_TURNS = 40;
+/** Memory is a fixed size: the coach must merge or replace items once it's full. */
+export const MAX_SINGER_FACTS = 20;
+export const MAX_SONG_MEMORY = 15;
 
 export interface SongCard {
   summary: string;
@@ -30,7 +33,14 @@ export interface SongKnowledge {
   card_made_at?: string;
   /** Lasting insights about this song, approved by the singer. */
   memory: string[];
-  chat: (CoachTurn & { at: string; sources?: { title: string; url: string }[] })[];
+  chat: (CoachTurn & {
+    at: string;
+    sources?: { title: string; url: string }[];
+    /** How the answer was made: model, time to first words, total time (ms). */
+    model?: string;
+    first_ms?: number;
+    ms?: number;
+  })[];
 }
 
 export interface SingerProfile {
@@ -124,14 +134,22 @@ export function buildContext(opts: {
   const hl = new Map(highlights.map((h) => [h.id, h.name]));
   const out: string[] = [];
   out.push(`SONG: ${song.title} — ${song.artist}${song.language ? ` (${song.language})` : ""}`);
-  if (profile.facts.length) out.push("", "ABOUT THE SINGER:", ...profile.facts.map((f) => `- ${f}`));
+  out.push(
+    "",
+    `ABOUT THE SINGER (memory ${profile.facts.length}/${MAX_SINGER_FACTS}${profile.facts.length >= MAX_SINGER_FACTS ? " — FULL: merge or replace, don't add" : ""}):`,
+    ...(profile.facts.length ? profile.facts.map((f, i) => `P${i + 1}. ${f}`) : ["(nothing yet)"]),
+  );
   if (knowledge.card) {
     const c = knowledge.card;
     out.push("", "SONG CARD (written earlier):", `Summary: ${c.summary}`, `Mood: ${c.mood}`, `Story: ${c.story}`);
     for (const s of c.sections) out.push(`- ${s.name}: ${s.mood} — ${s.intent}`);
     out.push(`Original singer: ${c.singer.name} — ${c.singer.style}`);
   }
-  if (knowledge.memory.length) out.push("", "WHAT WE'VE LEARNED ABOUT THIS SONG:", ...knowledge.memory.map((m) => `- ${m}`));
+  out.push(
+    "",
+    `WHAT WE'VE LEARNED ABOUT THIS SONG (memory ${knowledge.memory.length}/${MAX_SONG_MEMORY}${knowledge.memory.length >= MAX_SONG_MEMORY ? " — FULL: merge or replace, don't add" : ""}):`,
+    ...(knowledge.memory.length ? knowledge.memory.map((m, i) => `S${i + 1}. ${m}`) : ["(nothing yet)"]),
+  );
 
   out.push("", "LYRICS (L# = line number; my marks in [brackets]; my notes after ✎):");
   let current: Section | undefined;
@@ -188,6 +206,18 @@ export interface CoachProposals {
   line_notes: { line: number; note: string }[];
   remember_song: string[];
   remember_singer: string[];
+  /** Rewrite memory items by id ("S2" / "P3"). */
+  update_song: { id: string; text: string }[];
+  update_singer: { id: string; text: string }[];
+  /** Remove memory items by id. */
+  forget_song: string[];
+  forget_singer: string[];
+}
+
+/** "P3" → index 2 (or -1). */
+export function memoryIndex(id: string, prefix: "P" | "S"): number {
+  const m = id.trim().toUpperCase().match(new RegExp(`^${prefix}(\\d+)$`));
+  return m ? Number(m[1]) - 1 : -1;
 }
 
 /** Split a reply into what to show and what it proposes to save. */
@@ -197,14 +227,23 @@ export function parseReply(text: string): { body: string; proposals: CoachPropos
   const body = (text.slice(0, m.index) + text.slice(m.index! + m[0].length)).trim();
   try {
     const raw = JSON.parse(m[1]);
+    const strs = (v: unknown) => (Array.isArray(v) ? v.filter((s): s is string => typeof s === "string") : []);
+    const updates = (v: unknown) =>
+      Array.isArray(v)
+        ? v.filter((u): u is { id: string; text: string } => !!u && typeof u.id === "string" && typeof u.text === "string")
+        : [];
     const proposals: CoachProposals = {
       line_notes: Array.isArray(raw.line_notes)
         ? raw.line_notes.filter((n: unknown) => n && typeof (n as { line: unknown }).line === "number" && typeof (n as { note: unknown }).note === "string")
         : [],
-      remember_song: Array.isArray(raw.remember_song) ? raw.remember_song.filter((s: unknown) => typeof s === "string") : [],
-      remember_singer: Array.isArray(raw.remember_singer) ? raw.remember_singer.filter((s: unknown) => typeof s === "string") : [],
+      remember_song: strs(raw.remember_song),
+      remember_singer: strs(raw.remember_singer),
+      update_song: updates(raw.update_song),
+      update_singer: updates(raw.update_singer),
+      forget_song: strs(raw.forget_song),
+      forget_singer: strs(raw.forget_singer),
     };
-    const any = proposals.line_notes.length || proposals.remember_song.length || proposals.remember_singer.length;
+    const any = Object.values(proposals).some((v) => v.length > 0);
     return { body, proposals: any ? proposals : null };
   } catch {
     return { body, proposals: null };

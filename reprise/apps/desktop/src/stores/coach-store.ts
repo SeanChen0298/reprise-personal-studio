@@ -21,6 +21,8 @@ interface CoachState {
   /** API keys live only in this machine's app storage — never in the library backup. */
   keys: Record<CoachProvider, string>;
   models: Record<CoachProvider, string>;
+  /** Backup model when the main one is busy (Gemini). */
+  fallbackModels: Record<CoachProvider, string>;
   searchMode: SearchMode;
   /** Upper bound per answer (Claude enforces it exactly; Gemini only on/off). */
   maxSearchesPerAnswer: number;
@@ -29,6 +31,7 @@ interface CoachState {
   setProvider: (p: CoachProvider) => void;
   setKey: (p: CoachProvider, key: string) => void;
   setModel: (p: CoachProvider, model: string) => void;
+  setFallbackModel: (p: CoachProvider, model: string) => void;
   setSearchMode: (m: SearchMode) => void;
   setMaxSearchesPerAnswer: (n: number) => void;
   addSearches: (n: number) => void;
@@ -42,12 +45,14 @@ export const useCoachStore = create<CoachState>()(
       provider: "gemini",
       keys: { gemini: "", claude: "" },
       models: { ...DEFAULT_MODELS },
+      fallbackModels: { gemini: "", claude: "" },
       searchMode: "card",
       maxSearchesPerAnswer: 3,
       usage: { date: today(), searches: 0 },
       setProvider: (provider) => set({ provider }),
       setKey: (p, key) => set((s) => ({ keys: { ...s.keys, [p]: key.trim() } })),
       setModel: (p, model) => set((s) => ({ models: { ...s.models, [p]: model } })),
+      setFallbackModel: (p, model) => set((s) => ({ fallbackModels: { ...(s.fallbackModels ?? { gemini: "", claude: "" }), [p]: model } })),
       setSearchMode: (searchMode) => set({ searchMode }),
       setMaxSearchesPerAnswer: (n) => set({ maxSearchesPerAnswer: Math.max(1, Math.min(10, Math.round(n))) }),
       addSearches: (n) => {

@@ -33,6 +33,10 @@ export function CoachSettings() {
         // Gemini: default to the first "pro" model offered; else the first.
         s.setModel(p, list.find((id) => /pro/i.test(id)) ?? list[0]);
       }
+      // A busy / out-of-quota backup: the older 2.5 Flash has its own (larger) free quota.
+      if (p === "gemini" && !s.fallbackModels?.gemini && list.includes("gemini-2.5-flash")) {
+        s.setFallbackModel("gemini", "gemini-2.5-flash");
+      }
     } catch (err) {
       setTest({ provider: p, ok: false, msg: `Couldn't list models: ${err instanceof Error ? err.message : String(err)}` });
     } finally {
@@ -151,6 +155,22 @@ export function CoachSettings() {
                 Test
               </button>
             </div>
+            {p.key === "gemini" && (
+              <label className="flex items-center gap-2 text-[12px] text-[var(--text-secondary)]">
+                <span className="flex-shrink-0">If it's busy or out of free quota, use</span>
+                <select
+                  value={s.fallbackModels?.gemini ?? ""}
+                  onChange={(e) => s.setFallbackModel("gemini", e.target.value)}
+                  className={`${field} flex-1`}
+                  disabled={!s.keys.gemini}
+                >
+                  <option value="">no backup</option>
+                  {models.gemini.filter((id) => id !== s.models.gemini).map((id) => (
+                    <option key={id} value={id}>{id}</option>
+                  ))}
+                </select>
+              </label>
+            )}
             {test?.provider === p.key && (
               <span className={`text-[12px] ${test.ok ? "text-emerald-700" : "text-red-600"}`}>{test.msg}</span>
             )}

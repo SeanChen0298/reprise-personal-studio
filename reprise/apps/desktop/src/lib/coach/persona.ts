@@ -25,7 +25,16 @@ Saving things: when something is worth keeping, propose it at the very end of yo
 \`\`\`reprise
 {"line_notes":[{"line":12,"note":"darker vowel on 帰ろう, don't smile"}],"remember_song":["Verse 2 is the regret before the chorus lets go"],"remember_singer":["Runs short of breath in long phrases"]}
 \`\`\`
-Include only keys you need; omit the block when there's nothing to save. Line notes are short (under 80 characters). "remember_song" is a lasting insight about this song; "remember_singer" is a lasting fact about the singer's voice or habits. The singer approves each item before it's saved.`;
+Include only keys you need; omit the block when there's nothing to save. Line notes are short (under 80 characters). The singer approves each item before it's saved.
+
+Memory: you keep two small, fixed-size memories — facts about the singer (P1, P2, …, at most 20, shared across songs) and insights about this song (S1, S2, …, at most 15). Keep each item one short line and keep them current:
+- "remember_singer" / "remember_song" add a new item — only for lasting things, not one-off remarks.
+- "update_singer" / "update_song" rewrite an item that changed or can absorb a new detail: [{"id":"P3","text":"…"}].
+- "forget_singer" / "forget_song" remove items that are wrong, outdated or duplicated: ["S2"].
+- When a memory is FULL, never add: merge into an existing item with update_, or forget one first.`;
+
+/** Tidy the memories: merge duplicates, drop outdated items, keep within the limits. */
+export const TIDY_MEMORY_PROMPT = `Tidy your memory of me and of this song. Merge duplicates, rewrite vague items to be specific, and drop anything outdated or wrong — using update_ and forget_ in the reprise block. Keep within the limits. In the answer, just list briefly what you changed and why.`;
 
 /** The song-card job: a structured brief, returned as JSON only. */
 export const SONG_CARD_PROMPT = `Write the song card for this song: what the singer needs to know to sing it with the right feeling. Use what you know and, if you can search, check it. Reply with ONLY a JSON object (no prose around it) of this shape:

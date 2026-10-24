@@ -2,14 +2,16 @@ import { useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-shell";
 import { useCoachStore, searchesToday } from "../../stores/coach-store";
 import { askCoach, CoachError } from "../../lib/coach/providers";
-import { COACH_SYSTEM, SONG_CARD_PROMPT } from "../../lib/coach/persona";
+import { COACH_SYSTEM, SONG_CARD_PROMPT, TIDY_MEMORY_PROMPT } from "../../lib/coach/persona";
 import {
+  MAX_SINGER_FACTS,
+  MAX_SONG_MEMORY,
   buildContext,
+  memoryIndex,
   parseReply,
   parseSongCard,
   saveKnowledge,
   saveProfile,
-  type CoachProposals,
   type SingerProfile,
   type SongKnowledge,
 } from "../../lib/coach/knowledge";
@@ -101,6 +103,16 @@ export function CoachPanel({
   const coach = useCoachStore();
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState<null | "card" | "chat">(null);
+  /** The answer so far while it streams in. */
+  const [streaming, setStreaming] = useState("");
+  /** When the current request started — for the live seconds counter. */
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (startedAt == null) return;
+    const t = setInterval(() => tick((n) => n + 1), 200);
+    return () => clearInterval(t);
+  }, [startedAt]);
   const [error, setError] = useState<string | null>(null);
   const [applied, setApplied] = useState<Set<string>>(new Set());
   const [cardOpen, setCardOpen] = useState(true);
@@ -119,6 +131,7 @@ export function CoachPanel({
   const writeCard = async () => {
     if (!knowledge) return;
     setBusy("card");
+    setStartedAt(Date.now());
     setError(null);
     try {
       const r = await askCoach({
@@ -130,6 +143,7 @@ export function CoachPanel({
         history: [],
         prompt: SONG_CARD_PROMPT,
         maxSearches: coach.searchMode === "off" ? null : coach.maxSearchesPerAnswer,
+        fallbackModel: coach.fallbackModels?.[coach.provider],
       });
       coach.addSearches(r.searches);
       const card = parseSongCard(r.text);
@@ -141,6 +155,8 @@ export function CoachPanel({
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(null);
+      setStreaming("");
+      setStartedAt(null);
     }
   };
 
@@ -149,6 +165,8 @@ export function CoachPanel({
     if (!q || !knowledge || busy) return;
     setInput("");
     setBusy("chat");
+    setStreaming("");
+    setStartedAt(Date.now());
     setError(null);
     const at = new Date().toISOString();
     const withQ: SongKnowledge = { ...knowledge, chat: [...knowledge.chat, { role: "user", text: q, at }] };
@@ -163,11 +181,25 @@ export function CoachPanel({
         history: knowledge.chat.slice(-16).map(({ role, text }) => ({ role, text })),
         prompt: q,
         maxSearches: coach.searchMode === "auto" ? coach.maxSearchesPerAnswer : null,
+        fallbackModel: coach.fallbackModels?.[coach.provider],
+        quick: true,
+        onText: setStreaming,
       });
       coach.addSearches(r.searches);
       const next: SongKnowledge = {
         ...withQ,
-        chat: [...withQ.chat, { role: "assistant", text: r.text, at: new Date().toISOString(), sources: r.sources }],
+        chat: [
+          ...withQ.chat,
+          {
+            role: "assistant",
+            text: r.text,
+            at: new Date().toISOString(),
+            sources: r.sources,
+            model: r.model,
+            first_ms: Math.round(r.firstMs),
+            ms: Math.round(r.totalMs),
+          },
+        ],
       };
       setKnowledge(next);
       await saveKnowledge(song, next);
@@ -177,6 +209,8 @@ export function CoachPanel({
       await saveKnowledge(song, withQ);
     } finally {
       setBusy(null);
+      setStreaming("");
+      setStartedAt(null);
     }
   };
 
@@ -190,27 +224,33 @@ export function CoachPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request, knowledge !== null]);
 
-  const applyProposal = async (key: string, kind: keyof CoachProposals, value: string, line?: number) => {
+  const setSongMemory = async (memory: string[]) => {
     if (!knowledge) return;
-    setApplied((s) => new Set(s).add(key));
-    if (kind === "line_notes" && line != null) onApplyLineNote(line - 1, value);
-    if (kind === "remember_song") {
-      const next = { ...knowledge, memory: [...knowledge.memory, value] };
-      setKnowledge(next);
-      await saveKnowledge(song, next);
-    }
-    if (kind === "remember_singer") {
-      const next = { facts: [...profile.facts, value] };
-      setProfile(next);
-      await saveProfile(next);
-    }
-  };
-
-  const forgetMemory = async (i: number) => {
-    if (!knowledge) return;
-    const next = { ...knowledge, memory: knowledge.memory.filter((_, j) => j !== i) };
+    const next = { ...knowledge, memory };
     setKnowledge(next);
     await saveKnowledge(song, next);
+  };
+  const setFacts = async (facts: string[]) => {
+    const next = { facts };
+    setProfile(next);
+    await saveProfile(next);
+  };
+
+  /** Memory changes are applied by the item's text, so applying one doesn't shift the ids of others. */
+  type Op =
+    | { kind: "line_note"; line: number; text: string }
+    | { kind: "add"; who: "song" | "singer"; text: string }
+    | { kind: "update"; who: "song" | "singer"; old: string; text: string }
+    | { kind: "forget"; who: "song" | "singer"; old: string };
+  const apply = async (key: string, op: Op) => {
+    if (!knowledge) return;
+    setApplied((s) => new Set(s).add(key));
+    if (op.kind === "line_note") return onApplyLineNote(op.line - 1, op.text);
+    const list = op.who === "song" ? knowledge.memory : profile.facts;
+    const save = op.who === "song" ? setSongMemory : setFacts;
+    if (op.kind === "add") return save([...list, op.text]);
+    if (op.kind === "update") return save(list.map((x) => (x === op.old ? op.text : x)));
+    return save(list.filter((x) => x !== op.old));
   };
 
   if (!apiKey || !model) {
@@ -278,19 +318,50 @@ export function CoachPanel({
           )}
         </div>
 
-        {/* What we've learned */}
-        {knowledge.memory.length > 0 && (
-          <div>
-            <div className="text-[10px] font-semibold uppercase tracking-[0.09em] text-[var(--text-muted)] mb-1">What we've learned</div>
-            {knowledge.memory.map((m, i) => (
-              <div key={i} className="group flex items-start gap-2 text-[12px] text-[var(--text-secondary)] py-[2px]">
-                <span className="text-[var(--text-muted)]">•</span>
-                <span className="flex-1">{m}</span>
-                <button onClick={() => void forgetMemory(i)} className="opacity-0 group-hover:opacity-100 text-[var(--text-muted)] hover:text-red-600 bg-transparent border-none cursor-pointer">×</button>
-              </div>
-            ))}
+        {/* What the coach remembers — fixed size, with ids it can refer to */}
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.09em] text-[var(--text-muted)]">What I remember</span>
+            {(profile.facts.length > 0 || knowledge.memory.length > 0) && (
+              <button
+                onClick={() => void send(TIDY_MEMORY_PROMPT)}
+                disabled={busy != null}
+                title="Ask the coach to merge duplicates and drop outdated items (you approve each change)"
+                className="ml-auto text-[11px] text-[var(--theme)] bg-transparent border-none cursor-pointer hover:underline disabled:opacity-40"
+              >
+                Tidy
+              </button>
+            )}
           </div>
-        )}
+          {[
+            { title: "About you", prefix: "P", items: profile.facts, max: MAX_SINGER_FACTS, save: setFacts },
+            { title: "This song", prefix: "S", items: knowledge.memory, max: MAX_SONG_MEMORY, save: setSongMemory },
+          ].map((g) => (
+            <div key={g.prefix} className="mb-2">
+              <div className="text-[10.5px] text-[var(--text-muted)]">
+                {g.title} · {g.items.length}/{g.max}
+                {g.items.length >= g.max && <span className="text-amber-700"> · full — the coach will merge or replace</span>}
+              </div>
+              {g.items.length === 0 ? (
+                <div className="text-[11.5px] text-[var(--text-muted)] italic">nothing yet</div>
+              ) : (
+                g.items.map((m, i) => (
+                  <div key={i} className="group flex items-start gap-2 text-[12px] text-[var(--text-secondary)] py-[1px]">
+                    <span className="text-[10px] text-[var(--text-muted)] tabular-nums w-[22px] flex-shrink-0 pt-[2px]">{g.prefix}{i + 1}</span>
+                    <span className="flex-1">{m}</span>
+                    <button
+                      onClick={() => void g.save(g.items.filter((_, j) => j !== i))}
+                      title="Forget"
+                      className="opacity-0 group-hover:opacity-100 text-[var(--text-muted)] hover:text-red-600 bg-transparent border-none cursor-pointer"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          ))}
+        </div>
 
         {/* Conversation */}
         {knowledge.chat.length === 0 && (
@@ -321,29 +392,78 @@ export function CoachPanel({
             <div key={i} className="text-[12.5px] leading-[1.55] text-[var(--text-primary)]">
               <Markdown text={body} />
               <Sources sources={turn.sources ?? []} />
+              {turn.ms != null && (
+                <div className="mt-[5px] text-[10px] text-[var(--text-muted)] tabular-nums" title="Time to the first words · time for the whole answer">
+                  {turn.model} · first words {(turn.first_ms! / 1000).toFixed(1)} s · done {(turn.ms / 1000).toFixed(1)} s
+                </div>
+              )}
               {proposals && (
                 <div className="mt-2 flex flex-col gap-[5px] p-2 rounded-[8px] border border-dashed border-[var(--border)]">
                   <span className="text-[10px] font-semibold uppercase tracking-[0.09em] text-[var(--text-muted)]">Save?</span>
                   {proposals.line_notes.map((n, j) => {
                     const key = `${i}:n:${j}`;
+                    return <ProposalRow key={key} done={applied.has(key)} label={`Note on L${n.line}`} text={n.note} onApply={() => void apply(key, { kind: "line_note", line: n.line, text: n.note })} />;
+                  })}
+                  {(["singer", "song"] as const).map((who) => {
+                    const list = who === "song" ? knowledge.memory : profile.facts;
+                    const prefix = who === "song" ? "S" : "P";
+                    const max = who === "song" ? MAX_SONG_MEMORY : MAX_SINGER_FACTS;
+                    const adds = who === "song" ? proposals.remember_song : proposals.remember_singer;
+                    const updates = who === "song" ? proposals.update_song : proposals.update_singer;
+                    const forgets = who === "song" ? proposals.forget_song : proposals.forget_singer;
+                    const whoLabel = who === "song" ? "this song" : "you";
                     return (
-                      <ProposalRow key={key} done={applied.has(key)} label={`Note on L${n.line}`} text={n.note} onApply={() => void applyProposal(key, "line_notes", n.note, n.line)} />
+                      <div key={who} className="contents">
+                        {updates.map((u, j) => {
+                          const key = `${i}:${who}:u:${j}`;
+                          const old = list[memoryIndex(u.id, prefix)];
+                          if (old == null && !applied.has(key)) return null;
+                          return <ProposalRow key={key} done={applied.has(key) || list.includes(u.text)} label={`Update ${u.id}`} text={`${old ?? ""} → ${u.text}`} onApply={() => void apply(key, { kind: "update", who, old, text: u.text })} />;
+                        })}
+                        {forgets.map((id, j) => {
+                          const key = `${i}:${who}:f:${j}`;
+                          const old = list[memoryIndex(id, prefix)];
+                          if (old == null && !applied.has(key)) return null;
+                          return <ProposalRow key={key} done={applied.has(key)} label={`Forget ${id}`} text={old ?? ""} action="Forget" onApply={() => void apply(key, { kind: "forget", who, old })} />;
+                        })}
+                        {adds.map((m, j) => {
+                          const key = `${i}:${who}:a:${j}`;
+                          const full = list.length >= max && !list.includes(m);
+                          return (
+                            <ProposalRow
+                              key={key}
+                              done={applied.has(key) || list.includes(m)}
+                              disabled={full}
+                              label={`Remember about ${whoLabel}`}
+                              text={full ? `${m} (memory full — forget or tidy first)` : m}
+                              onApply={() => void apply(key, { kind: "add", who, text: m })}
+                            />
+                          );
+                        })}
+                      </div>
                     );
-                  })}
-                  {proposals.remember_song.map((m, j) => {
-                    const key = `${i}:s:${j}`;
-                    return <ProposalRow key={key} done={applied.has(key) || knowledge.memory.includes(m)} label="Remember for this song" text={m} onApply={() => void applyProposal(key, "remember_song", m)} />;
-                  })}
-                  {proposals.remember_singer.map((m, j) => {
-                    const key = `${i}:p:${j}`;
-                    return <ProposalRow key={key} done={applied.has(key) || profile.facts.includes(m)} label="Remember about you" text={m} onApply={() => void applyProposal(key, "remember_singer", m)} />;
                   })}
                 </div>
               )}
             </div>
           );
         })}
-        {busy === "chat" && <div className="text-[12px] text-[var(--text-muted)] animate-pulse">Thinking…</div>}
+        {busy === "chat" &&
+          (streaming ? (
+            <div className="text-[12.5px] leading-[1.55] text-[var(--text-primary)]">
+              <Markdown text={parseReply(streaming).body.replace(/```reprise[\s\S]*$/, "")} />
+              <span className="inline-block w-[6px] h-[12px] bg-[var(--theme)] animate-pulse align-middle ml-[2px]" />
+            </div>
+          ) : (
+            <div className="text-[12px] text-[var(--text-muted)] tabular-nums">
+              <span className="animate-pulse">Thinking…</span> {startedAt != null ? `${((Date.now() - startedAt) / 1000).toFixed(1)} s` : ""}
+            </div>
+          ))}
+        {busy === "card" && startedAt != null && (
+          <div className="text-[12px] text-[var(--text-muted)] tabular-nums">
+            <span className="animate-pulse">Writing the song card…</span> {((Date.now() - startedAt) / 1000).toFixed(1)} s
+          </div>
+        )}
         {error && <div className="text-[12px] text-red-600">{error}</div>}
         <div ref={endRef} />
       </div>
@@ -379,17 +499,31 @@ export function CoachPanel({
 
 const emptyKnowledge: SongKnowledge = { card: null, card_sources: [], memory: [], chat: [] };
 
-function ProposalRow({ label, text, done, onApply }: { label: string; text: string; done: boolean; onApply: () => void }) {
+function ProposalRow({
+  label,
+  text,
+  done,
+  disabled,
+  action = "Save",
+  onApply,
+}: {
+  label: string;
+  text: string;
+  done: boolean;
+  disabled?: boolean;
+  action?: string;
+  onApply: () => void;
+}) {
   return (
     <div className="flex items-start gap-2 text-[12px]">
       <span className="text-[10.5px] text-[var(--text-muted)] w-[118px] flex-shrink-0 pt-[1px]">{label}</span>
       <span className="flex-1 text-[var(--text-secondary)]">{text}</span>
       <button
         onClick={onApply}
-        disabled={done}
+        disabled={done || disabled}
         className="flex-shrink-0 px-2 py-[1px] rounded-[5px] border border-[var(--border)] bg-transparent text-[10.5px] text-[var(--theme)] cursor-pointer hover:border-[var(--theme)] disabled:text-emerald-700 disabled:border-transparent disabled:cursor-default"
       >
-        {done ? "Saved ✓" : "Save"}
+        {done ? "Done ✓" : action}
       </button>
     </div>
   );
