@@ -22,7 +22,7 @@ import { SongSetupPanel } from "../../components/song-setup-panel";
 import { EditSongModal } from "../../components/edit-song-modal";
 import { ConfirmDialog } from "../../components/confirm-dialog";
 import { useTaskQueueStore } from "../../stores/task-queue-store";
-import { LyricSheet, type Cursor, type SectionEdit } from "./lyric-sheet";
+import { LyricSheet, fmtTiming, type Cursor, type SectionEdit } from "./lyric-sheet";
 import { TransportBar } from "./transport-bar";
 import { TakesPanel } from "./takes-panel";
 import { LinePanel } from "./line-panel";
@@ -293,16 +293,37 @@ function Workspace({ songId }: { songId: string }) {
     changes.push({ lineId: cursorLine.id, start_ms: ms, end_ms: end });
     if (prev && (prev.end_ms == null || prev.end_ms > ms)) changes.push({ lineId: prev.id, end_ms: ms });
     await edits.setTiming(changes, "Set line start");
+    say(`Line ${cursorIdx + 1} starts at ${fmtTiming(ms)}${next ? " — next line" : ""}`);
     if (next) moveTo(next, false);
-  }, [cursorLine, cursorIdx, lines, nowMs, edits, moveTo, takes.busy]);
+  }, [cursorLine, cursorIdx, lines, nowMs, edits, moveTo, takes.busy, say]);
+
+  // After a timing change, replay the line once (debounced) so you can hear the new edge.
+  const playerRef = useRef(player);
+  playerRef.current = player;
+  const replayTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const replaySoon = useCallback(
+    (lineId: string) => {
+      clearTimeout(replayTimer.current);
+      replayTimer.current = setTimeout(() => {
+        if (takes.busy) return;
+        const p = playerRef.current;
+        const idx = lines.findIndex((l) => l.id === lineId);
+        if (idx >= 0) p.playLineOnce(idx);
+      }, 450);
+    },
+    [lines, takes.busy],
+  );
+  useEffect(() => () => clearTimeout(replayTimer.current), []);
 
   const nudge = useCallback(
-    (field: "start_ms" | "end_ms", delta: number) => {
-      if (!cursorLine || cursorLine[field] == null) return;
+    async (field: "start_ms" | "end_ms", delta: number) => {
+      if (!cursorLine || cursorLine[field] == null || takes.busy) return;
       const v = Math.max(0, cursorLine[field]! + delta);
-      edits.setTiming([{ lineId: cursorLine.id, [field]: v }], field === "start_ms" ? "Nudge start" : "Nudge end");
+      await edits.setTiming([{ lineId: cursorLine.id, [field]: v }], field === "start_ms" ? "Shift start" : "Shift end");
+      say(`${field === "start_ms" ? "Start" : "End"} ${fmtTiming(v)} (${delta > 0 ? "+" : "−"}${Math.abs(delta)} ms) — replaying`);
+      replaySoon(cursorLine.id);
     },
-    [cursorLine, edits],
+    [cursorLine, edits, say, replaySoon, takes.busy],
   );
 
   const startSectionEdit = useCallback(() => {
@@ -381,7 +402,7 @@ function Workspace({ songId }: { songId: string }) {
       case "ArrowRight": {
         handled();
         const right = k === "ArrowRight";
-        if (e.altKey) return nudge(e.shiftKey ? "end_ms" : "start_ms", right ? 50 : -50);
+        if (e.altKey) return void nudge(e.shiftKey ? "end_ms" : "start_ms", right ? 50 : -50);
         let f = ctrl ? nextWordBoundary(cursorText, focus, right ? 1 : -1) : Math.max(0, Math.min(len, focus + (right ? 1 : -1)));
         if (!e.shiftKey && selEnd > selStart && !ctrl) f = right ? selEnd : selStart;
         return setSel(e.shiftKey ? anchor : f, f);
@@ -508,6 +529,7 @@ function Workspace({ songId }: { songId: string }) {
   const onCancelEdit = useCallback(() => setEditingLineId(null), []);
   const onIssueClick = useStable(takes.playIssueYou);
   const onPlay = useStable(playLine);
+  const onNudge = useStable(nudge);
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-[var(--bg)]">
@@ -685,6 +707,7 @@ function Workspace({ songId }: { songId: string }) {
                 onCancelEdit={onCancelEdit}
                 onPlay={onPlay}
                 onIssueClick={onIssueClick}
+                onNudge={onNudge}
                 onSectionClick={(sec) => {
                   const first = lines.find((l) => l.order >= sec.start_line_order);
                   moveTo(first, false);
@@ -764,7 +787,7 @@ function Workspace({ songId }: { songId: string }) {
                 highlights={highlights}
                 player={player}
                 issues={cursorLine ? takes.issuesByLine.get(cursorLine.id) ?? [] : []}
-                onNudge={nudge}
+                onNudge={onNudge}
                 onTapStart={() => void tapStart()}
                 onRemoveAnnotation={(i) => {
                   const a = cursorLine?.annotations?.[i];

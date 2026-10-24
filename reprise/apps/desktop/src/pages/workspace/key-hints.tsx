@@ -85,6 +85,8 @@ export function KeyHints({
         <Hint k={<Key>R</Key>} label="record" />
         <Hint k={<><Key>Shift</Key><Key>→</Key></>} label="select words to mark" />
         {breathKey != null && <Hint k={<Key>{breathKey}</Key>} label="breath mark here" />}
+        <Hint k={<><Key>Alt</Key><Key>←</Key><Key>→</Key></>} label="shift line start" />
+        <Hint k={<Key>T</Key>} label="start = now" />
         <Hint k={<Key>#</Key>} label="new section" />
       </>
     );

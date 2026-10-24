@@ -42,6 +42,16 @@ function textOffset(root: HTMLElement, node: Node, offset: number): number {
   return count;
 }
 
+/** m:ss.cc — timing needs hundredths to be useful. */
+export function fmtTiming(ms: number): string {
+  const s = ms / 1000;
+  return `${Math.floor(s / 60)}:${(s % 60).toFixed(2).padStart(5, "0")}`;
+}
+
+const TIMING_HELP =
+  "Line timing. ◀ ▶ (or Alt+← / Alt+→) shift the start by 50 ms; Alt+Shift+← / → shifts the end. " +
+  "T sets the start to where the song is now. The line replays after each change so you can hear it. Ctrl+Z undoes.";
+
 function InlineInput({
   initial,
   placeholder,
@@ -104,11 +114,12 @@ interface LineRowProps {
   onCancelEdit: () => void;
   onPlay: (lineId: string) => void;
   onIssueClick: (issue: TakeIssue, key: string) => void;
+  onNudge: (field: "start_ms" | "end_ms", deltaMs: number) => void;
 }
 
 const LineRow = memo(function LineRow({
   line, info, translation, highlights, isCursor, anchor, focus, isPlaying, inLoop, editing, showStartDot,
-  issues, onSelect, onStartEdit, onCommitEdit, onCancelEdit, onPlay, onIssueClick,
+  issues, onSelect, onStartEdit, onCommitEdit, onCancelEdit, onPlay, onIssueClick, onNudge,
 }: LineRowProps) {
   const text = displayText(line);
   const textRef = useRef<HTMLDivElement>(null);
@@ -203,6 +214,31 @@ const LineRow = memo(function LineRow({
           {translation && <div className="text-[12px] leading-snug text-[var(--text-muted)] mt-0.5 select-none">{translation}</div>}
         </div>
 
+        {isCursor && !editing && line.start_ms != null && (
+          <div
+            className="flex-shrink-0 flex items-center gap-[1px] ml-2 mt-[3px] px-[2px] h-[22px] rounded-[6px] border border-[var(--border)] bg-[var(--bg)] text-[10.5px] tabular-nums select-none"
+            title={TIMING_HELP}
+            onMouseUp={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => onNudge("start_ms", -50)}
+              title="Start 50 ms earlier (Alt+←)"
+              className="w-[18px] h-[18px] rounded-[4px] flex items-center justify-center bg-transparent border-none cursor-pointer text-[var(--text-muted)] hover:bg-[var(--surface)] hover:text-[var(--text-primary)]"
+            >
+              ◀
+            </button>
+            <span className="px-[3px] text-[var(--text-primary)]">{fmtTiming(line.start_ms)}</span>
+            <button
+              onClick={() => onNudge("start_ms", 50)}
+              title="Start 50 ms later (Alt+→)"
+              className="w-[18px] h-[18px] rounded-[4px] flex items-center justify-center bg-transparent border-none cursor-pointer text-[var(--text-muted)] hover:bg-[var(--surface)] hover:text-[var(--text-primary)]"
+            >
+              ▶
+            </button>
+            {line.end_ms != null && <span className="pl-[2px] pr-[5px] text-[var(--text-muted)]">– {fmtTiming(line.end_ms)}</span>}
+          </div>
+        )}
         {info && (info.longestPhraseMs >= LONG_PHRASE_MS || info.peakSemitone != null) && (
           <div className="flex-shrink-0 flex flex-col items-end gap-[2px] pl-2 pt-[4px] select-none">
             {info.longestPhraseMs >= LONG_PHRASE_MS && (
@@ -319,6 +355,7 @@ export interface LyricSheetProps {
   onCancelEdit: () => void;
   onPlay: (lineId: string) => void;
   onIssueClick: (issue: TakeIssue, key: string) => void;
+  onNudge: (field: "start_ms" | "end_ms", deltaMs: number) => void;
   onSectionClick: (section: Section) => void;
   onSectionEdit: (edit: SectionEdit | null) => void;
   onCommitNewSection: (lineId: string, name: string) => void;
@@ -391,6 +428,7 @@ export function LyricSheet(p: LyricSheetProps) {
               onCancelEdit={p.onCancelEdit}
               onPlay={p.onPlay}
               onIssueClick={p.onIssueClick}
+              onNudge={p.onNudge}
             />
           </div>
         );
