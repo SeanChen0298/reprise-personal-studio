@@ -87,10 +87,13 @@ file_path, duration_ms
 is_master_take: boolean
 is_best_take: boolean         // independent star toggle
 note?: string
+song_start_ms?: number        // set for sung-along takes: song position at the take's first sample
+backing?: 'original'|'vocal'|'instrumental'
+analysis?: TakeAnalysis       // breath / high-note review (lib/take-analysis.ts)
 created_at, updated_at
 ```
 
-### Other collections: `sections` (start/end line_order), `meta` (migration flag, misc)
+### Other collections: `sections` (start/end line_order), `suggestions` (Discover page, keyed by YouTube video id), `meta` (migration flag, misc)
 
 ### Line status progression (behavior-based, not user-set)
 ```
@@ -109,8 +112,12 @@ src/components/    sidebar, audio-player, full-waveform, waveform, pitch-curve, 
 src/hooks/         use-line-player (core playback), use-recorder, use-waveform-data, use-pitch-data
 src/stores/        song-store (master), preferences-store, task-queue-store, queue-store
 src/lib/           local-db.ts (Dexie data layer), audio-download.ts (yt-dlp), audio-analysis.ts (torchcrepe),
-                   whisperx-align.ts, backup.ts (JSON export/import)
+                   whisperx-align.ts, backup.ts (JSON export/import),
+                   suggestions.ts (Discover: YouTube Mix-based suggestions via yt-dlp),
+                   vocal-map.ts + take-analysis.ts + take-review.ts (breath / high-note take review)
 ```
+
+**Take review** (Recordings page): "Record" with *Sing along* starts the song and stores `song_start_ms`, so the take can be lined up with the song (latency is measured by matching voicing). The reference **vocal map** comes from `pitch.csv` (phrases = confidently pitched runs, breaths = gaps ≥120 ms, high notes = top of the song's range), with reverb tails trimmed using the vocal stem's loudness. The take is analysed in-browser (YIN pitch + loudness) for breath problems (ran out, fading, mid-phrase breath, late after quick breath) and high-note problems (dropped, cracked, flat/sharp, unsteady, pushed), each relative to the original singer, plus a first-half vs second-half stamina comparison. Pitch accuracy elsewhere is intentionally not scored. The user records whole songs/sections here rather than line by line in Practice.
 
 **`song-store.ts`** — the master store. All persistence goes through `localDb` (in `local-db.ts`), which returns `{ data, error }` results mirroring the old Supabase shape so the optimistic-update-with-rollback flow is preserved. Cascade deletes (song → lines/recordings/sections) are explicit, inside a Dexie transaction.
 
@@ -225,6 +232,6 @@ CSS variable-based: `--theme`, `--theme-light`, `--theme-text`. Stored in `prefe
 
 ## What's Built
 
-**Working:** local song library, YouTube import, yt-dlp download, Demucs stems, torchcrepe pitch, WhisperX timestamp alignment, manual lyrics + furigana, annotation editor (5 predefined + custom types), timestamp waveform marker, line-by-line practice playback, recording, line status auto-tracking, 6 themes, task queue, section markers, local DB backup/restore.
+**Working:** local song library, YouTube import, yt-dlp download, Demucs stems, torchcrepe pitch, WhisperX timestamp alignment, manual lyrics + furigana, annotation editor (5 predefined + custom types), timestamp waveform marker, line-by-line practice playback, recording, line status auto-tracking, 6 themes, task queue, section markers, local DB backup/restore, Discover (song suggestions with lyrics), sung-along take review (breath control + high notes) with a breath map in the lyrics.
 
-**Not yet built:** compile line recordings → full song, pitch accuracy comparison (user vs. reference vocal).
+**Not yet built:** compile recordings → full song, key change / transpose, progress tracking across takes.

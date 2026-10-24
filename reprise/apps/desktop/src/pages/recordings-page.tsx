@@ -12,7 +12,18 @@ import { useRecorder } from "../hooks/use-recorder";
 import { playRecordingWithGain } from "../lib/play-recording";
 import { usePreferencesStore } from "../stores/preferences-store";
 import { formatMs } from "../lib/status-config";
-import type { Recording, Line, Section } from "../types/song";
+import { TakeReviewPanel } from "../components/take-review-panel";
+import {
+  ISSUE_LABEL,
+  analyzeRecording,
+  canReview,
+  isBreathIssue,
+  issueSongStartMs,
+  loadVocalMap,
+  needsAnalysis,
+} from "../lib/take-review";
+import { LONG_PHRASE_MS, lineVocalInfo, semitoneToNoteName, type VocalMap } from "../lib/vocal-map";
+import type { Recording, Line, Section, TakeIssue } from "../types/song";
 
 // ---------------------------------------------------------------------------
 // WaveSurfer thumbnail (renders peaks from the recording file, display-only)
@@ -131,6 +142,12 @@ interface RecordingEntryProps {
   playingId: string | null;
   comparingId: string | null;
   volume: number;
+  /** Set for sung-along takes that can be reviewed. */
+  review?: {
+    active: boolean;
+    analyzing: boolean;
+    onOpen: (id: string) => void;
+  };
 }
 
 function RecordingEntry({
@@ -148,6 +165,7 @@ function RecordingEntry({
   playingId,
   comparingId,
   volume,
+  review,
 }: RecordingEntryProps) {
   const isPlaying = playingId === rec.id;
   const isComparing = comparingId === rec.id;
@@ -224,6 +242,23 @@ function RecordingEntry({
           >
             {rec.note}
           </span>
+        )}
+        {review && (
+          <button
+            onClick={() => review.onOpen(rec.id)}
+            title="Breath & high-note review"
+            className={`text-[9.5px] font-medium px-[5px] py-[1px] rounded-[3px] border cursor-pointer transition-colors ${
+              review.active
+                ? "bg-[var(--theme)] text-white border-[var(--theme)]"
+                : "bg-transparent text-[var(--text-secondary)] border-[var(--border)] hover:border-[var(--theme)] hover:text-[var(--theme)]"
+            }`}
+          >
+            {review.analyzing
+              ? "Analyzing…"
+              : rec.analysis
+                ? `Review · ${rec.analysis.issues.filter((i) => isBreathIssue(i.kind)).length} breath · ${rec.analysis.issues.filter((i) => !isBreathIssue(i.kind)).length} high`
+                : "Review"}
+          </button>
         )}
       </div>
 
@@ -371,25 +406,9 @@ export function RecordingsPage() {
   const [pendingNote, setPendingNote] = useState("");
   const noteInputRef = useRef<HTMLInputElement>(null);
 
-  const startFreeRecording = useCallback(async () => {
-    if (!song?.audio_folder) return;
-    setRecordingTimer(0);
-    await recorder.startRecording("free", song.audio_folder);
-    timerRef.current = setInterval(() => setRecordingTimer((t) => t + 1), 1000);
-  }, [recorder, song?.audio_folder]);
-
-  const stopFreeRecording = useCallback(async () => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-    const result = await recorder.stopRecording();
-    if (result) {
-      setPendingRec({ filePath: result.filePath, durationMs: result.durationMs });
-      setPendingNote("");
-      setTimeout(() => noteInputRef.current?.focus(), 50);
-    }
-  }, [recorder]);
+  const [pendingSync, setPendingSync] = useState<{ songStartMs: number; backing: Recording["backing"] } | null>(null);
+  /** Sing along: the take starts the song and is lined up with it for review. */
+  const [singAlong, setSingAlong] = useState(true);
 
   const discardPendingRec = useCallback(async () => {
     if (pendingRec) {
@@ -397,27 +416,8 @@ export function RecordingsPage() {
     }
     setPendingRec(null);
     setPendingNote("");
+    setPendingSync(null);
   }, [pendingRec]);
-
-  const saveFreeRecording = useCallback(async () => {
-    if (!pendingRec || !id) return;
-    const newRec: Recording = {
-      id: crypto.randomUUID(),
-      song_id: id,
-      line_id: null,
-      section_id: undefined,
-      file_path: pendingRec.filePath,
-      duration_ms: pendingRec.durationMs,
-      is_master_take: false,
-      is_best_take: false,
-      note: pendingNote.trim() || undefined,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-    await addRecording(id, newRec);
-    setPendingRec(null);
-    setPendingNote("");
-  }, [pendingRec, pendingNote, id, addRecording]);
 
   // Cleanup timer on unmount
   useEffect(() => {
@@ -685,6 +685,201 @@ export function RecordingsPage() {
     if (first) seekToLine(first);
   }, [lines, seekToLine]);
 
+  // ── Free recording (start / stop / save) ─────────────────────────────────
+  const startFreeRecording = useCallback(async () => {
+    if (!song?.audio_folder) return;
+    stopAllPlayback();
+    setRecordingTimer(0);
+    const audio = songAudioRef.current;
+    const withSong = singAlong && !!audio && !!currentSongPath;
+    if (audio && !audio.paused) {
+      audio.pause();
+      setSongPlaying(false);
+    }
+    await recorder.startRecording("free", song.audio_folder);
+    timerRef.current = setInterval(() => setRecordingTimer((t) => t + 1), 1000);
+    setPendingSync(null);
+    if (withSong && audio) {
+      // Start the song where it's parked (click a line/section first to start there).
+      const songPosMs = audio.currentTime * 1000;
+      try {
+        await audio.play();
+        setSongPlaying(true);
+        // Take time 0 ↔ song position: the song started (now − recorder start) ms into the take.
+        const intoTakeMs = performance.now() - recorder.getStartedAt();
+        setPendingSync({ songStartMs: Math.round(songPosMs - intoTakeMs), backing: songSrcKey });
+      } catch {
+        // Couldn't start the song — it's just a free take then.
+      }
+    }
+  }, [recorder, song?.audio_folder, singAlong, currentSongPath, songSrcKey, stopAllPlayback]);
+
+  const stopFreeRecording = useCallback(async () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    const audio = songAudioRef.current;
+    if (audio && !audio.paused) {
+      audio.pause();
+      setSongPlaying(false);
+    }
+    const result = await recorder.stopRecording();
+    if (result) {
+      setPendingRec({ filePath: result.filePath, durationMs: result.durationMs });
+      setPendingNote("");
+      setTimeout(() => noteInputRef.current?.focus(), 50);
+    }
+  }, [recorder]);
+
+  // The song ending ends a sung-along take.
+  const stopFreeRecordingRef = useRef(stopFreeRecording);
+  stopFreeRecordingRef.current = stopFreeRecording;
+  const isRecordingRef = useRef(false);
+  isRecordingRef.current = recorder.isRecording;
+  useEffect(() => {
+    const audio = songAudioRef.current;
+    if (!audio) return;
+    const onEnded = () => {
+      if (isRecordingRef.current) stopFreeRecordingRef.current();
+    };
+    audio.addEventListener("ended", onEnded);
+    return () => audio.removeEventListener("ended", onEnded);
+  }, []);
+
+  // ── Take review ──────────────────────────────────────────────────────────
+  const [reviewId, setReviewId] = useState<string | null>(null);
+  const [analyzing, setAnalyzing] = useState<Record<string, number>>({});
+  const [analysisErrors, setAnalysisErrors] = useState<Record<string, string>>({});
+
+  const runAnalysis = useCallback(async (rec: Recording) => {
+    if (!song || !id) return;
+    setAnalyzing((m) => ({ ...m, [rec.id]: 0 }));
+    setAnalysisErrors(({ [rec.id]: _, ...rest }) => rest);
+    try {
+      const analysis = await analyzeRecording(rec, song, lines, (f) =>
+        setAnalyzing((m) => (rec.id in m ? { ...m, [rec.id]: f } : m)),
+      );
+      await updateRecording(id, rec.id, { analysis });
+    } catch (err) {
+      console.error("[review] analysis failed:", err);
+      setAnalysisErrors((m) => ({ ...m, [rec.id]: err instanceof Error ? err.message : String(err) }));
+    } finally {
+      setAnalyzing(({ [rec.id]: _, ...rest }) => rest);
+    }
+  }, [song, id, lines, updateRecording]);
+
+  const openReview = useCallback((recId: string) => {
+    setReviewId((cur) => (cur === recId ? null : recId));
+    const rec = recordings.find((r) => r.id === recId);
+    if (rec && needsAnalysis(rec) && !(rec.id in analyzing)) runAnalysis(rec);
+  }, [recordings, analyzing, runAnalysis]);
+
+  const saveFreeRecording = useCallback(async () => {
+    if (!pendingRec || !id) return;
+    const now = new Date().toISOString();
+    const newRec: Recording = {
+      id: crypto.randomUUID(),
+      song_id: id,
+      line_id: null,
+      section_id: undefined,
+      file_path: pendingRec.filePath,
+      duration_ms: pendingRec.durationMs,
+      is_master_take: false,
+      is_best_take: false,
+      note: pendingNote.trim() || undefined,
+      song_start_ms: pendingSync?.songStartMs,
+      backing: pendingSync?.backing,
+      created_at: now,
+      updated_at: now,
+    };
+    await addRecording(id, newRec);
+    setPendingRec(null);
+    setPendingNote("");
+    setPendingSync(null);
+    if (song && canReview(newRec, song)) {
+      setReviewId(newRec.id);
+      runAnalysis(newRec);
+    }
+  }, [pendingRec, pendingNote, pendingSync, id, addRecording, song, runAnalysis]);
+
+  // Short A/B snippets from the review: your take vs. the song at the same spot.
+  const snippetRef = useRef<HTMLAudioElement | null>(null);
+  const [snippetKey, setSnippetKey] = useState<string | null>(null);
+  const stopSnippet = useCallback(() => {
+    snippetRef.current?.pause();
+    snippetRef.current = null;
+    setSnippetKey(null);
+  }, []);
+  useEffect(() => () => stopSnippet(), [stopSnippet]);
+
+  const playSnippet = useCallback((key: string, path: string, fromMs: number) => {
+    if (snippetKey === key) {
+      stopSnippet();
+      return;
+    }
+    stopSnippet();
+    stopAllPlayback();
+    const audio = songAudioRef.current;
+    if (audio && !audio.paused) {
+      audio.pause();
+      setSongPlaying(false);
+    }
+    const el = new Audio(convertFileSrc(path));
+    el.volume = path === currentSongPath || path === song?.audio_path ? playbackVolume : 1;
+    el.currentTime = Math.max(0, fromMs / 1000);
+    // Play ~8 s around the problem, then stop.
+    const stopAt = fromMs / 1000 + 8;
+    el.ontimeupdate = () => {
+      if (el.currentTime >= stopAt) stopSnippet();
+    };
+    el.onended = () => stopSnippet();
+    snippetRef.current = el;
+    setSnippetKey(key);
+    el.play().catch(() => stopSnippet());
+  }, [snippetKey, stopSnippet, stopAllPlayback, currentSongPath, song?.audio_path, playbackVolume]);
+
+  const reviewRec = reviewId ? recordings.find((r) => r.id === reviewId) ?? null : null;
+
+  const playIssueYou = useCallback((issue: TakeIssue, key: string) => {
+    if (!reviewRec?.analysis || reviewRec.song_start_ms == null) return;
+    const takeMs = issueSongStartMs(issue) - reviewRec.song_start_ms + reviewRec.analysis.lag_ms;
+    playSnippet(`you:${key}`, reviewRec.file_path, takeMs);
+  }, [reviewRec, playSnippet]);
+
+  const playIssueOriginal = useCallback((issue: TakeIssue, key: string) => {
+    const path = song?.audio_path ?? currentSongPath;
+    if (!path) return;
+    playSnippet(`orig:${key}`, path, issueSongStartMs(issue));
+  }, [song?.audio_path, currentSongPath, playSnippet]);
+
+  // Issues of the reviewed take, by line, for the lyrics panel.
+  const reviewIssuesByLine = useMemo(() => {
+    const m = new Map<string, TakeIssue[]>();
+    for (const issue of reviewRec?.analysis?.issues ?? []) {
+      if (!issue.line_id) continue;
+      const arr = m.get(issue.line_id) ?? [];
+      arr.push(issue);
+      m.set(issue.line_id, arr);
+    }
+    return m;
+  }, [reviewRec]);
+
+  // ── Breath map: where the original singer breathes / goes high ─────────
+  const [showBreathMap, setShowBreathMap] = useState(true);
+  const [vocalMap, setVocalMap] = useState<VocalMap | null>(null);
+  useEffect(() => {
+    setVocalMap(null);
+    if (!song) return;
+    let cancelled = false;
+    loadVocalMap(song)
+      ?.then((m) => !cancelled && setVocalMap(m))
+      .catch((err) => console.warn("[recordings] vocal map unavailable:", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [song?.pitch_data_path, song?.vocals_path]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Early return ─────────────────────────────────────────────────────────
   if (!song) {
     return (
@@ -813,9 +1008,24 @@ export function RecordingsPage() {
             {/* Header + player */}
             <div className="px-5 pt-4 pb-3 border-b border-[var(--border-subtle)] flex-shrink-0 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-[var(--text-muted)]">
-                  Lyrics
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-[var(--text-muted)]">
+                    Lyrics
+                  </span>
+                  {vocalMap && (
+                    <button
+                      onClick={() => setShowBreathMap((v) => !v)}
+                      title="Show where the original singer takes quick breaths, sings long phrases and goes high"
+                      className={`px-[7px] py-[2px] text-[9.5px] font-medium rounded-[4px] border cursor-pointer transition-colors ${
+                        showBreathMap
+                          ? "bg-[var(--theme-light)] text-[var(--theme-text)] border-transparent"
+                          : "bg-transparent text-[var(--text-muted)] border-[var(--border)] hover:border-[#888]"
+                      }`}
+                    >
+                      Breath map
+                    </button>
+                  )}
+                </div>
                 {songAudioSources.length > 0 && (
                   <div className="flex items-center gap-1">
                     {songAudioSources.map((src) => (
@@ -838,7 +1048,7 @@ export function RecordingsPage() {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={toggleSongPlay}
-                    disabled={!currentSongPath}
+                    disabled={!currentSongPath || recorder.isRecording}
                     className="w-7 h-7 rounded-full bg-[var(--theme)] text-white flex items-center justify-center border-none cursor-pointer hover:opacity-85 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
                   >
                     {songPlaying ? (
@@ -887,15 +1097,27 @@ export function RecordingsPage() {
                     const { line } = item;
                     const isPlaying = playingLineId === line.id;
                     const translation = translationByOrder.get(line.order);
-                    const canSeek = line.start_ms != null && currentSongPath;
+                    // Seeking mid-take would break the take's alignment with the song.
+                    const canSeek = line.start_ms != null && currentSongPath && !recorder.isRecording;
+                    const info = vocalMap && showBreathMap ? lineVocalInfo(vocalMap, line) : null;
+                    const lineIssues = reviewIssuesByLine.get(line.id) ?? [];
                     return (
                       <div
                         key={line.id}
                         onClick={() => canSeek && seekToLine(line)}
-                        className={`flex items-start px-2 py-[5px] rounded-[6px] transition-colors ${
+                        className={`flex flex-col px-2 py-[5px] rounded-[6px] transition-colors ${
                           canSeek ? "hover:bg-[var(--bg)] cursor-pointer" : ""
                         }`}
                       >
+                        {info?.breathBefore?.quick && (
+                          <div
+                            className="text-[9.5px] text-sky-700/80 -mb-[1px] select-none"
+                            title={`The original singer has ${((info.breathBefore.endMs - info.breathBefore.startMs) / 1000).toFixed(1)} s to breathe here`}
+                          >
+                            ‿ quick breath
+                          </div>
+                        )}
+                        <div className="flex items-start">
                         <div className="flex-1 min-w-0">
                           <div className={`text-[14px] leading-[1.6] text-[var(--text-primary)] transition-all ${isPlaying ? "font-medium" : "font-normal"}`}>
                             <AnnotatedText
@@ -911,6 +1133,49 @@ export function RecordingsPage() {
                             </div>
                           )}
                         </div>
+                        {info && (info.longestPhraseMs >= LONG_PHRASE_MS || info.peakSemitone != null) && (
+                          <div className="flex-shrink-0 flex flex-col items-end gap-[2px] pl-2 pt-[3px]">
+                            {info.longestPhraseMs >= LONG_PHRASE_MS && (
+                              <span
+                                className="text-[9.5px] px-[5px] py-[1px] rounded-[3px] bg-sky-500/10 text-sky-700"
+                                title="A long phrase without a breath in the original — fill up before it"
+                              >
+                                long · {(info.longestPhraseMs / 1000).toFixed(1)} s
+                              </span>
+                            )}
+                            {info.peakSemitone != null && (
+                              <span
+                                className="text-[9.5px] px-[5px] py-[1px] rounded-[3px] bg-amber-500/10 text-amber-700"
+                                title="One of the highest notes in the song"
+                              >
+                                high · {semitoneToNoteName(info.peakSemitone)}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        </div>
+                        {lineIssues.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-[3px]">
+                            {lineIssues.map((issue, i) => (
+                              <button
+                                key={i}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const idx = reviewRec?.analysis?.issues.indexOf(issue) ?? -1;
+                                  playIssueYou(issue, `${reviewRec?.id}:${idx}`);
+                                }}
+                                title={`${issue.detail} — click to hear your take here`}
+                                className={`text-[9.5px] font-medium px-[5px] py-[1px] rounded-[3px] border-none cursor-pointer ${
+                                  isBreathIssue(issue.kind)
+                                    ? "bg-sky-500/15 text-sky-800 hover:bg-sky-500/25"
+                                    : "bg-amber-500/15 text-amber-800 hover:bg-amber-500/25"
+                                }`}
+                              >
+                                {ISSUE_LABEL[issue.kind]}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -937,7 +1202,9 @@ export function RecordingsPage() {
                   Free recording
                 </span>
                 <span className="text-[10.5px] text-[var(--text-muted)]">
-                  not tied to any line
+                  {singAlong && currentSongPath
+                    ? `starts the song from ${formatMs(Math.round(songCurrentMs))} — click a line or section first to start there`
+                    : "not tied to any line"}
                 </span>
               </div>
 
@@ -992,18 +1259,51 @@ export function RecordingsPage() {
                 </div>
               ) : (
                 /* Idle: record button */
-                <button
-                  onClick={startFreeRecording}
-                  disabled={!song.audio_folder}
-                  className="flex items-center gap-[6px] px-4 py-2 rounded-[8px] bg-red-600 text-white text-[13px] font-medium hover:bg-red-700 transition-colors cursor-pointer border-none disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
-                    <circle cx="12" cy="12" r="9" />
-                  </svg>
-                  Record
-                </button>
+                <div className="flex items-center gap-4">
+                  <button
+                    onClick={startFreeRecording}
+                    disabled={!song.audio_folder}
+                    className="flex items-center gap-[6px] px-4 py-2 rounded-[8px] bg-red-600 text-white text-[13px] font-medium hover:bg-red-700 transition-colors cursor-pointer border-none disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+                      <circle cx="12" cy="12" r="9" />
+                    </svg>
+                    Record
+                  </button>
+                  {currentSongPath && (
+                    <label
+                      className="flex items-center gap-[6px] text-[12px] text-[var(--text-secondary)] cursor-pointer select-none"
+                      title="Plays the selected track while you sing, so the take can be reviewed for breath and high notes. Use headphones."
+                    >
+                      <input
+                        type="checkbox"
+                        checked={singAlong}
+                        onChange={(e) => setSingAlong(e.target.checked)}
+                        className="w-[14px] h-[14px] accent-[var(--theme)] cursor-pointer"
+                      />
+                      Sing along ({songAudioSources.find((s) => s.key === songSrcKey)?.label ?? "Original"}) — headphones on
+                    </label>
+                  )}
+                </div>
               )}
             </div>
+
+            {reviewRec && (
+              <TakeReviewPanel
+                rec={reviewRec}
+                lines={lines}
+                analyzing={reviewRec.id in analyzing ? analyzing[reviewRec.id] : null}
+                error={analysisErrors[reviewRec.id] ?? null}
+                playingKey={snippetKey}
+                onPlayYou={playIssueYou}
+                onPlayOriginal={playIssueOriginal}
+                onReanalyze={() => runAnalysis(reviewRec)}
+                onClose={() => {
+                  stopSnippet();
+                  setReviewId(null);
+                }}
+              />
+            )}
 
             {/* Recording list */}
             <div className="flex-1 overflow-y-auto px-4 py-4">
@@ -1030,6 +1330,11 @@ export function RecordingsPage() {
                           rec={rec}
                           line={null}
                           sectionName={null}
+                          review={
+                            canReview(rec, song)
+                              ? { active: reviewId === rec.id, analyzing: rec.id in analyzing, onOpen: openReview }
+                              : undefined
+                          }
                           songId={id!}
                           songAudioPath={song.audio_path}
                           selectMode={selectMode}

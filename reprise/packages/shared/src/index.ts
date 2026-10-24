@@ -13,6 +13,10 @@ export type {
   ImportDraft,
   Recording,
   Section,
+  TakeAnalysis,
+  TakeIssue,
+  TakeIssueKind,
+  TakeHalfStats,
 } from "./types/song";
 export type { HighlightType } from "./types/highlight";
 export { DEFAULT_HIGHLIGHTS } from "./types/highlight";

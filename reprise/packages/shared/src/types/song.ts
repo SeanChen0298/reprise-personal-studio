@@ -100,8 +100,59 @@ export interface Recording {
   is_best_take: boolean;
   note?: string;
   section_id?: string;
+  /** Song position (ms) at the take's first sample — set when the take was sung along with the song. */
+  song_start_ms?: number;
+  /** Which track played while singing. */
+  backing?: "original" | "vocal" | "instrumental";
+  /** Breath / high-note review of a sung-along take. */
+  analysis?: TakeAnalysis;
   created_at: string;
   updated_at: string;
+}
+
+export type TakeIssueKind =
+  | "ran_out"        // voice stopped well before the phrase ended
+  | "fading"         // phrase end much quieter than its start
+  | "extra_breath"   // breath taken in the middle of a phrase
+  | "late_entry"     // came in late after a quick breath
+  | "high_dropped"   // high note mostly not sung
+  | "high_cracked"   // voice broke / flipped on a high note
+  | "high_flat"      // high note under pitch
+  | "high_sharp"
+  | "high_unsteady"  // pitch wobbling on a high note
+  | "high_pushed";   // high note much louder than usual — likely pushing
+
+export interface TakeIssue {
+  kind: TakeIssueKind;
+  /** Song timeline position of the problem (ms). */
+  song_ms: number;
+  line_id?: string;
+  /** Human-readable detail, e.g. "stopped 0.6 s early" or "D5, 45 cents flat". */
+  detail: string;
+}
+
+export interface TakeHalfStats {
+  phrases: number;
+  breath_issues: number;
+  high_notes: number;
+  high_issues: number;
+}
+
+export interface TakeAnalysis {
+  version: number;
+  analyzed_at: string;
+  /** Measured offset between take and song beyond song_start_ms (latency), ms. */
+  lag_ms: number;
+  /** -12 when the singer sang an octave below the reference, etc. */
+  octave_shift: number;
+  /** Song range the take covers (ms). */
+  song_from_ms: number;
+  song_to_ms: number;
+  phrases_checked: number;
+  high_notes_checked: number;
+  issues: TakeIssue[];
+  /** First vs second half of the take, for stamina. */
+  halves: [TakeHalfStats, TakeHalfStats];
 }
 
 export interface Section {

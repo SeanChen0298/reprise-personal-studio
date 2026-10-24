@@ -14,6 +14,8 @@ export interface UseRecorderResult {
   stopRecording: () => Promise<RecordingResult | null>;
   /** Returns current mic input level 0–1 (call in RAF loop during recording) */
   getInputLevel: () => number;
+  /** Wall-clock time (performance.now) when the recorder started capturing. */
+  getStartedAt: () => number;
 }
 
 export function useRecorder(): UseRecorderResult {
@@ -23,6 +25,7 @@ export function useRecorder(): UseRecorderResult {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const startTimeRef = useRef<number>(0);
+  const startedAtRef = useRef<number>(0);
   const lineIdRef = useRef<string>("");
   const songFolderRef = useRef<string>("");
   const streamRef = useRef<MediaStream | null>(null);
@@ -81,6 +84,7 @@ export function useRecorder(): UseRecorderResult {
 
       recorder.start(100);
       startTimeRef.current = Date.now();
+      startedAtRef.current = performance.now();
       setIsRecording(true);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Microphone access denied";
@@ -149,5 +153,7 @@ export function useRecorder(): UseRecorderResult {
     });
   }, []);
 
-  return { isRecording, error, startRecording, stopRecording, getInputLevel };
+  const getStartedAt = useCallback(() => startedAtRef.current, []);
+
+  return { isRecording, error, startRecording, stopRecording, getInputLevel, getStartedAt };
 }

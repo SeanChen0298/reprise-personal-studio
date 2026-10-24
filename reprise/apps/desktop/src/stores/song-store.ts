@@ -108,7 +108,7 @@ interface SongStore {
   // Recordings management
   addRecording: (songId: string, recording: Recording) => Promise<void>;
   removeRecording: (songId: string, recordingId: string) => Promise<void>;
-  updateRecording: (songId: string, recordingId: string, data: Partial<Pick<Recording, "note" | "is_best_take">>) => Promise<void>;
+  updateRecording: (songId: string, recordingId: string, data: Partial<Pick<Recording, "note" | "is_best_take" | "analysis">>) => Promise<void>;
   toggleMasterTake: (songId: string, recordingId: string) => Promise<void>;
   getRecordingsForLine: (songId: string, lineId: string) => Recording[];
 
@@ -1164,6 +1164,9 @@ function dbRowToRecording(row: Record<string, unknown>): Recording {
     is_best_take: (row.is_best_take as boolean) ?? false,
     note: (row.note as string | undefined) ?? undefined,
     section_id: (row.section_id as string | undefined) ?? undefined,
+    song_start_ms: (row.song_start_ms as number | undefined) ?? undefined,
+    backing: (row.backing as Recording["backing"]) ?? undefined,
+    analysis: (row.analysis as Recording["analysis"]) ?? undefined,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -1181,6 +1184,9 @@ function recordingToDbRow(recording: Recording, userId: string): Record<string, 
     is_best_take: recording.is_best_take,
     note: recording.note ?? null,
     section_id: recording.section_id ?? null,
+    song_start_ms: recording.song_start_ms ?? null,
+    backing: recording.backing ?? null,
+    analysis: recording.analysis ?? null,
     created_at: recording.created_at,
     updated_at: recording.updated_at,
   };

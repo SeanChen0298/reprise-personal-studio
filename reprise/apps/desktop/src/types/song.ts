@@ -13,4 +13,8 @@ export type {
   ImportDraft,
   Recording,
   Section,
+  TakeAnalysis,
+  TakeIssue,
+  TakeIssueKind,
+  TakeHalfStats,
 } from "@reprise/shared";
