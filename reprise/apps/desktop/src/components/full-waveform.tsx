@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useRef } from "react";
 
-interface Region {
-  /** Fraction 0–1 of total duration where this region starts */
+interface Band {
+  /** Fraction 0–1 of total duration where this band starts / ends */
   start: number;
-  /** Fraction 0–1 of total duration where this region ends */
   end: number;
   label: string;
-  isCurrent?: boolean;
 }
 
 interface Props {
@@ -14,15 +12,17 @@ interface Props {
   peaks: number[];
   /** Playhead position as fraction 0–1 of total duration */
   progress: number;
-  /** Timestamped line regions to overlay */
-  regions: Region[];
+  /** Labelled stretches (e.g. song sections) drawn as alternating bands */
+  bands?: Band[];
+  /** One stretch to emphasise (e.g. the selected line) */
+  highlight?: { start: number; end: number } | null;
   /** Click-to-seek callback (fraction 0–1) */
   onSeek: (fraction: number) => void;
   /** Height class (default 64 px). */
   heightClass?: string;
 }
 
-export function FullWaveform({ peaks, progress, regions, onSeek, heightClass = "h-[64px]" }: Props) {
+export function FullWaveform({ peaks, progress, bands = [], highlight, onSeek, heightClass = "h-[64px]" }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -52,78 +52,65 @@ export function FullWaveform({ peaks, progress, regions, onSeek, heightClass = "
     ctx.clearRect(0, 0, w, h);
 
     const style = getComputedStyle(container);
-    const themeColor = style.getPropertyValue("--theme").trim() || "#2563EB";
+    const theme = style.getPropertyValue("--theme").trim() || "#2563EB";
+    const muted = style.getPropertyValue("--text-muted").trim() || "#9CA3AF";
+    const labelH = bands.length ? 12 : 0;
+    const waveTop = labelH;
+    const waveH = h - labelH;
 
-    // Draw region backgrounds
-    for (const region of regions) {
-      const x = region.start * w;
-      const rw = (region.end - region.start) * w;
-      ctx.fillStyle = region.isCurrent
-        ? "rgba(37,99,235,0.12)"
-        : "rgba(37,99,235,0.06)";
-      ctx.fillRect(x, 0, rw, h);
-
-      // Region left border
-      ctx.fillStyle = themeColor;
-      ctx.globalAlpha = region.isCurrent ? 1 : 0.5;
-      ctx.fillRect(x, 0, 2, h);
-      ctx.globalAlpha = 1;
-
-      // Region label
+    // Section bands: faint alternating fill, a hairline at each start, name above.
+    bands.forEach((band, i) => {
+      const x = band.start * w;
+      const bw = Math.max(1, (band.end - band.start) * w);
+      if (i % 2 === 0) {
+        ctx.fillStyle = "rgba(127,127,127,0.07)";
+        ctx.fillRect(x, waveTop, bw, waveH);
+      }
+      ctx.fillStyle = "rgba(127,127,127,0.35)";
+      ctx.fillRect(x, 0, 1, h);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x + 3, 0, Math.max(0, bw - 6), labelH);
+      ctx.clip();
       ctx.font = "600 9px 'DM Sans', sans-serif";
-      ctx.fillStyle = themeColor;
-      ctx.globalAlpha = 0.8;
-      ctx.fillText(region.label, x + 6, 11);
+      ctx.fillStyle = muted;
+      ctx.fillText(band.label.toUpperCase(), x + 4, 9);
+      ctx.restore();
+    });
+
+    // Selected line.
+    if (highlight) {
+      ctx.fillStyle = theme;
+      ctx.globalAlpha = 0.14;
+      ctx.fillRect(highlight.start * w, waveTop, Math.max(2, (highlight.end - highlight.start) * w), waveH);
       ctx.globalAlpha = 1;
     }
 
-    // Draw waveform bars
+    // Bars, centred vertically; played part in the theme colour.
     const barCount = peaks.length;
     const gap = 1;
     const barWidth = Math.max(1, (w - gap * (barCount - 1)) / barCount);
     const playedX = progress * w;
-
+    const mid = waveTop + waveH / 2;
     for (let i = 0; i < barCount; i++) {
       const x = i * (barWidth + gap);
-      const amplitude = peaks[i];
-      const barHeight = Math.max(2, amplitude * h * 0.85);
-      const y = h - barHeight; // Bottom-aligned like the design
-
-      const barMidX = x + barWidth / 2;
-      if (barMidX <= playedX) {
-        ctx.fillStyle = themeColor;
-        ctx.globalAlpha = 0.9;
-      } else {
-        ctx.fillStyle = "#E8E8E8";
-        ctx.globalAlpha = 1;
-      }
-
+      const barH = Math.max(2, peaks[i] * waveH * 0.9);
+      ctx.fillStyle = x + barWidth / 2 <= playedX ? theme : "rgba(127,127,127,0.35)";
       ctx.beginPath();
-      ctx.roundRect(x, y, barWidth, barHeight, [2, 2, 0, 0]);
+      ctx.roundRect(x, mid - barH / 2, barWidth, barH, 1);
       ctx.fill();
     }
 
-    // Playhead line + circle
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = "#111111";
-    ctx.fillRect(playedX - 1, 0, 2, h);
-    ctx.beginPath();
-    ctx.arc(playedX, 0, 5, 0, Math.PI * 2);
-    ctx.fill();
-  }, [peaks, progress, regions]);
+    // Playhead.
+    ctx.fillStyle = theme;
+    ctx.fillRect(Math.round(playedX) - 1, waveTop, 2, waveH);
+  }, [peaks, progress, bands, highlight]);
 
   if (peaks.length === 0) return null;
 
   return (
-    <div
-      ref={containerRef}
-      className={`${heightClass} relative cursor-pointer`}
-      onClick={handleClick}
-    >
-      <canvas
-        ref={canvasRef}
-        className="absolute inset-0 w-full h-full"
-      />
+    <div ref={containerRef} className={`${heightClass} relative cursor-pointer`} onClick={handleClick}>
+      <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
     </div>
   );
 }

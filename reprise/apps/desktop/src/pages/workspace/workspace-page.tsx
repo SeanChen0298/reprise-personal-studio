@@ -163,6 +163,8 @@ function Workspace({ songId }: { songId: string }) {
   const cursorSection = sectionOf(cursorLine);
 
   const [editingLineId, setEditingLineId] = useState<string | null>(null);
+  /** The caret shows only once you work inside a line (←/→, Home/End, clicking into the text). */
+  const [caretShown, setCaretShown] = useState(false);
   const [sectionEdit, setSectionEdit] = useState<SectionEdit | null>(null);
   const [view, setView] = useState<"lyrics" | "lead">("lyrics");
   const [modeTabsEl, setModeTabsEl] = useState<HTMLDivElement | null>(null);
@@ -213,10 +215,10 @@ function Workspace({ songId }: { songId: string }) {
   const moveTo = useCallback(
     (line: Line | undefined, keepColumn = true) => {
       if (!line) return;
-      const col = keepColumn ? Math.min(focus, displayText(line).length) : 0;
+      const col = keepColumn && caretShown ? Math.min(focus, displayText(line).length) : 0;
       setCursor({ lineId: line.id, anchor: col, focus: col });
     },
-    [focus],
+    [focus, caretShown],
   );
 
   const sectionRange = useCallback(
@@ -388,6 +390,7 @@ function Workspace({ songId }: { songId: string }) {
       case "ArrowDown": {
         if (e.altKey) return;
         handled();
+        setCaretShown(false);
         const down = k === "ArrowDown";
         if (ctrl) {
           const starts = sections.map((s) => lines.find((l) => l.order >= s.start_line_order)).filter(Boolean) as Line[];
@@ -403,6 +406,7 @@ function Workspace({ songId }: { songId: string }) {
         handled();
         const right = k === "ArrowRight";
         if (e.altKey) return void nudge(e.shiftKey ? "end_ms" : "start_ms", right ? 50 : -50);
+        setCaretShown(true);
         let f = ctrl ? nextWordBoundary(cursorText, focus, right ? 1 : -1) : Math.max(0, Math.min(len, focus + (right ? 1 : -1)));
         if (!e.shiftKey && selEnd > selStart && !ctrl) f = right ? selEnd : selStart;
         return setSel(e.shiftKey ? anchor : f, f);
@@ -410,6 +414,7 @@ function Workspace({ songId }: { songId: string }) {
       case "Home":
       case "End": {
         handled();
+        setCaretShown(true);
         const f = k === "Home" ? 0 : len;
         return setSel(e.shiftKey ? anchor : f, f);
       }
@@ -445,7 +450,7 @@ function Workspace({ songId }: { songId: string }) {
         handled();
         return void clearMarks();
     }
-    if (ctrl && (k === "a" || k === "A")) return handled(), setSel(0, len);
+    if (ctrl && (k === "a" || k === "A")) return handled(), setCaretShown(true), setSel(0, len);
     if (ctrl || e.altKey) return;
     if (k === "l" || k === "L") return handled(), e.shiftKey ? loopSection() : loopLine();
     if (k === "t" || k === "T") return handled(), void tapStart();
@@ -520,6 +525,7 @@ function Workspace({ songId }: { songId: string }) {
 
   const onSelect = useCallback((lineId: string, a: number, f: number) => {
     setCursor({ lineId, anchor: a, focus: f });
+    setCaretShown(true);
     setEditingLineId(null);
   }, []);
   const onCommitEdit = useStable((lineId: string, text: string) => {
@@ -640,6 +646,7 @@ function Workspace({ songId }: { songId: string }) {
         durationMs={durationMs}
         peaks={peaks}
         lines={lines}
+        sections={sections}
         cursorLineId={cursorLine?.id ?? null}
         tracks={tracks}
         track={track}
@@ -699,7 +706,7 @@ function Workspace({ songId }: { songId: string }) {
                 sectionEdit={sectionEdit}
                 playingLineId={playingLineId}
                 loopLineIds={loopLineIds}
-                showStartDot={!takes.busy && !takes.pending}
+                showCaret={caretShown}
                 issuesByLine={takes.issuesByLine}
                 onSelect={onSelect}
                 onStartEdit={setEditingLineId}

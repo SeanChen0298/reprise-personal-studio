@@ -106,7 +106,8 @@ interface LineRowProps {
   isPlaying: boolean;
   inLoop: boolean;
   editing: boolean;
-  showStartDot: boolean;
+  /** Draw the caret (only once you're working inside the line). */
+  showCaret: boolean;
   issues?: { issue: TakeIssue; key: string }[];
   onSelect: (lineId: string, anchor: number, focus: number) => void;
   onStartEdit: (lineId: string) => void;
@@ -118,7 +119,7 @@ interface LineRowProps {
 }
 
 const LineRow = memo(function LineRow({
-  line, info, translation, highlights, isCursor, anchor, focus, isPlaying, inLoop, editing, showStartDot,
+  line, info, translation, highlights, isCursor, anchor, focus, isPlaying, inLoop, editing, showCaret,
   issues, onSelect, onStartEdit, onCommitEdit, onCancelEdit, onPlay, onIssueClick, onNudge,
 }: LineRowProps) {
   const text = displayText(line);
@@ -152,20 +153,24 @@ const LineRow = memo(function LineRow({
     <div
       ref={rowRef}
       data-line-id={line.id}
-      className={`group relative flex flex-col pl-7 pr-2 py-[5px] rounded-[6px] transition-colors ${
-        isCursor
-          ? "bg-[var(--surface)] shadow-[inset_2px_0_0_var(--theme)]"
-          : isPlaying
-            ? "bg-[var(--theme-light)]"
-            : inLoop
-              ? "bg-[var(--theme-light)]/50"
-              : "hover:bg-[var(--surface)]/60"
+      className={`group relative flex flex-col pl-8 pr-2 py-[5px] rounded-[8px] transition-colors ${
+        isCursor ? "bg-[var(--theme-light)]" : inLoop ? "bg-[var(--theme-light)]/40" : "hover:bg-[var(--surface)]"
       }`}
       onMouseUp={handleMouseUp}
       onDoubleClick={() => onStartEdit(line.id)}
     >
-      {/* Play from this line */}
-      {line.start_ms != null && (
+      {/* Being sung: a small level-meter icon; otherwise ▶ on hover */}
+      {isPlaying ? (
+        <span className="absolute left-[9px] top-[13px] flex items-end gap-[2px] h-[11px]" title="Playing">
+          {[0, 1, 2].map((i) => (
+            <span
+              key={i}
+              className="w-[2px] rounded-full bg-[var(--theme)] animate-pulse"
+              style={{ height: `${[60, 100, 75][i]}%`, animationDelay: `${i * 150}ms`, animationDuration: "0.9s" }}
+            />
+          ))}
+        </span>
+      ) : line.start_ms != null && (
         <button
           onMouseUp={(e) => e.stopPropagation()}
           onClick={(e) => {
@@ -173,20 +178,12 @@ const LineRow = memo(function LineRow({
             onPlay(line.id);
           }}
           title="Play from this line (Enter)"
-          className={`absolute left-[4px] top-[9px] w-[18px] h-[18px] rounded-full flex items-center justify-center border-none cursor-pointer transition-opacity ${
-            isPlaying ? "opacity-100 bg-[var(--theme)] text-white" : "opacity-0 group-hover:opacity-100 bg-[var(--bg)] text-[var(--text-secondary)]"
-          }`}
+          className="absolute left-[5px] top-[9px] w-[18px] h-[18px] rounded-full flex items-center justify-center border-none cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity bg-[var(--surface)] text-[var(--text-secondary)] shadow-sm"
         >
           <svg width="7" height="7" viewBox="0 0 24 24" fill="currentColor" style={{ marginLeft: 1 }}>
             <polygon points="5,3 19,12 5,21" />
           </svg>
         </button>
-      )}
-      {showStartDot && !isPlaying && (
-        <span
-          className="absolute left-[10px] top-[15px] w-[6px] h-[6px] rounded-full bg-red-500 group-hover:opacity-0"
-          title="Takes start from this line (R)"
-        />
       )}
 
       <div className="flex items-start">
@@ -199,14 +196,14 @@ const LineRow = memo(function LineRow({
               onCancel={onCancelEdit}
             />
           ) : (
-            <div className={`text-[15px] leading-[1.65] ${isPlaying ? "text-[var(--theme-text)] font-medium" : "text-[var(--text-primary)]"}`}>
+            <div className={`text-[15px] leading-[1.65] transition-colors ${isPlaying ? "text-[var(--theme-text)] font-medium" : "text-[var(--text-primary)]"}`}>
               <AnnotatedText
                 text={text}
                 annotations={line.annotations}
                 highlights={highlights}
                 lineFuriganaHtml={line.custom_text ? line.custom_furigana_html : line.furigana_html}
                 selection={selection}
-                caret={isCursor && anchor === focus ? focus : undefined}
+                caret={isCursor && showCaret && anchor === focus ? focus : undefined}
               />
               {text.length === 0 && <span className="text-[var(--text-muted)] italic text-[13px]">(empty line)</span>}
             </div>
@@ -347,7 +344,7 @@ export interface LyricSheetProps {
   sectionEdit: SectionEdit | null;
   playingLineId: string | null;
   loopLineIds: Set<string>;
-  showStartDot: boolean;
+  showCaret: boolean;
   issuesByLine: Map<string, { issue: TakeIssue; key: string }[]>;
   onSelect: (lineId: string, anchor: number, focus: number) => void;
   onStartEdit: (lineId: string) => void;
@@ -420,7 +417,7 @@ export function LyricSheet(p: LyricSheetProps) {
               isPlaying={p.playingLineId === line.id}
               inLoop={p.loopLineIds.has(line.id)}
               editing={p.editingLineId === line.id}
-              showStartDot={isCursor && p.showStartDot}
+              showCaret={isCursor && p.showCaret}
               issues={p.issuesByLine.get(line.id)}
               onSelect={p.onSelect}
               onStartEdit={p.onStartEdit}
