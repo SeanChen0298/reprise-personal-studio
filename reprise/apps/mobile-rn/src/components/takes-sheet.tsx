@@ -33,18 +33,29 @@ export function TakesSheet({ open, onClose, songId, takes, lines, t, onBeforePla
   const [loading, setLoading] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(takes[0]?.id ?? null);
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  const [withBacking, setWithBacking] = useState(true);
   const soundRef = useRef<Audio.Sound | null>(null);
+  const backingRef = useRef<Audio.Sound | null>(null);
+  const backingUri = local.downloads[songId]?.instrumental?.uri;
 
   const stop = async () => {
     const s = soundRef.current;
+    const b = backingRef.current;
     soundRef.current = null;
+    backingRef.current = null;
     setPlaying(null);
-    await s?.unloadAsync().catch(() => {});
+    await Promise.all([s?.unloadAsync().catch(() => {}), b?.unloadAsync().catch(() => {})]);
   };
   useEffect(() => {
     if (!open) void stop();
   }, [open]);
-  useEffect(() => () => void soundRef.current?.unloadAsync(), []);
+  useEffect(
+    () => () => {
+      void soundRef.current?.unloadAsync();
+      void backingRef.current?.unloadAsync();
+    },
+    [],
+  );
 
   const play = async (take: Take) => {
     if (playing === take.id) return stop();
@@ -58,10 +69,20 @@ export function TakesSheet({ open, onClose, songId, takes, lines, t, onBeforePla
       return;
     }
     try {
-      const { sound } = await Audio.Sound.createAsync({ uri }, { shouldPlay: true }, (st) => {
+      // Sung-along takes can play with the backing under them, lined up like on the computer.
+      const songMs = take.song_start_ms != null ? take.song_start_ms - (take.analysis?.lag_ms ?? 0) : null;
+      const mix = withBacking && backingUri && songMs != null;
+      const takeFrom = mix ? Math.max(0, -songMs) : 0;
+      const { sound } = await Audio.Sound.createAsync({ uri }, { shouldPlay: false, positionMillis: takeFrom }, (st) => {
         if (st.isLoaded && st.didJustFinish) void stop();
       });
+      let backing: Audio.Sound | null = null;
+      if (mix) {
+        backing = (await Audio.Sound.createAsync({ uri: backingUri }, { shouldPlay: false, volume: 0.55, positionMillis: Math.max(0, songMs) })).sound;
+      }
       soundRef.current = sound;
+      backingRef.current = backing;
+      await Promise.all([sound.playAsync(), backing?.playAsync()]);
       setPlaying(take.id);
     } catch (err) {
       Alert.alert("Can't play this take", err instanceof Error ? err.message : String(err));
@@ -76,6 +97,14 @@ export function TakesSheet({ open, onClose, songId, takes, lines, t, onBeforePla
         <Text style={{ fontSize: 14, color: t.muted, lineHeight: 20 }}>
           No takes yet. Tap Record to sing along from the current line — use headphones so the song doesn't go into the mic.
         </Text>
+      )}
+      {!!backingUri && takes.some((x) => x.song_start_ms != null) && (
+        <Pressable onPress={() => setWithBacking((v) => !v)} style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10, alignSelf: "flex-start" }}>
+          <View style={{ width: 34, height: 20, borderRadius: 10, padding: 2, backgroundColor: withBacking ? t.theme : t.border, alignItems: withBacking ? "flex-end" : "flex-start" }}>
+            <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: "#fff" }} />
+          </View>
+          <Text style={{ fontSize: 13.5, color: t.textSecondary }}>Play with the backing under it</Text>
+        </Pressable>
       )}
       <View style={{ gap: 10 }}>
         {takes.map((take) => {
