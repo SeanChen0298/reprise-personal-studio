@@ -33,6 +33,12 @@ export function loadVocalMap(song: Pick<Song, "pitch_data_path" | "vocals_path">
   return p;
 }
 
+/** The vocal map if it was already built this session (with the stem's loudness), else null — never starts a build. */
+export function peekVocalMap(song: Pick<Song, "pitch_data_path" | "vocals_path">): Promise<VocalMap> | null {
+  if (!song.pitch_data_path) return null;
+  return mapCache.get(`${song.pitch_data_path}|${song.vocals_path ?? ""}`) ?? null;
+}
+
 const featureCache = new Map<string, Promise<TakeFeatures>>();
 
 /** A take's loudness + pitch tracks (cached for the session — used by the review and its pitch charts). */

@@ -8,11 +8,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { exists, mkdir, readDir, readTextFile, remove, rename, stat, writeTextFile } from "@tauri-apps/plugin-fs";
 import { normaliseCard } from "@reprise/shared";
-import type { PhoneChanges, PhoneTake, SyncCoach, SyncFileRef, SyncSnapshot, SyncSongFiles } from "@reprise/shared";
+import type { Line, PhoneChanges, PhoneTake, SyncCoach, SyncFileRef, SyncLineHint, SyncSnapshot, SyncSongFiles } from "@reprise/shared";
 import { useSongStore } from "../stores/song-store";
 import { usePreferencesStore } from "../stores/preferences-store";
 import { useHighlightStore } from "./highlight-config";
-import { analyzeRecording, canReview } from "./take-review";
+import { analyzeRecording, canReview, peekVocalMap } from "./take-review";
+import { parsePitchData } from "./audio-analysis";
+import { buildVocalMap, LONG_PHRASE_MS, lineVocalInfo, semitoneToNoteName } from "./vocal-map";
 import { splitLines } from "@reprise/shared";
 import type { Recording, Song } from "../types/song";
 
@@ -66,12 +68,46 @@ async function readJson<T>(path: string): Promise<T | null> {
   }
 }
 
+const hintCache = new Map<string, Record<string, SyncLineHint>>();
+
+/**
+ * Song hints per line, as the lyric sheet shows them: high notes from pitch.csv,
+ * and long phrases only once the full vocal map (with the stem's loudness to
+ * trim reverb tails) has been built in this session — pitch alone runs long.
+ */
+async function songHints(song: Song, all: Line[]): Promise<Record<string, SyncLineHint> | undefined> {
+  if (song.pitch_status !== "done" || !song.pitch_data_path) return undefined;
+  const { lines } = splitLines(all, song.translation_language);
+  const full = peekVocalMap(song);
+  const key = `${song.pitch_data_path}|${full ? "full" : "pitch"}|${lines.map((l) => `${l.id}:${l.start_ms}:${l.end_ms}`).join(",")}`;
+  const cached = hintCache.get(key);
+  if (cached) return cached;
+  try {
+    const map = full ? await full : buildVocalMap(parsePitchData(await readTextFile(song.pitch_data_path)));
+    const out: Record<string, SyncLineHint> = {};
+    for (const l of lines) {
+      const info = lineVocalInfo(map, l);
+      if (!info) continue;
+      const h: SyncLineHint = {};
+      if (full && info.longestPhraseMs >= LONG_PHRASE_MS) h.long_ms = info.longestPhraseMs;
+      if (info.peakSemitone != null) h.high = semitoneToNoteName(info.peakSemitone);
+      if (h.long_ms || h.high) out[l.id] = h;
+    }
+    if (hintCache.size > 300) hintCache.clear();
+    hintCache.set(key, out);
+    return out;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Build the snapshot the phone pulls. */
 export async function buildSnapshot(host: string): Promise<SyncSnapshot> {
   const st = useSongStore.getState();
   const songs = st.songs;
   const files: Record<string, SyncSongFiles> = {};
   const coach: Record<string, SyncCoach> = {};
+  const hints: Record<string, Record<string, SyncLineHint>> = {};
   await Promise.all(
     songs.map(async (song) => {
       const [audio, vocals, instrumental] = await Promise.all([
@@ -80,6 +116,8 @@ export async function buildSnapshot(host: string): Promise<SyncSnapshot> {
         fileRef(song.stem_status === "done" ? song.instrumental_path : undefined),
       ]);
       files[song.id] = { audio, vocals, instrumental };
+      const h = await songHints(song, st.lines[song.id] ?? []);
+      if (h && Object.keys(h).length) hints[song.id] = h;
       if (song.audio_folder) {
         const k = await readJson<{ card?: Record<string, unknown>; card_made_at?: string; memory?: string[] }>(
           `${song.audio_folder}/coach.json`,
@@ -106,6 +144,7 @@ export async function buildSnapshot(host: string): Promise<SyncSnapshot> {
     singer_facts: profile?.facts ?? [],
     theme: usePreferencesStore.getState().theme,
     practiced: usePreferencesStore.getState().lastPracticed,
+    hints,
   };
 }
 

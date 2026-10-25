@@ -58,6 +58,7 @@ export default function SongScreen() {
   const downloading = useLibraryStore((s) => s.downloading[id]);
   const showTranslation = usePrefsStore((s) => s.showTranslation);
   const showFurigana = usePrefsStore((s) => s.showFurigana);
+  const showHints = usePrefsStore((s) => s.showHints);
   const countIn = usePrefsStore((s) => s.countIn);
   const autoDownload = usePrefsStore((s) => s.autoDownload);
   const [focus, setFocus] = useState(false);
@@ -74,6 +75,7 @@ export default function SongScreen() {
   const coach = snapshot?.coach[id];
   const card = coach?.card ?? null;
   const highlights = snapshot?.highlights ?? [];
+  const hints = showHints && !focus ? snapshot?.hints?.[id] : undefined;
 
   // ── Audio ──────────────────────────────────────────────────────────────
   const files = snapshot?.files[id];
@@ -288,6 +290,7 @@ export default function SongScreen() {
               active={item.index === active}
               distance={Math.abs(item.index - active)}
               translation={showTranslation ? transById.get(item.line.id) : undefined}
+              hint={hints?.[item.line.id]}
               highlights={highlights}
               showFurigana={showFurigana}
               t={t}
@@ -413,7 +416,8 @@ export default function SongScreen() {
         {[
           { label: "Translation", value: showTranslation, set: usePrefsStore.getState().setShowTranslation, hidden: translations.length === 0 },
           { label: "Furigana", value: showFurigana, set: usePrefsStore.getState().setShowFurigana, hidden: !lines.some((l) => l.furigana_html || l.custom_furigana_html) },
-          { label: "Focus (hide the coach's notes)", value: focus, set: setFocus, hidden: !card },
+          { label: "Song hints (high notes, long phrases)", value: showHints, set: usePrefsStore.getState().setShowHints, hidden: !snapshot?.hints?.[id] },
+          { label: "Focus (hide the coach's notes and hints)", value: focus, set: setFocus, hidden: !card && !snapshot?.hints?.[id] },
         ]
           .filter((x) => !x.hidden)
           .map((x) => (

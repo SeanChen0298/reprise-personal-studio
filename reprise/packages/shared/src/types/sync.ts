@@ -24,6 +24,14 @@ export interface SyncCoach {
   memory: string[];
 }
 
+/** What the original singer does on a line (from the desktop's vocal map) — the lyric sheet's "song hints". */
+export interface SyncLineHint {
+  /** A long phrase without a breath in the original (ms). */
+  long_ms?: number;
+  /** One of the song's highest notes, e.g. "D5". */
+  high?: string;
+}
+
 /** GET /library — the whole library as the desktop has it. */
 export interface SyncSnapshot {
   format: "reprise-sync";
@@ -40,6 +48,8 @@ export interface SyncSnapshot {
   files: Record<string, SyncSongFiles>;
   /** Singer facts the coach keeps. */
   singer_facts: string[];
+  /** Song id → line id → song hints. */
+  hints?: Record<string, Record<string, SyncLineHint>>;
   /** Song id → when it was last practised on the computer. */
   practiced?: Record<string, string>;
   /** The desktop's accent theme (blue / violet / …), so the phone looks the same. */

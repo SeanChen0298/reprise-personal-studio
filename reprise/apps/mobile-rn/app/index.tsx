@@ -1,6 +1,6 @@
 // Library: the song to pick up again (big, one action), then every song.
-import { useMemo } from "react";
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, Text, View } from "react-native";
+import { useMemo, useState } from "react";
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, Text, TextInput, View } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Song } from "@reprise/shared/core";
@@ -43,7 +43,12 @@ export default function Library() {
   const downloading = useLibraryStore((s) => s.downloading);
 
   const recent = useMemo(() => recentSongs(snapshot, local.practiced, local.takes), [snapshot, local.practiced, local.takes]);
-  const songs = useMemo(() => [...(snapshot?.songs ?? [])].sort((a, b) => a.title.localeCompare(b.title)), [snapshot]);
+  const [query, setQuery] = useState("");
+  const allSongs = useMemo(() => [...(snapshot?.songs ?? [])].sort((a, b) => a.title.localeCompare(b.title)), [snapshot]);
+  const songs = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? allSongs.filter((s) => s.title.toLowerCase().includes(q) || s.artist?.toLowerCase().includes(q) || s.tags?.some((t) => t.toLowerCase().includes(q))) : allSongs;
+  }, [allSongs, query]);
   const hero = recent[0];
   const open = (song: Song) => router.push(`/song/${song.id}`);
 
@@ -85,7 +90,7 @@ export default function Library() {
         </View>
       )}
 
-      {hero && (
+      {hero && !query && (
         <Pressable onPress={() => open(hero.song)} style={{ borderRadius: 16, backgroundColor: t.surface, borderWidth: 1, borderColor: t.borderSubtle, overflow: "hidden", marginBottom: 22 }}>
           <Thumb song={hero.song} radius={0} aspect={2.1} />
           <View style={{ padding: 16, gap: 4 }}>
@@ -111,10 +116,20 @@ export default function Library() {
         </Pressable>
       )}
 
-      {songs.length > 0 && (
-        <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8, marginBottom: 6 }}>
+      {allSongs.length > 0 && (
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 6 }}>
           <Text style={{ fontSize: 13.5, fontWeight: "600", color: t.textSecondary }}>All songs</Text>
           <Text style={{ fontSize: 12.5, color: t.muted }}>{songs.length}</Text>
+          {allSongs.length > 6 && (
+            <TextInput
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Search"
+              placeholderTextColor={t.muted}
+              autoCorrect={false}
+              style={{ flex: 1, marginLeft: 8, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 9, backgroundColor: t.surface, borderWidth: 1, borderColor: t.borderSubtle, color: t.text, fontSize: 14 }}
+            />
+          )}
         </View>
       )}
     </View>
