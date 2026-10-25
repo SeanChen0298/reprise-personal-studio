@@ -372,4 +372,26 @@ mod tests {
         assert!(root.join("sync").join("last-pull.txt").is_file());
         server.unblock();
     }
+
+    /// Manual testing with a phone / emulator:
+    /// `REPRISE_SYNC_TOKEN=… cargo test --lib manual_serve -- --ignored --nocapture` serves C:/Reprise on
+    /// 127.0.0.1 only (the Android emulator reaches it as 10.0.2.2) for 20 minutes.
+    #[test]
+    #[ignore]
+    fn manual_serve() {
+        let token = std::env::var("REPRISE_SYNC_TOKEN").expect("REPRISE_SYNC_TOKEN");
+        let server = Arc::new(Server::http(("127.0.0.1", 47615)).unwrap());
+        println!("serving C:/Reprise on 127.0.0.1:47615 (emulator: 10.0.2.2:47615)");
+        let s2 = server.clone();
+        thread::spawn(move || {
+            for req in s2.incoming_requests() {
+                println!("{} {}", req.method(), req.url().split("token=").next().unwrap_or(""));
+                let token = token.clone();
+                thread::spawn(move || handle(req, Path::new("C:/Reprise"), &token, "TEST-DESKTOP"));
+            }
+        });
+        thread::sleep(std::time::Duration::from_secs(1200));
+        server.unblock();
+    }
 }
+

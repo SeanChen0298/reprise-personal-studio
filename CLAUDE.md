@@ -1,9 +1,9 @@
 # CLAUDE.md — Reprise Agent Reference
 
 ## Project
-Reprise — personal vocal practice studio. **Desktop-only** (Tauri v2 + React), **local-first**: no auth, no cloud database. The only online parts are YouTube (yt-dlp) and the **optional coach**, which calls Gemini or Claude with the user's own API key. All data lives in a local NoSQL database (Dexie/IndexedDB) on the machine; audio files live on local disk under `C:/Reprise/`.
+Reprise — personal vocal practice studio. **Desktop app** (Tauri v2 + React) plus a **phone app** (Expo / React Native) that syncs with it over the home Wi-Fi; **local-first**: no auth, no cloud database. The only online parts are YouTube (yt-dlp), LRCLIB lyrics and the **optional coach**, which calls Gemini or Claude with the user's own API key. All data lives in a local NoSQL database (Dexie/IndexedDB) on the machine; audio files live on local disk under `C:/Reprise/`.
 
-> History: the app previously synced to Supabase (Postgres + Auth) and Google Drive, and shipped a React Native mobile app. All of that has been removed — the desktop app is now standalone and local. (An old Supabase cloud project may still exist remotely, but the app no longer references it.)
+> History: the app previously synced to Supabase (Postgres + Auth) and Google Drive, with an older React Native app on top. That was removed; the current phone app (`apps/mobile-rn`, rebuilt Oct 2026) talks only to the desktop on the local network. (An old Supabase cloud project may still exist remotely, but nothing references it.)
 
 ---
 
@@ -15,6 +15,7 @@ reprise/
 │   ├── src/               React frontend (pages, components, hooks, stores, lib)
 │   └── src-tauri/         Rust binary, capabilities, sidecars (Python scripts)
 ├── packages/shared/       Shared TS types (Song/Line/Recording/Section) + furigana
+├── apps/mobile-rn/        Expo SDK 53 phone app — installed with npm, OUTSIDE the pnpm workspace
 └── packages/ui/           Empty placeholder (unused)
 ```
 
@@ -135,6 +136,12 @@ src/lib/           local-db.ts (Dexie data layer), audio-download.ts (yt-dlp), a
 **`task-queue-store.ts`** — persisted queue for Demucs / torchcrepe / WhisperX. Processed by `use-task-queue-processor.ts`.
 
 ---
+
+## Phone app & Wi-Fi sync
+
+- **Desktop side:** Settings → Phone switches on a small HTTP server in the Tauri backend (`src-tauri/src/sync_server.rs`, tiny_http, port 47615). Every request needs the pairing token (`X-Reprise-Token` header or `?token=`); `GET /ping`, `GET /library` (serves `C:/Reprise/sync/library.json`), `GET /file?path=` (only files under `C:/Reprise`, audio / json / image types), `POST /upload?name=` (into `C:/Reprise/sync/inbox/`, safe names only). Pairing is a QR code `reprise://pair?h=<ip:port>&t=<token>&n=<host>`; the token lives in `reprise-phone-sync` (localStorage, never in backups). `hooks/use-phone-sync.ts` (app root) rewrites the snapshot (debounced on store changes + every 30 s — coach cards are files) and imports the inbox every 3 s (`lib/phone-sync.ts`): phone takes move into the song's `recordings/` and get their breath / high-note review right away; line notes / voice marks / take notes merge newer-wins; practised times merge. The snapshot (`SyncSnapshot` in `@reprise/shared`) has songs, lines, sections, takes, highlight types, coach card + song memory (never chat or keys), singer facts, file sizes / mtimes, theme and practised times; it's only written after the DB has loaded (never an empty library).
+- **Phone side** (`apps/mobile-rn`, expo-router): library (pick-up card + all songs, pull to sync), song screen (lyrics follow the playhead with furigana / highlights / translation / notes / voice marks, tap a line to play, hold for note + voice mark + loop; loop line → section → off; 0.5–1.0× with pitch kept; Original / Backing / Vocals; sung-along takes with lead-in, count-in, section stop — kept even if you leave mid-take; Takes sheet with the desktop's review in plain words; "About this song" = the coach's card), pairing (QR via expo-camera or typed code), settings. State: `stores/library-store.ts` keeps the snapshot (`library.json`) and phone-only state (`local.json`: downloads, takes, unacknowledged edits, practised times) in the app's documents folder; sync = upload takes (audio, then `<id>.take.json`) and `changes-*.json`, then pull the library. Shared code comes from `@reprise/shared/core` (no furigana generation), resolved by `metro.config.js` / tsconfig paths.
+- **Build:** `cd reprise/apps/mobile-rn && npm install && npx expo prebuild --platform android` (android/ is generated and git-ignored; permissions and cleartext HTTP come from app.json plugins), then `cd android && ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a` → `android/app/build/outputs/apk/release/app-release.apk` (signed with the debug key — personal use). `npx tsc --noEmit` typechecks.
 
 ## Backup
 

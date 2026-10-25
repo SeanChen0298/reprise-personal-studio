@@ -12,6 +12,8 @@ import type { PhoneChanges, PhoneTake, SyncCoach, SyncFileRef, SyncSnapshot, Syn
 import { useSongStore } from "../stores/song-store";
 import { usePreferencesStore } from "../stores/preferences-store";
 import { useHighlightStore } from "./highlight-config";
+import { analyzeRecording, canReview } from "./take-review";
+import { splitLines } from "@reprise/shared";
 import type { Recording, Song } from "../types/song";
 
 export const REPRISE_ROOT = "C:/Reprise";
@@ -102,6 +104,8 @@ export async function buildSnapshot(host: string): Promise<SyncSnapshot> {
     coach,
     files,
     singer_facts: profile?.facts ?? [],
+    theme: usePreferencesStore.getState().theme,
+    practiced: usePreferencesStore.getState().lastPracticed,
   };
 }
 
@@ -177,6 +181,7 @@ export async function importInbox(): Promise<{ takes: number; edits: number }> {
       await store.addRecording(t.song_id, rec);
       await remove(path).catch(() => {});
       done.takes++;
+      if (canReview(rec, song)) reviewSoon(rec, song);
     } else if (e.name.startsWith("changes-") && e.name.endsWith(".json")) {
       const c = await readJson<PhoneChanges>(path);
       if (c?.type === "changes") done.edits += await applyChanges(c);
@@ -215,4 +220,18 @@ async function applyChanges(c: PhoneChanges): Promise<number> {
     }
   }
   return n;
+}
+
+/** Phone takes get their breath / high-note review here, one at a time, so the phone sees it on its next sync. */
+let reviewing: Promise<void> = Promise.resolve();
+function reviewSoon(rec: Recording, song: Song) {
+  reviewing = reviewing.then(async () => {
+    try {
+      const { lines } = splitLines(useSongStore.getState().lines[song.id] ?? [], song.translation_language);
+      const analysis = await analyzeRecording(rec, song, lines);
+      await useSongStore.getState().updateRecording(song.id, rec.id, { analysis });
+    } catch (err) {
+      console.warn("[phone-sync] couldn't review a phone take:", err);
+    }
+  });
 }

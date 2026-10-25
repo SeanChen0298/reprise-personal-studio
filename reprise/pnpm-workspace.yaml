@@ -1,3 +1,5 @@
 packages:
   - "apps/*"
   - "packages/*"
+  # The phone app is installed with npm on its own (flat node_modules — Expo / React Native autolinking expects it).
+  - "!apps/mobile-rn"

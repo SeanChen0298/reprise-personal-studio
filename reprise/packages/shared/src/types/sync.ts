@@ -40,6 +40,10 @@ export interface SyncSnapshot {
   files: Record<string, SyncSongFiles>;
   /** Singer facts the coach keeps. */
   singer_facts: string[];
+  /** Song id → when it was last practised on the computer. */
+  practiced?: Record<string, string>;
+  /** The desktop's accent theme (blue / violet / …), so the phone looks the same. */
+  theme?: string;
 }
 
 /** A take recorded on the phone: uploaded audio first, then this as `<id>.take.json`. */
