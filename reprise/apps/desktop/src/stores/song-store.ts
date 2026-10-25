@@ -5,9 +5,11 @@ import {
   downloadAudio,
   buildSongFolder,
   separateStems,
+  type TimedLyricLine,
 } from "../lib/audio-download";
 import { analyzePitch } from "../lib/audio-analysis";
 import { alignLyrics } from "../lib/whisperx-align";
+import { audioDurationMs, confidentMatch, searchLyrics, UNTIMED } from "../lib/lrclib";
 import { analyzeChords } from "../lib/chord-analysis";
 import { localDb } from "../lib/local-db";
 import { readFile } from "@tauri-apps/plugin-fs";
@@ -332,17 +334,35 @@ export const useSongStore = create<SongStore>()((set, get) => ({
         }).catch((e) => console.warn("BPM detection failed:", e));
       }
 
-      if (result.lyrics && result.lyrics.length > 0) {
-        const existingLines = get().lines[id];
-        if (!existingLines || existingLines.length === 0) {
+      const existingLines = get().lines[id];
+      if (!existingLines || existingLines.length === 0) {
+        // Lyrics for a fresh song: LRCLIB synced lyrics that fit this recording's
+        // length, else YouTube subtitles, else LRCLIB plain lyrics (untimed).
+        let lyrics: TimedLyricLine[] | undefined;
+        let plain: TimedLyricLine[] | undefined;
+        try {
+          const durationMs = song.duration_ms ?? (await audioDurationMs(result.audioPath));
+          if (durationMs && !song.duration_ms) get().updateSong(id, { duration_ms: durationMs }).catch(() => {});
+          const cands = await searchLyrics({ title: song.title, artist: song.artist, durationMs });
+          lyrics = confidentMatch(cands, durationMs)?.lines;
+          const top = cands[0];
+          if (top && durationMs && top.durationMs && Math.abs(top.durationMs - durationMs) <= 3000) {
+            plain = top.lines.map((l) => ({ ...l, start_ms: UNTIMED, end_ms: UNTIMED }));
+          }
+        } catch (e) {
+          console.warn("LRCLIB lookup failed:", e);
+        }
+        if (!lyrics && result.lyrics && result.lyrics.length > 0) lyrics = result.lyrics;
+        lyrics ??= plain;
+        if (lyrics && lyrics.length > 0) {
           const now = new Date().toISOString();
-          const newLines: Line[] = result.lyrics.map((tl, i) => ({
+          const newLines: Line[] = lyrics.map((tl, i) => ({
             id: crypto.randomUUID(),
             song_id: id,
             text: tl.text,
             order: i,
-            start_ms: tl.start_ms,
-            end_ms: tl.end_ms,
+            start_ms: tl.start_ms === UNTIMED ? undefined : tl.start_ms,
+            end_ms: tl.end_ms === UNTIMED ? undefined : tl.end_ms,
             status: "new" as const,
             created_at: now,
             updated_at: now,

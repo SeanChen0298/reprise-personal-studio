@@ -10,6 +10,7 @@ import {
   SUBTITLE_LANGUAGES,
   buildSongFolder,
 } from "../lib/audio-download";
+import { audioDurationMs, searchLyrics, UNTIMED, type LyricsCandidate } from "../lib/lrclib";
 import { isTranslationSupported, translateLinesToEnglish, type TranslateProgress } from "../lib/translate";
 import type { Line, Section } from "../types/song";
 
@@ -495,6 +496,43 @@ export function LyricsInputPage() {
     setMode("lines");
   }
 
+  // Lyrics from LRCLIB (online lyrics database, often with line timings)
+  const [lrcSearching, setLrcSearching] = useState(false);
+  const [lrcResults, setLrcResults] = useState<LyricsCandidate[] | null>(null);
+  const [lrcError, setLrcError] = useState<string | null>(null);
+  const [songDurationMs, setSongDurationMs] = useState<number | undefined>(song?.duration_ms);
+  async function handleFindOnline() {
+    if (!song) return;
+    setLrcSearching(true);
+    setLrcError(null);
+    try {
+      let durationMs = songDurationMs;
+      if (!durationMs && song.audio_path) {
+        durationMs = await audioDurationMs(song.audio_path);
+        setSongDurationMs(durationMs);
+      }
+      const found = await searchLyrics({ title: song.title, artist: song.artist, durationMs });
+      setLrcResults(found);
+      if (found.length === 0) setLrcError("No lyrics found for this title — try YouTube subtitles or paste them.");
+    } catch (err) {
+      setLrcError(err instanceof Error ? err.message : "Couldn't reach LRCLIB");
+    } finally {
+      setLrcSearching(false);
+    }
+  }
+  function pickCandidate(c: LyricsCandidate) {
+    setEditLines(
+      c.lines.map((l) => ({
+        id: crypto.randomUUID(),
+        text: l.text,
+        start_ms: l.start_ms === UNTIMED ? undefined : l.start_ms,
+        end_ms: l.end_ms === UNTIMED ? undefined : l.end_ms,
+      })),
+    );
+    setMode("lines");
+    setLrcResults(null);
+  }
+
   async function handleFetchLyrics() {
     if (!song?.youtube_url) return;
     setFetching(true);
@@ -791,6 +829,66 @@ export function LyricsInputPage() {
             <p className="text-[13px] text-[var(--text-muted)] leading-relaxed font-light mb-5">
               Add lyrics line by line. Each line will become a separate practice segment you can drill individually.
             </p>
+
+            {/* Find lyrics online (LRCLIB) */}
+            {isDesktop && (
+              <div className="flex flex-col gap-2 p-3 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)] mb-3">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-1.5 text-[12.5px] text-[var(--text-secondary)] flex-shrink-0">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+                    </svg>
+                    Find lyrics online
+                  </div>
+                  <button
+                    onClick={() => void handleFindOnline()}
+                    disabled={lrcSearching}
+                    title="Search LRCLIB, a free lyrics database — many songs come with a time for every line"
+                    className="flex items-center gap-[5px] px-3 py-[5px] rounded-[6px] bg-[var(--accent)] text-white text-[12px] font-medium hover:opacity-80 transition-opacity disabled:opacity-50 flex-shrink-0"
+                  >
+                    {lrcSearching ? "Searching…" : lrcResults ? "Search again" : "Search LRCLIB"}
+                  </button>
+                  <span className="text-[11px] text-[var(--text-muted)]">Synced lyrics arrive with line timings.</span>
+                  {lrcError && <span className="text-[11px] text-red-500 truncate" title={lrcError}>{lrcError}</span>}
+                </div>
+                {lrcResults && lrcResults.length > 0 && (
+                  <div className="flex flex-col gap-[2px] pt-1 border-t border-[var(--border-subtle)]">
+                    {lrcResults.map((c) => {
+                      const off = songDurationMs && c.durationMs ? Math.abs(c.durationMs - songDurationMs) : null;
+                      return (
+                        <button
+                          key={c.id}
+                          onClick={() => pickCandidate(c)}
+                          title={c.lines.slice(0, 6).map((l) => l.text).join(" / ")}
+                          className="flex items-center gap-2 text-left px-2 py-[6px] rounded-[6px] bg-transparent border-none cursor-pointer hover:bg-[var(--bg)]"
+                        >
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-[12.5px] text-[var(--text-primary)] truncate">
+                              {c.title} <span className="text-[var(--text-muted)]">— {c.artist}{c.album ? ` · ${c.album}` : ""}</span>
+                            </span>
+                            <span className="block text-[11px] text-[var(--text-muted)] truncate">{c.lines[0]?.text} / {c.lines[1]?.text}</span>
+                          </span>
+                          {c.durationMs != null && (
+                            <span
+                              className={`text-[11px] tabular-nums flex-shrink-0 ${off != null && off > 3000 ? "text-amber-600" : "text-[var(--text-muted)]"}`}
+                              title={off != null ? (off <= 3000 ? "Same length as your audio" : `${Math.round(off / 1000)} s off your audio — timings may not fit`) : undefined}
+                            >
+                              {Math.floor(c.durationMs / 60000)}:{String(Math.round(c.durationMs / 1000) % 60).padStart(2, "0")}
+                            </span>
+                          )}
+                          <span
+                            className={`text-[10px] px-[6px] py-[1px] rounded-[4px] flex-shrink-0 ${c.synced ? "bg-emerald-500/10 text-emerald-700" : "bg-[var(--bg)] text-[var(--text-muted)]"}`}
+                          >
+                            {c.synced ? "synced" : "text only"}
+                          </span>
+                        </button>
+                      );
+                    })}
+                    <p className="text-[10.5px] text-[var(--text-muted)] px-2 pt-1">Picking one replaces the lines below (nothing is saved until Save lyrics).</p>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Import from YouTube section — desktop only (requires yt-dlp sidecar) */}
             {isDesktop && song.youtube_url && (
