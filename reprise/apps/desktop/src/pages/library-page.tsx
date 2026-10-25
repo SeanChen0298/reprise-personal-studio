@@ -8,6 +8,7 @@ import { useQueueStore } from "../stores/queue-store";
 import { useSortedGroupedSongs } from "../hooks/use-sorted-grouped-songs";
 import { QueuePlayerBar } from "../components/queue-player-bar";
 import { TidyTitlesDialog, findTitleFixes } from "../components/tidy-titles-dialog";
+import { LibraryHero, useRecentSongs } from "../components/library-hero";
 import type { Song } from "../types/song";
 import type { SongGroup } from "../hooks/use-sorted-grouped-songs";
 
@@ -515,6 +516,7 @@ export function LibraryPage() {
   const setLibrarySearch = usePreferencesStore((s) => s.setLibrarySearch);
 
   const searchRef = useRef<HTMLInputElement>(null);
+  const heroRef = useRef<Song | null>(null);
 
   // Raw YouTube titles → offer a one-time rename.
   const allSongs = useSongStore((s) => s.songs);
@@ -526,6 +528,8 @@ export function LibraryPage() {
 
   const sortedGrouped = useSortedGroupedSongs();
   const flatSongs = sortedGrouped.type === "flat" ? sortedGrouped.songs : sortedGrouped.groups.flatMap((g) => g.songs);
+  const recent = useRecentSongs();
+  const showHero = !librarySearch.trim() && recent.length > 0;
 
   // Ctrl+F focuses the search input
   useEffect(() => {
@@ -536,10 +540,18 @@ export function LibraryPage() {
         searchRef.current?.select();
       }
       if (e.key === "Escape") searchRef.current?.blur();
+      // Enter opens the song at the top ("Pick up where you left off").
+      const t = e.target as HTMLElement | null;
+      const typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "BUTTON" || t.isContentEditable);
+      if (e.key === "Enter" && !typing && !e.ctrlKey && !e.altKey && heroRef.current) {
+        e.preventDefault();
+        navigate(`/song/${heroRef.current.id}`);
+      }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, []);
+  }, [navigate]);
+  heroRef.current = showHero ? recent[0].song : null;
 
   const filterSongs = useCallback((songs: Song[]) => {
     const q = librarySearch.trim().toLowerCase();
@@ -650,7 +662,7 @@ export function LibraryPage() {
   const canDrag = libraryGroup === "none" && librarySort === "custom";
 
   const renderGrid = (songs: Song[]) => (
-    <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(176px,1fr))] gap-4">
       {songs.map((song) => (
         <SongCard
           key={song.id}
@@ -805,6 +817,15 @@ export function LibraryPage() {
                 </svg>
               </button>
             </div>
+          )}
+          {showHero && flatSongs.length > 0 && (
+            <>
+              <LibraryHero recent={recent} onOpen={(song) => navigate(`/song/${song.id}`)} />
+              <div className="flex items-baseline gap-2 mb-3">
+                <h2 className="text-[13px] font-medium text-[var(--text-secondary)]">All songs</h2>
+                <span className="text-[12px] text-[var(--text-muted)]">{flatSongs.length}</span>
+              </div>
+            </>
           )}
           <FadeWrapper fadeKey={`${librarySort}|${libraryGroup}|${libraryView}`}>
             {renderContent()}
