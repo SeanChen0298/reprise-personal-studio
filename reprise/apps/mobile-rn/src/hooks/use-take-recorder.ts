@@ -63,6 +63,13 @@ export function useTakeRecorder(
   const [elapsedMs, setElapsedMs] = useState(0);
   const [pending, setPending] = useState<PendingTake | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Speed to go back to after the take. */
+  const speedRef = useRef<number | null>(null);
+  const restoreSpeed = () => {
+    const s = speedRef.current;
+    speedRef.current = null;
+    if (s != null && s !== 1) player.setSpeed(s);
+  };
 
   const sectionEnd = useCallback(
     (sec: Section) => {
@@ -78,13 +85,19 @@ export function useTakeRecorder(
     async (fromLine: Line | null, section: Section | null) => {
       if (recRef.current || countdown != null || pending) return;
       setError(null);
+      // Stop the song first, so nothing moves on while the mic prompt is up.
+      await player.pause();
+      const at = fromLine ? lines.indexOf(fromLine) : -1;
+      if (at >= 0) player.setCursor(at);
       const perm = await Audio.requestPermissionsAsync();
       if (!perm.granted) {
         setError("Reprise needs the microphone to record. Allow it in the phone's settings.");
         return;
       }
-      await player.pause();
       if (fromLine?.start_ms != null) await player.seek(Math.max(0, fromLine.start_ms - LEAD_IN_MS));
+      // The review lines the take up with the song at normal speed.
+      speedRef.current = player.speed;
+      if (player.speed !== 1) player.setSpeed(1);
       sectionRef.current = section;
       stopAtRef.current = section ? sectionEnd(section) : null;
       syncRef.current = undefined;
@@ -103,6 +116,7 @@ export function useTakeRecorder(
         await new Promise((r) => setTimeout(r, 1000));
         if (cancelRef.current) {
           setCountdown(null);
+          restoreSpeed();
           const r = recRef.current;
           recRef.current = null;
           if (r) {
@@ -133,6 +147,7 @@ export function useTakeRecorder(
     recRef.current = null;
     setRecording(false);
     await player.pause();
+    restoreSpeed();
     try {
       await r.stopAndUnloadAsync();
     } catch {

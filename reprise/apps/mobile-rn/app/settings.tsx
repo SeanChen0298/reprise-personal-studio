@@ -142,7 +142,7 @@ export default function Settings() {
           </Pressable>
           {Object.entries(ACCENTS).map(([k, a]) => (
             <Pressable key={k} onPress={() => prefs.setAccent(k)} hitSlop={6}>
-              <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: a.light, borderWidth: prefs.accent === k ? 3 : 0, borderColor: t.text }} />
+              <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: a.light, borderWidth: prefs.accent === k ? 3 : 1, borderColor: prefs.accent === k ? t.text : t.border }} />
             </Pressable>
           ))}
         </View>

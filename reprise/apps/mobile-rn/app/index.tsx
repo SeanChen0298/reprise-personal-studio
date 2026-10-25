@@ -87,7 +87,7 @@ export default function Library() {
 
       {hero && (
         <Pressable onPress={() => open(hero.song)} style={{ borderRadius: 16, backgroundColor: t.surface, borderWidth: 1, borderColor: t.borderSubtle, overflow: "hidden", marginBottom: 22 }}>
-          <Thumb song={hero.song} radius={0} />
+          <Thumb song={hero.song} radius={0} aspect={2.1} />
           <View style={{ padding: 16, gap: 4 }}>
             <Text style={{ fontSize: 11, fontWeight: "600", letterSpacing: 1, color: t.theme, textTransform: "uppercase" }}>
               {hero.kind === "added" ? "Start here" : "Pick up where you left off"}

@@ -60,7 +60,7 @@ const DARK = {
   muted: "#7B7F8A",
   danger: "#F87171",
   voice: "#C4B5FD",
-  voiceSoft: "#2E1065",
+  voiceSoft: "#C4B5FD22",
 };
 
 export function useTheme(): Theme {
@@ -76,7 +76,8 @@ export function useTheme(): Theme {
     dark,
     ...base,
     theme,
-    themeSoft: dark ? a.softDark : a.soft,
+    // A quiet tint in the dark (a solid deep colour shouts).
+    themeSoft: dark ? `${a.dark}1F` : a.soft,
     themeText: dark ? a.dark : a.text,
     accent: dark ? "#F3F4F6" : "#111111",
     onAccent: dark ? "#111111" : "#FFFFFF",

@@ -101,7 +101,7 @@ export function TakesSheet({ open, onClose, songId, takes, lines, t, onBeforePla
                   </Text>
                   <Text style={{ fontSize: 12, color: t.muted }}>
                     {source}
-                    {take.backing ? ` · sung with ${take.backing === "original" ? "the song" : take.backing}` : ""}
+                    {take.backing ? ` · sung with ${take.backing === "original" ? "the song" : take.backing === "instrumental" ? "the backing" : "the vocals"}` : ""}
                   </Text>
                 </View>
                 {!pending && (

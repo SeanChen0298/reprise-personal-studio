@@ -37,7 +37,7 @@ export const LyricRow = memo(function LyricRow({ line, index, active, distance, 
         opacity: active ? 1 : FADE[Math.min(distance, FADE.length - 1)],
       }}
     >
-      <AnnotatedText line={line} highlights={highlights} fontSize={active ? 22 : 20} color={timed ? t.text : t.muted} bold={active} showFurigana={showFurigana} />
+      <AnnotatedText line={line} highlights={highlights} fontSize={active ? 22 : 20} color={timed ? t.text : t.muted} bold={active} showFurigana={showFurigana} dark={t.dark} />
       {!!translation && (
         <Text style={{ textAlign: "center", fontSize: 13.5, lineHeight: 19, color: t.muted, marginTop: 3 }}>{translation}</Text>
       )}

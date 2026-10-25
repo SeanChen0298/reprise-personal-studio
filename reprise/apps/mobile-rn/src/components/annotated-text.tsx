@@ -74,13 +74,18 @@ interface Props {
   color: string;
   bold?: boolean;
   showFurigana: boolean;
+  /** Dark theme: highlight colours are made for light backgrounds, so tint instead. */
+  dark?: boolean;
 }
 
-export const AnnotatedText = memo(function AnnotatedText({ line, highlights, fontSize, color, bold, showFurigana }: Props) {
+export const AnnotatedText = memo(function AnnotatedText({ line, highlights, fontSize, color, bold, showFurigana, dark }: Props) {
   const text = line.custom_text ?? line.text;
   const ruby = showFurigana ? (line.custom_text != null ? line.custom_furigana_html : line.furigana_html) ?? null : null;
   const segs = useMemo(() => segments(text, line.annotations, ruby), [text, line.annotations, ruby]);
-  const hl = useMemo(() => new Map(highlights.map((h) => [h.id, h])), [highlights]);
+  const hl = useMemo(
+    () => new Map(highlights.map((h) => [h.id, dark ? { ...h, bg: `${h.color}40`, color } : h])),
+    [highlights, dark, color],
+  );
   const weight = bold ? "600" : "400";
   const style = { fontSize, color, fontFamily: "serif", fontWeight: weight } as const;
   const hasRuby = segs.some((s) => s.furigana);

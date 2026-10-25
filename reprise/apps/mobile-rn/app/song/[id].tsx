@@ -190,7 +190,7 @@ export default function SongScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>
       {/* Header */}
-      <View style={{ paddingTop: insets.top + 6, paddingHorizontal: 10, paddingBottom: 6, flexDirection: "row", alignItems: "center", gap: 6 }}>
+      <View style={{ paddingTop: insets.top + 6, paddingLeft: 10, paddingRight: 16, paddingBottom: 6, flexDirection: "row", alignItems: "center", gap: 6 }}>
         <Pressable onPress={() => router.back()} hitSlop={10} style={{ padding: 6 }}>
           <BackIcon color={t.text} size={22} />
         </Pressable>
@@ -335,7 +335,7 @@ export default function SongScreen() {
         </View>
       )}
       {rec.countdown != null && (
-        <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center" }}>
+        <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", backgroundColor: t.dark ? "rgba(12,12,16,0.82)" : "rgba(249,249,249,0.86)" }}>
           <Text style={{ fontSize: 96, fontWeight: "200", color: t.danger }}>{rec.countdown}</Text>
           <Text style={{ fontSize: 14, color: t.muted }}>Headphones on — the song starts after the count</Text>
         </View>
