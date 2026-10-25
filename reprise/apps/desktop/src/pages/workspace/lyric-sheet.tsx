@@ -5,6 +5,7 @@ import { ISSUE_LABEL, isBreathIssue } from "../../lib/take-review";
 import { displayText } from "./use-workspace-edits";
 import type { VocalSymbol } from "../../lib/symbol-config";
 import type { SongCard } from "../../lib/coach/knowledge";
+import type { LyricsCheck, LyricsGap } from "../../lib/lyrics-check";
 import type { HighlightType } from "../../lib/highlight-config";
 import type { Line, Section, TakeIssue } from "../../types/song";
 
@@ -199,13 +200,16 @@ interface LineRowProps {
   pickingSymbol: boolean;
   onPickSymbol: (char: string) => void;
   onCloseSymbols: () => void;
+  /** Lyrics check: the line has no singing under it, or its timing is unsure. */
+  checkFlag?: "silent" | "unsure";
+  onCheckOk: (lineId: string, flag: "silent" | "unsure") => void;
 }
 
 const LineRow = memo(function LineRow({
   line, info, translation, highlights, isCursor, anchor, focus, isPlaying, inLoop, editing, showCaret,
   issues, onSelect, onStartEdit, onCommitEdit, onCancelEdit, onPlay, onIssueClick, onNudge,
   symbols, pickingSymbol, onPickSymbol, onCloseSymbols,
-  takeNotes, editingNote, onStartNote, onCommitNote, onCancelNote,
+  takeNotes, editingNote, onStartNote, onCommitNote, onCancelNote, checkFlag, onCheckOk,
 }: LineRowProps) {
   const text = displayText(line);
   const textRef = useRef<HTMLDivElement>(null);
@@ -352,6 +356,26 @@ const LineRow = memo(function LineRow({
               ▶
             </button>
             {line.end_ms != null && <span className="pl-[2px] pr-[5px] text-[var(--text-muted)]">– {fmtTiming(line.end_ms)}</span>}
+          </div>
+        )}
+        {checkFlag && !editing && (
+          <div className="flex-shrink-0 pl-2 pt-[3px] select-none">
+            <button
+              onMouseUp={(e) => e.stopPropagation()}
+              onDoubleClick={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onCheckOk(line.id, checkFlag);
+              }}
+              title={
+                checkFlag === "unsure"
+                  ? "Lyrics check: the alignment wasn't sure where this line is. Double-click the line to listen; fix it with T (tap the start) or Alt+A/D. Click here if it's right."
+                  : "Lyrics check: no singing heard under this line — an extra line, or its timing is off. Double-click to listen. Click here if it's fine."
+              }
+              className="text-[9.5px] px-[5px] py-[1px] rounded-[3px] border border-dashed border-amber-500/50 bg-transparent text-amber-700 cursor-pointer hover:bg-amber-500/10"
+            >
+              {checkFlag === "unsure" ? "timing?" : "no singing?"}
+            </button>
           </div>
         )}
         {(line.register || line.placement) && (
@@ -600,6 +624,11 @@ export interface LyricSheetProps {
   onCommitNewSection: (lineId: string, name: string) => void;
   onCommitRename: (section: Section, name: string) => void;
   onRemoveSection: (section: Section) => void;
+  /** Lyrics check against the song (null = off). */
+  check: LyricsCheck | null;
+  onGap: (gap: LyricsGap, action: "listen" | "add" | "dismiss") => void;
+  onCheckOk: (lineId: string, flag: "silent" | "unsure") => void;
+  onOffset: (action: "apply" | "dismiss") => void;
 }
 
 export function LyricSheet(p: LyricSheetProps) {
@@ -617,10 +646,38 @@ export function LyricSheet(p: LyricSheetProps) {
   }, [p.vocalMap, p.showHints, p.lines]);
 
   const intents = new Map((p.songCard?.sections ?? []).map((s) => [s.name.trim().toLowerCase(), s]));
+  const gapsAfter = useMemo(() => {
+    const m = new Map<string | null, LyricsGap[]>();
+    for (const g of p.check?.gaps ?? []) m.set(g.afterLineId, [...(m.get(g.afterLineId) ?? []), g]);
+    return m;
+  }, [p.check]);
 
   return (
     <div className="flex flex-col pb-[40vh]">
       {p.showHints && p.songCard?.summary && <SongAbout summary={p.songCard.summary} mood={p.songCard.mood} onOpenCoach={p.onOpenCoach} />}
+      {p.check?.offset && (
+        <div className="mx-2 mb-3 px-3 py-[8px] rounded-[8px] border border-dashed border-amber-500/40 flex items-center gap-2 flex-wrap select-none">
+          <span className="text-[12px] text-amber-700">
+            The lyrics' timing looks {(Math.abs(p.check.offset.ms) / 1000).toFixed(1)} s {p.check.offset.ms > 0 ? "early" : "late"} for this audio
+            {p.check.offset.ms > 0 ? " (an intro in this version?)" : ""}
+          </span>
+          <span className="flex-1" />
+          <button
+            onClick={() => p.onOffset("apply")}
+            title={`Moves every line ${(Math.abs(p.check.offset.ms) / 1000).toFixed(1)} s ${p.check.offset.ms > 0 ? "later" : "earlier"} — lines then sit over singing ${Math.round(p.check.offset.fitBefore * 100)}% → ${Math.round(p.check.offset.fitAfter * 100)}% of the time (Ctrl+Z undoes)`}
+            className="text-[11px] px-[8px] py-[2px] rounded-[5px] bg-[var(--theme)] text-white border-none cursor-pointer"
+          >
+            Shift all lines {(Math.abs(p.check.offset.ms) / 1000).toFixed(1)} s {p.check.offset.ms > 0 ? "later" : "earlier"}
+          </button>
+          <button
+            onClick={() => p.onOffset("dismiss")}
+            className="text-[11px] px-[7px] py-[1px] rounded-[5px] bg-transparent border border-[var(--border)] cursor-pointer text-[var(--text-secondary)]"
+          >
+            Keep as is
+          </button>
+        </div>
+      )}
+      {gapsAfter.get(null)?.map((g) => <GapMarker key={g.key} gap={g} onAction={p.onGap} />)}
       {p.lines.map((line) => {
         const sec = sectionAt.get(line.order);
         const isCursor = p.cursor?.lineId === line.id;
@@ -681,10 +738,48 @@ export function LyricSheet(p: LyricSheetProps) {
               pickingSymbol={isCursor && p.symbolPickerOpen}
               onPickSymbol={p.onPickSymbol}
               onCloseSymbols={p.onCloseSymbols}
+              checkFlag={p.check?.lines.get(line.id)}
+              onCheckOk={p.onCheckOk}
             />
+            {gapsAfter.get(line.id)?.map((g) => <GapMarker key={g.key} gap={g} onAction={p.onGap} />)}
           </div>
         );
       })}
+    </div>
+  );
+}
+
+const fmtClock = (ms: number) => `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
+
+/** Singing in the song that no lyric line covers. */
+function GapMarker({ gap, onAction }: { gap: LyricsGap; onAction: (gap: LyricsGap, action: "listen" | "add" | "dismiss") => void }) {
+  const btn =
+    "text-[11px] px-[7px] py-[1px] rounded-[5px] bg-transparent border border-[var(--border)] cursor-pointer text-[var(--text-secondary)] hover:border-amber-500/60 hover:text-[var(--text-primary)]";
+  return (
+    <div
+      data-gap-key={gap.key}
+      className="ml-8 mr-2 my-[3px] px-3 py-[6px] rounded-[8px] border border-dashed border-amber-500/40 select-none"
+    >
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-[11.5px] text-amber-700">
+          ♪ {Math.round(gap.singingMs / 1000)} s of singing with no lyric line · {fmtClock(gap.startMs)}
+        </span>
+        <span className="flex-1" />
+        <button className={btn} onClick={() => onAction(gap, "listen")} title="Play this part">
+          ▶ Listen
+        </button>
+        <button
+          className={btn}
+          onClick={() => onAction(gap, "add")}
+          title={gap.heard ? "Add what was heard as a line here, timed to this part (Ctrl+Z undoes)" : "Add an empty line here, timed to this part, and type it (Ctrl+Z undoes)"}
+        >
+          + Add line
+        </button>
+        <button className={btn} onClick={() => onAction(gap, "dismiss")} title="It's not lyrics (backing vocals, humming…) — don't flag it again">
+          Not lyrics
+        </button>
+      </div>
+      {gap.heard && <div className="mt-[3px] text-[12.5px] text-[var(--text-secondary)] italic truncate" title={gap.heard}>heard: “{gap.heard}”</div>}
     </div>
   );
 }

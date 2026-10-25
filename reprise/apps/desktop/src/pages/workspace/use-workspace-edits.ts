@@ -89,13 +89,15 @@ export function useWorkspaceEdits(songId: string) {
       const before = changes
         .map((c) => getLine(songId, c.lineId))
         .filter((l): l is Line => !!l)
-        .map((l) => ({ lineId: l.id, start_ms: l.start_ms, end_ms: l.end_ms }));
-      const apply = async (list: { lineId: string; start_ms?: number; end_ms?: number }[]) => {
+        .map((l) => ({ lineId: l.id, start_ms: l.start_ms, end_ms: l.end_ms, align_confidence: l.align_confidence }));
+      // Timing you set yourself is no longer "unsure".
+      const after = changes.map((c) => ({ ...c, align_confidence: undefined }));
+      const apply = async (list: { lineId: string; start_ms?: number; end_ms?: number; align_confidence?: number }[]) => {
         const store = useSongStore.getState();
         for (const { lineId, ...data } of list) await store.updateLine(songId, lineId, data);
       };
-      await apply(changes);
-      push({ label, undo: () => apply(before), redo: () => apply(changes) });
+      await apply(after);
+      push({ label, undo: () => apply(before), redo: () => apply(after) });
     },
     [songId, push],
   );
@@ -207,8 +209,76 @@ export function useWorkspaceEdits(songId: string) {
     [songId, push],
   );
 
+  /** Confirm a line's timing is fine (clears the "unsure" flag from alignment). */
+  const confirmTiming = useCallback(
+    async (lineId: string) => {
+      const line = getLine(songId, lineId);
+      if (!line || line.align_confidence == null) return;
+      const prev = line.align_confidence;
+      await useSongStore.getState().updateLine(songId, lineId, { align_confidence: undefined });
+      push({
+        label: "Timing looks right",
+        undo: () => useSongStore.getState().updateLine(songId, lineId, { align_confidence: prev }),
+        redo: () => useSongStore.getState().updateLine(songId, lineId, { align_confidence: undefined }),
+      });
+    },
+    [songId, push],
+  );
+
+  /**
+   * Insert a new primary line after `afterLineId` (null = before the first line).
+   * Later lines move down one; a section that holds the line before grows to
+   * hold the new one. Returns the new line's id.
+   */
+  const insertLine = useCallback(
+    async (afterLineId: string | null, text: string, start_ms?: number, end_ms?: number) => {
+      const store = useSongStore.getState();
+      const transLang = store.songs.find((x) => x.id === songId)?.translation_language;
+      const all = (store.lines[songId] ?? []).filter((l) => !transLang || l.language !== transLang).sort((a, b) => a.order - b.order);
+      const after = afterLineId ? all.find((l) => l.id === afterLineId) : undefined;
+      const prevOrder = after ? after.order : -1;
+      const newOrder = prevOrder + 1;
+      const now = new Date().toISOString();
+      const line: Line = {
+        id: crypto.randomUUID(),
+        song_id: songId,
+        text,
+        order: newOrder,
+        start_ms,
+        end_ms,
+        annotations: [],
+        status: "new",
+        play_count: 0,
+        created_at: now,
+        updated_at: now,
+      };
+      const moved = all.filter((l) => l.order > prevOrder).map((l) => ({ id: l.id, order: l.order }));
+      const sections = (store.sections[songId] ?? []).map((s) => ({ id: s.id, start: s.start_line_order, end: s.end_line_order }));
+      const apply = async () => {
+        const st = useSongStore.getState();
+        for (const m of moved) await st.updateLine(songId, m.id, { order: m.order + 1 });
+        for (const s of sections) {
+          const start = s.start > prevOrder ? s.start + 1 : s.start;
+          const end = s.end >= prevOrder && s.end >= s.start ? s.end + 1 : s.end;
+          if (start !== s.start || end !== s.end) await st.updateSection(songId, s.id, { start_line_order: start, end_line_order: end });
+        }
+        await st.insertLine(songId, { ...line, updated_at: new Date().toISOString() });
+      };
+      const revert = async () => {
+        const st = useSongStore.getState();
+        await st.removeLine(songId, line.id);
+        for (const m of moved) await st.updateLine(songId, m.id, { order: m.order });
+        for (const s of sections) await st.updateSection(songId, s.id, { start_line_order: s.start, end_line_order: s.end });
+      };
+      await apply();
+      push({ label: "Add a line", undo: revert, redo: apply });
+      return line.id;
+    },
+    [songId, push],
+  );
+
   return useMemo(
-    () => ({ annotate, clearAnnotations, editText, setTiming, createSection, addSections, renameSection, removeSection, setLineNote, setLineVoice }),
-    [annotate, clearAnnotations, editText, setTiming, createSection, addSections, renameSection, removeSection, setLineNote, setLineVoice],
+    () => ({ annotate, clearAnnotations, editText, setTiming, confirmTiming, insertLine, createSection, addSections, renameSection, removeSection, setLineNote, setLineVoice }),
+    [annotate, clearAnnotations, editText, setTiming, confirmTiming, insertLine, createSection, addSections, renameSection, removeSection, setLineNote, setLineVoice],
   );
 }

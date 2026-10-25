@@ -17,7 +17,8 @@ Input JSON (lines_path):
     [{"order": 0, "text": "...", "custom_text": "..."}, ...]
 
 Output JSON (output_path) on success:
-    {"status": "ok", "lines": [{"order": N, "start_ms": X, "end_ms": Y, "confidence": F}], "unmatched_lines": [...]}
+    {"status": "ok", "lines": [{"order": N, "start_ms": X, "end_ms": Y, "confidence": F}], "unmatched_lines": [...],
+     "heard": [[start_ms, end_ms, "text"], ...]}
 Output JSON on error:
     {"status": "error", "message": "..."}
 """
@@ -353,10 +354,19 @@ def main() -> None:
         sys.exit(1)
 
     # --- Write output -------------------------------------------------------
+    # What was heard, segment by segment — lets the app suggest text for
+    # stretches of singing that no lyric line covers.
+    heard = []
+    for seg in aligned["segments"]:
+        text = (seg.get("text") or "").strip()
+        if text and seg.get("start") is not None and seg.get("end") is not None:
+            heard.append([round(seg["start"] * 1000), round(seg["end"] * 1000), text])
+
     output = {
         "status": "ok",
         "lines": matched,
         "unmatched_lines": unmatched,
+        "heard": heard,
     }
     output_path.write_text(json.dumps(output, ensure_ascii=False), encoding="utf-8")
 

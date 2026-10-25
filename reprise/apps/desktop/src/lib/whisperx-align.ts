@@ -30,7 +30,21 @@ export interface AlignOutput {
   status: "ok" | "error";
   lines: AlignedLineResult[];
   unmatched_lines: number[];
+  /** What WhisperX heard, segment by segment: [start_ms, end_ms, text]. */
+  heard?: [number, number, string][];
   message?: string;
+}
+
+/** What the last alignment heard in this song (from align_output.json in its folder), if any. */
+export async function loadHeard(songFolder: string): Promise<[number, number, string][] | null> {
+  const path = `${songFolder}/align_output.json`;
+  try {
+    if (!(await exists(path))) return null;
+    const out = JSON.parse(await readTextFile(path)) as AlignOutput;
+    return out.status === "ok" && Array.isArray(out.heard) ? out.heard : null;
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------

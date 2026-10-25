@@ -98,6 +98,8 @@ interface SongStore {
   addLine: (songId: string, text: string, order: number) => Promise<void>;
   updateLine: (songId: string, lineId: string, data: Partial<Line>) => Promise<void>;
   removeLine: (songId: string, lineId: string) => Promise<void>;
+  /** Insert a ready-made line row (orders of the others are the caller's job). */
+  insertLine: (songId: string, line: Line) => Promise<void>;
   updateLineStatus: (songId: string, lineId: string, status: LineStatus) => Promise<void>;
   /** Increment play_count and auto-upgrade status (listened at 1, practiced at 10) */
   incrementPlayCount: (songId: string, lineId: string) => Promise<void>;
@@ -474,10 +476,20 @@ export const useSongStore = create<SongStore>()((set, get) => ({
 
       // Merge aligned timestamps back into the existing line records
       const alignMap = new Map(output.lines.map((r) => [r.order, r]));
+      const unmatched = new Set(output.unmatched_lines);
+      const primaryIds = new Set(primaryLines.map((l) => l.id));
       const updatedLines = allLines.map((line) => {
+        if (!primaryIds.has(line.id)) return line;
         const aligned = alignMap.get(line.order);
-        if (!aligned) return line;
-        return { ...line, start_ms: aligned.start_ms, end_ms: aligned.end_ms, syllable_times: aligned.tokens };
+        // Couldn't place it: keep the old timing, flagged as unsure.
+        if (!aligned) return unmatched.has(line.order) ? { ...line, align_confidence: 0 } : line;
+        return {
+          ...line,
+          start_ms: aligned.start_ms,
+          end_ms: aligned.end_ms,
+          syllable_times: aligned.tokens,
+          align_confidence: aligned.confidence,
+        };
       });
 
       await get().setLines(id, updatedLines);
@@ -664,6 +676,17 @@ export const useSongStore = create<SongStore>()((set, get) => ({
     const dbData: Record<string, unknown> = { ...updated };
 
     const { error } = await localDb.updateLine(lineId, dbData);
+    if (error) {
+      await get().loadAllData();
+      throw error;
+    }
+  },
+
+  insertLine: async (songId, line) => {
+    set((s) => ({
+      lines: { ...s.lines, [songId]: [...(s.lines[songId] ?? []), line] },
+    }));
+    const { error } = await localDb.insertLine(lineToDbRow(line, LOCAL_USER_ID));
     if (error) {
       await get().loadAllData();
       throw error;
@@ -1141,6 +1164,7 @@ function dbRowToLine(row: Record<string, unknown>): Line {
     start_ms: row.start_ms as number | undefined,
     end_ms: row.end_ms as number | undefined,
     syllable_times: (row.syllable_times as [number, number, number][] | null) ?? undefined,
+    align_confidence: (row.align_confidence as number | null) ?? undefined,
     note: (row.note as string | null) ?? undefined,
     register: (row.register as string | null) ?? undefined,
     placement: (row.placement as string | null) ?? undefined,
@@ -1166,6 +1190,7 @@ function lineToDbRow(line: Line, userId: string): Record<string, unknown> {
     start_ms: line.start_ms ?? null,
     end_ms: line.end_ms ?? null,
     syllable_times: line.syllable_times ?? null,
+    align_confidence: line.align_confidence ?? null,
     note: line.note ?? null,
     register: line.register ?? null,
     placement: line.placement ?? null,

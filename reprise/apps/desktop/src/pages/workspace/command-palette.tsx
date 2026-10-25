@@ -116,6 +116,7 @@ const SHORTCUTS: [string, [string, string][]][] = [
     ["T", "Line starts at the playhead, move to the next line"],
     ["Alt+A / D", "Shift the line's start ±50 ms"],
     ["Alt+Shift+A / D", "Shift the line's end ±50 ms"],
+    ["Alt+F", "Next lyrics check (singing with no line, a line with no singing, unsure timing)"],
   ]],
   ["Record", [
     ["R", "Record from the selected line / stop"],

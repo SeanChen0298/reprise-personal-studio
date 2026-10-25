@@ -54,6 +54,12 @@ export interface VocalMap {
   /** Median stem loudness while singing. */
   stemTypicalDb?: number;
   phrases: Phrase[];
+  /**
+   * Where the singer is singing at all — pitched, or nearly as loud as pitched
+   * singing in the stem (soft / breathy notes the pitch tracker loses). Wider
+   * than `phrases`; used to check the lyrics against the song.
+   */
+  singing: Phrase[];
   breaths: BreathPoint[];
   highMoments: HighMoment[];
   /** Semitone at/above which a note counts as high for this song. */
@@ -146,6 +152,13 @@ export function buildVocalMap(points: PitchPoint[], stemDb?: Float32Array): Voca
   if (stemDb) trimTails(phraseMask, stemDb);
   const phrases = runs(phraseMask).map(([s, e]) => ({ startMs: s * HOP_MS, endMs: e * HOP_MS }));
 
+  let singing = phrases;
+  if (stemDb && stemTypicalDb != null) {
+    const raw = new Uint8Array(n);
+    for (let i = 0; i < n; i++) if (voiced[i] || stemDb[i] >= stemTypicalDb - 25) raw[i] = 1;
+    singing = runs(cleanMask(raw, CONSONANT_GAP_MS / HOP_MS, MIN_VOICED_MS / HOP_MS)).map(([s, e]) => ({ startMs: s * HOP_MS, endMs: e * HOP_MS }));
+  }
+
   const breaths: BreathPoint[] = [];
   for (let i = 1; i < phrases.length; i++) {
     const startMs = phrases[i - 1].endMs;
@@ -173,7 +186,7 @@ export function buildVocalMap(points: PitchPoint[], stemDb?: Float32Array): Voca
     highMoments.push({ startMs: s * HOP_MS, endMs: e * HOP_MS, peakSemitone: peak });
   }
 
-  return { semitones, stemDb, stemTypicalDb, phrases, breaths, highMoments, highThreshold, lowSemitone, topSemitone };
+  return { semitones, stemDb, stemTypicalDb, phrases, singing, breaths, highMoments, highThreshold, lowSemitone, topSemitone };
 }
 
 /** Within each phrase, drop leading/trailing frames far quieter than the phrase body. */

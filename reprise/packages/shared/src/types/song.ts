@@ -63,6 +63,8 @@ export interface Line {
   end_ms?: number;
   /** Timing of the sung tokens in the line from alignment: [start_ms, end_ms, characters]. */
   syllable_times?: [number, number, number][];
+  /** How sure the alignment was of this line's timing (0–1; 0 = couldn't place it). Cleared when you set the timing yourself. */
+  align_confidence?: number;
   status: LineStatus;
   play_count?: number;
   furigana_html?: string; // HTML with <ruby> tags for line.text, auto-generated for language === "ja"

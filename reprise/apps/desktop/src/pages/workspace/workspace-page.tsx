@@ -22,6 +22,8 @@ import { collapseRepeats } from "../../lib/translate";
 import { emptyTakeTrash } from "../../lib/take-trash";
 import { PLACEMENTS, REGISTERS } from "../../lib/coach/knowledge";
 import type { VocalMap } from "../../lib/vocal-map";
+import { checkLyrics, loadDismissed, saveDismissed, type LyricsGap } from "../../lib/lyrics-check";
+import { loadHeard } from "../../lib/whisperx-align";
 import { SongSetupPanel } from "../../components/song-setup-panel";
 import { EditSongModal } from "../../components/edit-song-modal";
 import { ConfirmDialog } from "../../components/confirm-dialog";
@@ -197,6 +199,31 @@ function Workspace({ songId }: { songId: string }) {
     };
   }, [song.pitch_data_path, song.vocals_path]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Lyrics check (singing with no line, lines with no singing, unsure timing) ──
+  const [heard, setHeard] = useState<[number, number, string][] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (song.audio_folder) void loadHeard(song.audio_folder).then((h) => !cancelled && setHeard(h));
+    return () => {
+      cancelled = true;
+    };
+  }, [song.audio_folder, song.align_status]);
+  const [checkDismissed, setCheckDismissed] = useState<Set<string>>(() => loadDismissed(songId));
+  useEffect(() => setCheckDismissed(loadDismissed(songId)), [songId]);
+  const dismissCheck = useCallback(
+    (key: string) =>
+      setCheckDismissed((cur) => {
+        const next = new Set(cur).add(key);
+        saveDismissed(songId, next);
+        return next;
+      }),
+    [songId],
+  );
+  const lyricsCheck = useMemo(
+    () => (showHints ? checkLyrics(lines, vocalMap?.singing ?? null, heard, checkDismissed) : null),
+    [showHints, lines, vocalMap, heard, checkDismissed],
+  );
+
   // ── Cursor / editing state ──────────────────────────────────────────────
   const [cursor, setCursor] = useState<Cursor | null>(null);
   useEffect(() => {
@@ -371,6 +398,73 @@ function Workspace({ songId }: { songId: string }) {
     },
     [lines, player, takes.busy],
   );
+
+  const onGap = useCallback(
+    async (gap: LyricsGap, action: "listen" | "add" | "dismiss") => {
+      if (action === "dismiss") {
+        dismissCheck(gap.key);
+        return say("Won't flag that part again");
+      }
+      if (action === "listen") {
+        if (takes.busy) return;
+        player.seekTo(Math.max(0, gap.startMs - 1000));
+        return player.play();
+      }
+      const id = await edits.insertLine(gap.afterLineId, gap.heard ?? "", Math.round(gap.startMs), Math.round(gap.endMs));
+      setCursor({ lineId: id, anchor: 0, focus: 0 });
+      setEditingLineId(id);
+      say(gap.heard ? "Line added from what was heard — fix the words, Enter saves" : "Line added — type it, Enter saves");
+    },
+    [dismissCheck, say, takes.busy, player, edits],
+  );
+  const onCheckOk = useCallback(
+    (lineId: string, flag: "silent" | "unsure") => {
+      if (flag === "unsure") void edits.confirmTiming(lineId);
+      else dismissCheck(`line:${lineId}`);
+    },
+    [edits, dismissCheck],
+  );
+  const onOffset = useCallback(
+    (action: "apply" | "dismiss") => {
+      const off = lyricsCheck?.offset;
+      if (!off) return;
+      if (action === "dismiss") return dismissCheck("offset");
+      const shift = (v?: number) => (v == null ? undefined : Math.max(0, v + off.ms));
+      const changes = [...lines, ...translationLines]
+        .filter((l) => l.start_ms != null)
+        .map((l) => ({ lineId: l.id, start_ms: shift(l.start_ms), end_ms: shift(l.end_ms) }));
+      void edits.setTiming(changes, `Shift all lines ${(off.ms / 1000).toFixed(1)} s`);
+      say(`All lines moved ${(Math.abs(off.ms) / 1000).toFixed(1)} s ${off.ms > 0 ? "later" : "earlier"} — Ctrl+Z undoes`);
+    },
+    [lyricsCheck, dismissCheck, lines, translationLines, edits, say],
+  );
+  /** Alt+F: move to the next thing the lyrics check found, after the cursor line. */
+  const nextCheck = useCallback(() => {
+    if (!lyricsCheck) return say("Lyrics check is hidden in the focus view (V shows it)");
+    const items: { pos: number; lineId: string | null; gap?: LyricsGap; flag?: "silent" | "unsure" }[] = [];
+    for (const g of lyricsCheck.gaps) {
+      const i = g.afterLineId ? lines.findIndex((l) => l.id === g.afterLineId) : -1;
+      items.push({ pos: i + 0.5, lineId: g.afterLineId ?? lines[0]?.id ?? null, gap: g });
+    }
+    lyricsCheck.lines.forEach((flag, lineId) => items.push({ pos: lines.findIndex((l) => l.id === lineId), lineId, flag }));
+    if (items.length === 0) return say(lyricsCheck.offset ? "Lyrics check: the whole song's timing looks shifted — see the note above the lyrics" : "Lyrics check: nothing found");
+    items.sort((a, b) => a.pos - b.pos);
+    const it = items.find((x) => x.pos > cursorIdx) ?? items[0];
+    const line = lines.find((l) => l.id === it.lineId);
+    if (line) setCursor({ lineId: line.id, anchor: 0, focus: 0 });
+    if (it.gap) {
+      const key = it.gap.key;
+      requestAnimationFrame(() => document.querySelector(`[data-gap-key="${key}"]`)?.scrollIntoView({ block: "center" }));
+    }
+    const n = items.length;
+    say(
+      it.gap
+        ? `Singing with no line at ${fmtTiming(it.gap.startMs)} (${n} to check)`
+        : it.flag === "unsure"
+          ? `Timing unsure on this line (${n} to check)`
+          : `No singing heard under this line (${n} to check)`,
+    );
+  }, [lyricsCheck, lines, cursorIdx, say]);
 
   const loopLine = useCallback(() => {
     if (takes.busy) return;
@@ -578,6 +672,7 @@ function Workspace({ songId }: { songId: string }) {
 
     // Alt: timing (A/D, arrows) and speed (W/S)
     if (alt && !ctrl) {
+      if (letter === "F") return handled(), nextCheck();
       if (letter === "A" || k === "ArrowLeft") return handled(), void nudge(shift ? "end_ms" : "start_ms", -50);
       if (letter === "D" || k === "ArrowRight") return handled(), void nudge(shift ? "end_ms" : "start_ms", 50);
       if (letter === "W") return changeSpeed(true);
@@ -729,6 +824,15 @@ function Workspace({ songId }: { songId: string }) {
       { id: "section", group: "Lyrics", featured: true, label: cursorLine && sections.some((s) => s.start_line_order === cursorLine.order) ? "Rename this section" : "Start a section at this line", shortcut: "#", run: startSectionEdit },
       ...(cursorSection ? [{ id: "section-rm", group: "Lyrics", label: `Remove section “${cursorSection.name}”`, run: () => edits.removeSection(cursorSection) }] : []),
       { id: "lyrics", group: "Lyrics", label: "Import / paste lyrics…", run: () => navigate(`/song/${songId}/lyrics`) },
+      {
+        id: "lyrics-check",
+        group: "Lyrics",
+        label: lyricsCheck
+          ? `Next lyrics check (${lyricsCheck.gaps.length + lyricsCheck.lines.size} found)`
+          : "Next lyrics check (shown with song hints)",
+        shortcut: "Alt+F",
+        run: () => nextCheck(),
+      },
       { id: "hints", group: "View", label: showHints ? "Focus on the lyrics (hide song hints and coach notes)" : "Show song hints and coach notes", shortcut: "V", run: () => setShowHints((v) => !v) },
       ...(coachTranslation
         ? [{ id: "coach-translate", group: "Coach", label: `Translate the lyrics with the coach (${coachTranslation.languageName})`, run: () => (setPanel("coach"), setTranslateNonce((n) => n + 1)) }]
@@ -758,7 +862,7 @@ function Workspace({ songId }: { songId: string }) {
       { id: "keys", group: "Help", label: "Keyboard shortcuts", shortcut: "F1", featured: true, run: () => setShortcutsOpen(true) },
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [highlights, selStart, selEnd, cursorLine, cursorSection, sections, view, showHints, panel, symbols, showTranslation, translationLines.length, player.isPlaying, player.loopEnabled, tracks, canUndo, canRedo, edits]);
+  }, [highlights, selStart, selEnd, cursorLine, cursorSection, sections, view, showHints, panel, symbols, showTranslation, translationLines.length, player.isPlaying, player.loopEnabled, tracks, canUndo, canRedo, edits, lyricsCheck, nextCheck]);
 
   // Your take notes, placed under the lyric line they were sung on.
   const takeNotesByLine = useMemo(() => {
@@ -1066,6 +1170,10 @@ function Workspace({ songId }: { songId: string }) {
                   else edits.renameSection(sec, name.trim());
                 }}
                 onRemoveSection={(sec) => edits.removeSection(sec)}
+                check={lyricsCheck}
+                onGap={onGap}
+                onCheckOk={onCheckOk}
+                onOffset={onOffset}
               />
             </div>
           )}
