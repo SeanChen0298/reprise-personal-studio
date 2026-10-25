@@ -85,6 +85,60 @@ export async function fetchMix(videoId: string): Promise<MixEntry[]> {
   return entries;
 }
 
+export interface SearchResult {
+  videoId: string;
+  rawTitle: string;
+  channel: string;
+  durationMs: number;
+  /** Cleaned-up song title / artist from the YouTube title. */
+  title: string;
+  artist: string;
+  /** Probably not the studio version (live, cover, karaoke…) or not a song length. */
+  unlikely: boolean;
+}
+
+const COVER_PATTERN = /\bcover\b|歌ってみた|弾いてみた|演奏してみた|吹奏楽|\bpiano ver|acoustic ver|\bremix\b/i;
+
+/** Search YouTube (yt-dlp "ytsearchN:"), entries only, no download. Unlikely versions go last. */
+export async function searchYouTube(query: string, count = 12): Promise<SearchResult[]> {
+  const args = [
+    ...YT_DLP_BASE,
+    "--flat-playlist",
+    "--print", "%(id)s\t%(duration)s\t%(channel)j\t%(title)j",
+    `ytsearch${count}:${query}`,
+  ];
+  const result = await spawnAndWait(await makeYtDlpCommand(args), "[suggestions][search]");
+  if (result.code !== 0 && isBotDetectionError(result.stderr)) {
+    throw new Error(COOKIES_EXPIRED_MESSAGE);
+  }
+  const out: SearchResult[] = [];
+  for (const line of result.stdout.split("\n")) {
+    const [id, duration, channelJson, titleJson] = line.split("\t");
+    if (!id || !titleJson) continue;
+    const rawTitle = parseJsonString(titleJson);
+    const channel = parseJsonString(channelJson);
+    const durationMs = Math.round((parseFloat(duration) || 0) * 1000);
+    const { title, artist } = parseSongTitle(rawTitle, channel);
+    const badLength = durationMs > 0 && (durationMs < MIN_DURATION_MS || durationMs > MAX_DURATION_MS);
+    // Shorts / channels have no duration or aren't videos.
+    if (!/^[\w-]{11}$/.test(id.trim())) continue;
+    out.push({
+      videoId: id.trim(),
+      rawTitle,
+      channel,
+      durationMs,
+      title,
+      artist,
+      unlikely: badLength || NON_SONG_PATTERN.test(rawTitle) || COVER_PATTERN.test(rawTitle),
+    });
+  }
+  if (out.length === 0 && result.code !== 0) {
+    throw new Error(result.stderr.trim().split("\n").pop() || "YouTube search failed.");
+  }
+  // Stable: keep YouTube's order within each group.
+  return [...out.filter((r) => !r.unlikely), ...out.filter((r) => r.unlikely)];
+}
+
 /**
  * Look up the uploaded caption languages of several videos in one yt-dlp run.
  * `onResult` fires per video as yt-dlp prints it (videos that fail to load are
