@@ -1,4 +1,5 @@
 import { CoachSettings } from "../components/coach-settings";
+import { PhoneSettings } from "../components/phone-settings";
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { exists } from "@tauri-apps/plugin-fs";
@@ -14,7 +15,7 @@ import { useAudioDevices } from "../hooks/use-audio-devices";
 import { useSongStore } from "../stores/song-store";
 import { exportBackup, importBackupViaPicker } from "../lib/backup";
 
-type Tab = "highlights" | "preferences" | "downloads" | "audio" | "coach";
+type Tab = "highlights" | "preferences" | "downloads" | "audio" | "coach" | "phone";
 
 const THEME_OPTIONS = [
   { key: "blue", color: "#2563EB", label: "Blue", light: "#EFF6FF", text: "#1D4ED8" },
@@ -391,6 +392,14 @@ export function SettingsPage() {
                   <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
                 </svg>,
               )}
+              {isDesktop && tabDef(
+                "phone",
+                "Phone",
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="7" y="2" width="10" height="20" rx="2" />
+                  <line x1="11" y1="18" x2="13" y2="18" />
+                </svg>,
+              )}
               {tabDef(
                 "audio",
                 "Audio I/O",
@@ -711,6 +720,7 @@ export function SettingsPage() {
 
             {/* ═══ COACH TAB ═══ */}
             {activeTab === "coach" && <CoachSettings />}
+            {isDesktop && activeTab === "phone" && <PhoneSettings />}
 
             {/* ═══ AUDIO I/O TAB ═══ */}
             {activeTab === "audio" && (

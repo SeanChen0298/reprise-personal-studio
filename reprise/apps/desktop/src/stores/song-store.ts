@@ -56,6 +56,8 @@ interface SongStore {
   sections: Record<string, Section[]>; // songId -> sections
   importDraft: ImportDraft | null;
   isLoading: boolean;
+  /** The library has been read from the DB at least once. */
+  hasLoaded: boolean;
   loadError: string | null;
 
   // Bootstrap — call once on app load (after auth)
@@ -123,6 +125,7 @@ export const useSongStore = create<SongStore>()((set, get) => ({
   sections: {},
   importDraft: null,
   isLoading: false,
+  hasLoaded: false,
   loadError: null,
 
   // -------------------------------------------------------------------------
@@ -185,6 +188,7 @@ export const useSongStore = create<SongStore>()((set, get) => ({
         recordings,
         sections,
         isLoading: false,
+        hasLoaded: true,
       });
 
       // Re-enqueue any songs that were mid-download when the app last closed.

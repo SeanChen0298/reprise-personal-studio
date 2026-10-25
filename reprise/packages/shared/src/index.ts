@@ -21,4 +21,7 @@ export type {
 } from "./types/song";
 export type { HighlightType } from "./types/highlight";
 export { DEFAULT_HIGHLIGHTS } from "./types/highlight";
+export type { SyncFileRef, SyncSongFiles, SyncCoach, SyncSnapshot, PhoneTake, PhoneChanges } from "./types/sync";
+export { REGISTERS, PLACEMENTS, normaliseCard } from "./lib/song-card";
+export type { VoiceSpec, SongCard } from "./lib/song-card";
 export { generateFurigana } from "./lib/furigana";

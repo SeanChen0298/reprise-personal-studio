@@ -83,6 +83,7 @@
     "fs:allow-write-text-file",
     "fs:allow-remove",
     "fs:allow-rename",
+    "fs:allow-stat",
     {
       "identifier": "fs:scope",
       "allow": [

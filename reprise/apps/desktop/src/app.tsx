@@ -3,6 +3,7 @@ import { emptyTakeTrash } from "./lib/take-trash";
 import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { useSongStore } from "./stores/song-store";
 import { useTaskQueueProcessor } from "./hooks/use-task-queue-processor";
+import { usePhoneSync } from "./hooks/use-phone-sync";
 import { useAutoProcess } from "./hooks/use-auto-process";
 import { useSuggestionsPreload } from "./hooks/use-suggestions-preload";
 import { ProtectedRoute } from "./components/protected-route";
@@ -32,6 +33,7 @@ export function App() {
   }, [loadAllData]);
 
   useTaskQueueProcessor();
+  usePhoneSync();
   useAutoProcess();
   useSuggestionsPreload();
 

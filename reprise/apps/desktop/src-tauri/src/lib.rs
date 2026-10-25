@@ -1,3 +1,5 @@
+mod sync_server;
+
 /// Returns the PATH environment variable with the sidecar binaries directory prepended.
 /// In production, sidecar binaries (yt-dlp.exe, deno.exe) are placed in the same
 /// directory as the main executable. Injecting this directory lets yt-dlp discover
@@ -23,7 +25,13 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_os::init())
-        .invoke_handler(tauri::generate_handler![get_sidecar_path_env])
+        .manage(sync_server::SyncState::default())
+        .invoke_handler(tauri::generate_handler![
+            get_sidecar_path_env,
+            sync_server::sync_server_start,
+            sync_server::sync_server_stop,
+            sync_server::sync_server_status
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

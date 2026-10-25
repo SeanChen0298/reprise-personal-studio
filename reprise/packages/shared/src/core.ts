@@ -1,0 +1,27 @@
+// Everything except furigana generation (kuroshiro + a 17 MB dictionary) — for the phone app.
+export type { AuthStatus } from "./types/auth";
+export type {
+  DownloadStatus,
+  StemStatus,
+  PitchStatus,
+  ChordStatus,
+  AlignStatus,
+  LineStatus,
+  Song,
+  Annotation,
+  Line,
+  YouTubeMetadata,
+  ImportDraft,
+  Recording,
+  Section,
+  TakeAnalysis,
+  TakeNote,
+  TakeIssue,
+  TakeIssueKind,
+  TakeHalfStats,
+} from "./types/song";
+export type { HighlightType } from "./types/highlight";
+export { DEFAULT_HIGHLIGHTS } from "./types/highlight";
+export type { SyncFileRef, SyncSongFiles, SyncCoach, SyncSnapshot, PhoneTake, PhoneChanges } from "./types/sync";
+export { REGISTERS, PLACEMENTS, normaliseCard } from "./lib/song-card";
+export type { VoiceSpec, SongCard } from "./lib/song-card";
