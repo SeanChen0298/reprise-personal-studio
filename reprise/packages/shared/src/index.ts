@@ -22,6 +22,9 @@ export type {
 export type { HighlightType } from "./types/highlight";
 export { DEFAULT_HIGHLIGHTS } from "./types/highlight";
 export type { SyncFileRef, SyncSongFiles, SyncCoach, SyncSnapshot, PhoneTake, PhoneChanges } from "./types/sync";
-export { REGISTERS, PLACEMENTS, normaliseCard } from "./lib/song-card";
+export { REGISTERS, PLACEMENTS, normaliseCard, parseLineRefs, splitLineRefs } from "./lib/song-card";
+export { collapseRepeats, splitLines, translationsByLine } from "./lib/lyrics";
+export { ISSUE_LABEL, isBreathIssue, reviewInsight, issueSongStartMs } from "./lib/take-words";
+export type { ReviewInsight } from "./lib/take-words";
 export type { VoiceSpec, SongCard } from "./lib/song-card";
 export { generateFurigana } from "./lib/furigana";

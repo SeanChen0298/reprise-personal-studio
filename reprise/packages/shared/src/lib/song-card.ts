@@ -60,3 +60,19 @@ export function normaliseCard(raw: Record<string, unknown> | null | undefined): 
     practice_focus: arr(raw.practice_focus),
   };
 }
+
+/** "L15-22, L36–45" → [[15, 22], [36, 45]] (1-based, inclusive). */
+export function parseLineRefs(s: string): [number, number][] {
+  const out: [number, number][] = [];
+  for (const m of s.matchAll(/L?\s*(\d+)(?:\s*[-–—~]\s*L?\s*(\d+))?/gi)) {
+    const a = Number(m[1]);
+    const b = m[2] ? Number(m[2]) : a;
+    if (a > 0) out.push([Math.min(a, b), Math.max(a, b)]);
+  }
+  return out;
+}
+
+/** Free text split around "L12" / "L3–5": odd indexes are the refs. */
+export function splitLineRefs(text: string): string[] {
+  return text.split(/(\bL\d+(?:\s*[-–—]\s*L?\d+)?)/g);
+}

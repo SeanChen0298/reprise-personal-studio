@@ -5,6 +5,7 @@
 // transport plays the song for everything; the right panel holds takes and
 // the selected line's details. Every lyric edit is undoable.
 
+import { splitLines, translationsByLine } from "@reprise/shared";
 import { isJapanese, languageCode } from "../../lib/language";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -19,7 +20,6 @@ import { useWaveformData } from "../../hooks/use-waveform-data";
 import { useAudioDevices } from "../../hooks/use-audio-devices";
 import { loadVocalMap } from "../../lib/take-review";
 import { nextWordBoundary } from "../../lib/lyric-edits";
-import { collapseRepeats } from "../../lib/translate";
 import { emptyTakeTrash } from "../../lib/take-trash";
 import { PLACEMENTS, REGISTERS } from "../../lib/coach/knowledge";
 import type { VocalMap } from "../../lib/vocal-map";
@@ -105,40 +105,11 @@ function Workspace({ songId }: { songId: string }) {
 
   // ── Data ─────────────────────────────────────────────────────────────────
   const transLang = song.translation_language;
-  const lines = useMemo(
-    () => [...(rawLines ?? [])].filter((l) => !transLang || l.language !== transLang).sort((a, b) => a.order - b.order),
+  const { lines, translations: translationLines } = useMemo(
+    () => splitLines(rawLines ?? [], transLang),
     [rawLines, transLang],
   );
-  const translationLines = useMemo(
-    () => (transLang ? (rawLines ?? []).filter((l) => l.language === transLang).sort((a, b) => a.order - b.order) : []),
-    [rawLines, transLang],
-  );
-  // Translation per lyric line. Match by time first — translations fetched from
-  // captions are split differently from the lyrics, so their numbering doesn't
-  // line up — and fall back to the line number.
-  const translationById = useMemo(() => {
-    const m = new Map<string, string>();
-    if (translationLines.length === 0) return m;
-    const byOrder = new Map(translationLines.map((l) => [l.order, l.text]));
-    const timed = translationLines.filter((t) => t.start_ms != null);
-    for (const line of lines) {
-      let text: string | undefined;
-      if (line.start_ms != null && line.end_ms != null && timed.length) {
-        const parts = timed
-          .filter((t) => {
-            const mid = (t.start_ms! + (t.end_ms ?? t.start_ms!)) / 2;
-            return mid >= line.start_ms! - 150 && mid < line.end_ms!;
-          })
-          .map((t) => t.text.trim())
-          .filter(Boolean);
-        if (parts.length) text = parts.join(" ");
-      }
-      text ??= byOrder.get(line.order);
-      // Older machine translations can contain runaway repeats — tidy them for display.
-      if (text) m.set(line.id, collapseRepeats(text));
-    }
-    return m;
-  }, [lines, translationLines]);
+  const translationById = useMemo(() => translationsByLine(lines, translationLines), [lines, translationLines]);
   const showTranslation = usePreferencesStore((s) => s.showTranslation);
   const setShowTranslation = usePreferencesStore((s) => s.setShowTranslation);
   const sections = useMemo(

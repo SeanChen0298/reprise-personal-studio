@@ -40,29 +40,8 @@ function generateOptions(text: string) {
   return { max_new_tokens: Math.min(128, text.length * 4 + 16), repetition_penalty: 1.3, no_repeat_ngram_size: 4 };
 }
 
-/** Collapse a word or short phrase repeated more than 3 times in a row to 3. */
-export function collapseRepeats(text: string): string {
-  const words = text.split(/\s+/).filter(Boolean);
-  const norm = (w: string) => w.toLowerCase().replace(/[^\p{L}\p{N}']/gu, "");
-  for (let n = 1; n <= 4; n++) {
-    const out: string[] = [];
-    for (let i = 0; i < words.length; ) {
-      const gram = words.slice(i, i + n).map(norm).join(" ");
-      let reps = 1;
-      while (
-        i + (reps + 1) * n <= words.length &&
-        words.slice(i + reps * n, i + (reps + 1) * n).map(norm).join(" ") === gram
-      )
-        reps++;
-      const keep = gram && reps > 3 ? 3 : reps;
-      out.push(...words.slice(i, i + keep * n));
-      i += reps * n;
-    }
-    // Finish a collapsed run cleanly ("please, please, please," → "please, please, please").
-    words.splice(0, words.length, ...out);
-  }
-  return words.join(" ").replace(/[,;]\s*$/, "");
-}
+import { collapseRepeats } from "@reprise/shared";
+export { collapseRepeats };
 
 function normalizeLang(code: string): string {
   return code.split("-")[0].toLowerCase();
