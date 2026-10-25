@@ -3,6 +3,8 @@
 // file), this gives a one-click, copyable backup of the whole library.
 
 import { dexie, type Row } from "./local-db";
+import { useHighlightStore } from "./highlight-config";
+import { useSymbolStore } from "./symbol-config";
 
 export interface BackupCounts {
   songs: number;
@@ -21,6 +23,27 @@ export interface BackupFile extends BackupCounts {
     recordings: Row[];
     sections: Row[];
   };
+  /**
+   * Local settings that rows depend on: the highlight and symbol types marks
+   * refer to by id. (Coach keys are never included.)
+   */
+  settings?: Record<string, string>;
+}
+
+/** localStorage keys copied into a backup — never "reprise-coach" (API keys). */
+const SETTINGS_KEYS = ["reprise-highlights", "reprise-symbols", "reprise-preferences"];
+
+function readSettings(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const k of SETTINGS_KEYS) {
+    try {
+      const v = localStorage.getItem(k);
+      if (v) out[k] = v;
+    } catch {
+      /* unavailable */
+    }
+  }
+  return out;
 }
 
 /** Gather every collection and trigger a download of a timestamped JSON file. */
@@ -41,6 +64,7 @@ export async function exportBackup(): Promise<BackupCounts> {
     recordings: recordings.length,
     sections: sections.length,
     data: { songs, lines, recordings, sections },
+    settings: readSettings(),
   };
 
   const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
@@ -72,6 +96,33 @@ export async function importBackupFromText(text: string): Promise<BackupCounts> 
       if (sections.length) await dexie.sections.bulkPut(sections);
     }
   );
+
+  // Highlight / symbol types: add the backup's ones this machine doesn't have
+  // (by id), so restored marks keep their look. Preferences only on a fresh machine.
+  for (const [k, v] of Object.entries(parsed.settings ?? {})) {
+    if (!SETTINGS_KEYS.includes(k)) continue;
+    try {
+      const cur = localStorage.getItem(k);
+      if (!cur || k === "reprise-preferences") {
+        if (!cur) localStorage.setItem(k, v);
+        continue;
+      }
+      const mine = JSON.parse(cur) as { state?: Record<string, unknown> };
+      const theirs = JSON.parse(v) as { state?: Record<string, unknown> };
+      const listKey = k === "reprise-highlights" ? "highlights" : "symbols";
+      const a = (mine.state?.[listKey] ?? []) as { id: string }[];
+      const b = (theirs.state?.[listKey] ?? []) as { id: string }[];
+      if (!Array.isArray(a) || !Array.isArray(b)) continue;
+      const have = new Set(a.map((x) => x.id));
+      const merged = [...a, ...b.filter((x) => !have.has(x.id))];
+      if (merged.length !== a.length) {
+        localStorage.setItem(k, JSON.stringify({ ...mine, state: { ...mine.state, [listKey]: merged } }));
+      }
+    } catch {
+      /* skip a malformed entry */
+    }
+  }
+  await Promise.all([useHighlightStore.persist.rehydrate(), useSymbolStore.persist.rehydrate()]);
 
   return { songs: songs.length, lines: lines.length, recordings: recordings.length, sections: sections.length };
 }

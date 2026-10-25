@@ -5,6 +5,7 @@
 // transport plays the song for everything; the right panel holds takes and
 // the selected line's details. Every lyric edit is undoable.
 
+import { isJapanese, languageCode } from "../../lib/language";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { convertFileSrc } from "@tauri-apps/api/core";
@@ -90,6 +91,17 @@ function Workspace({ songId }: { songId: string }) {
   useEffect(() => setScope(songId), [songId, setScope]);
   // Undo can't reach deleted takes once you leave the song — remove their files then.
   useEffect(() => () => void emptyTakeTrash(), [songId]);
+  // Japanese lyrics that came in without furigana (e.g. a fresh download): fill it in once.
+  const furiganaTried = useRef<string | null>(null);
+  useEffect(() => {
+    if (furiganaTried.current === songId || !rawLines?.length) return;
+    if (!isJapanese(song.language) && !rawLines.some((l) => isJapanese(l.language))) return;
+    const missing = rawLines.some(
+      (l) => (isJapanese(l.language) || (!l.language && isJapanese(song.language))) && !l.furigana_html && /[一-龯㐀-䶿]/.test(l.text),
+    );
+    furiganaTried.current = songId;
+    if (missing) void useSongStore.getState().generateFuriganaForSong(songId);
+  }, [songId, rawLines, song.language]);
 
   // ── Data ─────────────────────────────────────────────────────────────────
   const transLang = song.translation_language;
@@ -264,7 +276,7 @@ function Workspace({ songId }: { songId: string }) {
   /** Where a coach translation goes: the song's translation language (English by default). */
   const coachTranslation = useMemo(() => {
     const lang = transLang ?? "en";
-    const base = (c: string | null | undefined) => (c ?? "").split("-")[0].toLowerCase();
+    const base = (c: string | null | undefined) => languageCode(c) ?? "";
     // Never when the lyrics themselves are in that language (it would replace them).
     if (base(song.language) === base(lang) || lines.some((l) => l.language && base(l.language) === base(lang))) return null;
     let languageName = lang;

@@ -236,6 +236,34 @@ export function useTakes({ song, lines, sections, player, backing, originalPath,
     if (timerRef.current) clearInterval(timerRef.current);
   }, []);
 
+  // Leaving the song mid-take: close the mic and keep what was sung (it can be deleted later).
+  const leaveRef = useRef<() => void>(() => {});
+  leaveRef.current = () => {
+    cancelCountdownRef.current = true;
+    if (!recorder.isRecording || countdown != null || stoppingRef.current) return;
+    const sync = syncRef.current;
+    const section = takeSection;
+    void recorder.stopRecording().then((result) => {
+      if (!result) return;
+      const now = new Date().toISOString();
+      void addRecording(song.id, {
+        id: crypto.randomUUID(),
+        song_id: song.id,
+        line_id: null,
+        section_id: section?.id,
+        file_path: result.filePath,
+        duration_ms: result.durationMs,
+        is_master_take: false,
+        is_best_take: false,
+        song_start_ms: sync?.songStartMs,
+        backing: sync?.backing,
+        created_at: now,
+        updated_at: now,
+      });
+    });
+  };
+  useEffect(() => () => leaveRef.current(), []);
+
   // ── Review ───────────────────────────────────────────────────────────────
   const [reviewId, setReviewId] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState<Record<string, number>>({});
@@ -326,6 +354,32 @@ export function useTakes({ song, lines, sections, player, backing, originalPath,
       }
     },
     [pending, song, takeSection, addRecording, runAnalysis],
+  );
+
+  // A take waiting for Save/Discard when you leave: keep it rather than lose it.
+  const pendingRef = useRef(pending);
+  pendingRef.current = pending;
+  useEffect(
+    () => () => {
+      const p = pendingRef.current;
+      if (!p) return;
+      const now = new Date().toISOString();
+      void addRecording(song.id, {
+        id: crypto.randomUUID(),
+        song_id: song.id,
+        line_id: null,
+        file_path: p.filePath,
+        duration_ms: p.durationMs,
+        is_master_take: false,
+        is_best_take: false,
+        song_start_ms: p.songStartMs,
+        backing: p.backing,
+        created_at: now,
+        updated_at: now,
+      });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [song.id],
   );
 
   const discard = useCallback(() => {

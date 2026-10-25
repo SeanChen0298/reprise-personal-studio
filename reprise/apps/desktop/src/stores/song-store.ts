@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { isJapanese, languageCode } from "../lib/language";
 import type { Song, ImportDraft, Line, LineStatus, Annotation, Recording, Section } from "../types/song";
 import { upgradeStatus } from "../lib/status-config";
 import {
@@ -26,20 +27,8 @@ const LOCAL_USER_ID = "local";
 
 /** Maps a user-facing language name (or code) to a yt-dlp language code. */
 function languageNameToCode(language?: string): string | undefined {
-  if (!language) return undefined;
-  const l = language.toLowerCase().trim();
-  const map: Record<string, string> = {
-    japanese: "ja", ja: "ja",
-    english: "en",  en: "en",
-    korean: "ko",   ko: "ko",
-    chinese: "zh",  zh: "zh",
-    spanish: "es",  es: "es",
-    french: "fr",   fr: "fr",
-    german: "de",   de: "de",
-    portuguese: "pt", pt: "pt",
-    italian: "it",  it: "it",
-  };
-  return map[l];
+  const code = languageCode(language);
+  return code && ["ja", "en", "ko", "zh", "es", "fr", "de", "pt", "it"].includes(code) ? code : undefined;
 }
 
 async function detectBpmFromFile(filePath: string): Promise<number | null> {
@@ -370,7 +359,7 @@ export const useSongStore = create<SongStore>()((set, get) => ({
             updated_at: now,
           }));
           await get().setLines(id, newLines);
-          if (song.language?.startsWith("ja")) {
+          if (isJapanese(song.language)) {
             get().generateFuriganaForSong(id).catch(() => {});
           }
         }
@@ -627,7 +616,7 @@ export const useSongStore = create<SongStore>()((set, get) => ({
         await get().loadAllData();
         throw insError;
       }
-      if (language?.startsWith("ja") && lines.length > 0) {
+      if ((isJapanese(language) || (!language && isJapanese(song?.language))) && lines.length > 0) {
         get().generateFuriganaForSong(songId).catch(() => {});
       }
     }
@@ -729,7 +718,7 @@ export const useSongStore = create<SongStore>()((set, get) => ({
     const allLines = get().lines[songId] ?? [];
     // Generate for lines explicitly tagged "ja", or untagged lines when the song language is "ja"
     const targets = allLines.filter(
-      (l) => l.language?.startsWith("ja") || (!l.language && song.language?.startsWith("ja"))
+      (l) => isJapanese(l.language) || (!l.language && isJapanese(song.language))
     );
     console.log("[furigana] target line count:", targets.length);
     if (targets.length === 0) return;
@@ -783,7 +772,7 @@ export const useSongStore = create<SongStore>()((set, get) => ({
     // Fire-and-forget: generate furigana for custom_text (Japanese songs only)
     const song = get().songs.find((s) => s.id === songId);
     const KANJI_RE = /[\u4E00-\u9FAF\u3400-\u4DBF]/;
-    if (song?.language?.startsWith("ja") && customText && KANJI_RE.test(customText)) {
+    if (isJapanese(song?.language) && customText && KANJI_RE.test(customText)) {
       (async () => {
         try {
           const { generateFurigana } = await import("@reprise/shared");
@@ -814,7 +803,7 @@ export const useSongStore = create<SongStore>()((set, get) => ({
 
     // Fire-and-forget: generate furigana for the full line and each annotation slice (Japanese songs only)
     const song = get().songs.find((s) => s.id === songId);
-    if (song?.language?.startsWith("ja") && annotations.length > 0 && line) {
+    if (isJapanese(song?.language) && annotations.length > 0 && line) {
       const lineText = line.custom_text ?? line.text;
       const KANJI_RE = /[\u4E00-\u9FAF\u3400-\u4DBF]/;
       (async () => {
