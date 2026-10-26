@@ -4,7 +4,9 @@
  *
  *   1. lyrics, when it has none (LRCLIB, same rules as a fresh download)
  *   2. stem separation (→ pitch and chords follow on their own, see use-task-queue-processor)
- *   3. lyric timing (WhisperX) when the lyrics have no timing
+ *   3. lyric timing: lyrics that came with timing (LRCLIB) are fitted to this recording's vocals
+ *      (shifted to where the singing is, each line ending where the singing stops); lyrics with
+ *      no timing are timed by WhisperX
  *   4. furigana and romaji for Japanese lyrics (a song with no language whose lyrics are mostly
  *      kana is set to Japanese first)
  *   5. sections from the coach, when the song has none and a coach key is set
@@ -22,8 +24,10 @@ import { useTaskQueueStore } from "../stores/task-queue-store";
 import { backupChain, useCoachStore } from "../stores/coach-store";
 import { isJapanese } from "../lib/language";
 import type { Line, Section, Song } from "../types/song";
+import { fitLyrics } from "../lib/fit-lyrics";
+import { loadVocalMap } from "../lib/take-review";
 
-type Step = "lyrics" | "align" | "sections";
+type Step = "lyrics" | "align" | "sections" | "fit";
 const TRIED_KEY = "reprise-auto-prepared";
 
 function tried(): Record<string, Partial<Record<Step, number>>> {
@@ -103,6 +107,16 @@ async function coachSections(song: Song, lines: Line[]): Promise<void> {
   for (const s of list) await useSongStore.getState().addSection(song.id, s);
 }
 
+/** Fit the song's timed lyrics to its vocals and save the new times. */
+async function fitToVocals(song: Song, lines: Line[], sections: Section[]): Promise<void> {
+  const map = await loadVocalMap(song);
+  if (!map) return;
+  const r = fitLyrics(lines, sections, map.singing, map.semitones.length * 10);
+  if (!r?.changes.length) return;
+  const store = useSongStore.getState();
+  for (const c of r.changes) await store.updateLine(song.id, c.lineId, { start_ms: c.start_ms, end_ms: c.end_ms });
+}
+
 export function useAutoProcess() {
   const on = usePreferencesStore((s) => s.autoPrepare);
   const songs = useSongStore((s) => s.songs);
@@ -172,6 +186,13 @@ export function useAutoProcess() {
         break;
       }
       const primary = primaryLines(song, all);
+      const timed = primary.filter((l) => l.start_ms != null).length;
+      const byWhisper = primary.some((l) => l.align_confidence != null) || song.align_status === "done";
+      if (song.pitch_status === "done" && timed >= 5 && timed >= primary.length * 0.8 && !byWhisper && !t[song.id]?.fit) {
+        markTried(song.id, "fit");
+        job = () => fitToVocals(song, primary, sections[song.id] ?? []);
+        break;
+      }
       if (coachReady && primary.length >= 6 && (sections[song.id]?.length ?? 0) === 0 && !t[song.id]?.sections) {
         markTried(song.id, "sections");
         job = () => coachSections(song, primary);

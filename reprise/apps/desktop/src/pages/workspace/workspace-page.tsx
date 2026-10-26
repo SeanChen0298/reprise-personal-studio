@@ -19,6 +19,7 @@ import { useLinePlayer } from "../../hooks/use-line-player";
 import { useWaveformData } from "../../hooks/use-waveform-data";
 import { useAudioDevices } from "../../hooks/use-audio-devices";
 import { loadVocalMap } from "../../lib/take-review";
+import { fitLyrics } from "../../lib/fit-lyrics";
 import { nextWordBoundary } from "../../lib/lyric-edits";
 import { emptyTakeTrash } from "../../lib/take-trash";
 import { PLACEMENTS, REGISTERS } from "../../lib/coach/knowledge";
@@ -806,6 +807,23 @@ function Workspace({ songId }: { songId: string }) {
         shortcut: "C",
         run: () => void insertSymbol(sym.char),
       })),
+      ...(vocalMap && lines.filter((l) => l.start_ms != null).length >= 5
+        ? [
+            {
+              id: "fit-timing",
+              group: "Lyrics",
+              label: "Fit timing to the vocals",
+              run: () => {
+                const r = fitLyrics(lines, sections, vocalMap.singing, vocalMap.semitones.length * 10);
+                if (!r?.changes.length) return say("The timing already fits the vocals as well as I can make it");
+                void edits.setTiming(r.changes, "Fit timing to the vocals");
+                say(
+                  `Fitted ${r.changes.length} lines to the vocals${r.offsetMs ? ` (shifted ${(r.offsetMs / 1000).toFixed(1)} s)` : ""}${r.sectionsShifted ? `, ${r.sectionsShifted} section${r.sectionsShifted > 1 ? "s" : ""} shifted on ${r.sectionsShifted > 1 ? "their" : "its"} own` : ""} — Ctrl+Z undoes it`,
+                );
+              },
+            },
+          ]
+        : []),
       { id: "note", group: "Lyrics", label: panel === "takes" && takes.reviewRec ? "Note a moment in the open take" : "Write a note on this line", shortcut: "N", featured: true, run: () => (panel === "takes" && takes.reviewRec ? setNoteFocusNonce((n) => n + 1) : cursorLine && setNoteLineId(cursorLine.id)) },
       { id: "edit", group: "Lyrics", label: "Edit line text", shortcut: "F", featured: true, run: () => cursorLine && setEditingLineId(cursorLine.id) },
       { id: "section", group: "Lyrics", featured: true, label: cursorLine && sections.some((s) => s.start_line_order === cursorLine.order) ? "Rename this section" : "Start a section at this line", shortcut: "#", run: startSectionEdit },
@@ -852,7 +870,7 @@ function Workspace({ songId }: { songId: string }) {
       { id: "keys", group: "Help", label: "Keyboard shortcuts", shortcut: "F1", featured: true, run: () => setShortcutsOpen(true) },
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [highlights, selStart, selEnd, cursorLine, cursorSection, sections, view, showHints, panel, symbols, showTranslation, showRomaji, translationLines.length, player.isPlaying, player.loopEnabled, tracks, canUndo, canRedo, edits, lyricsCheck, nextCheck]);
+  }, [highlights, selStart, selEnd, cursorLine, cursorSection, sections, view, showHints, panel, symbols, showTranslation, showRomaji, translationLines.length, player.isPlaying, player.loopEnabled, tracks, canUndo, canRedo, edits, lyricsCheck, nextCheck, vocalMap, lines, say]);
 
   // Your take notes, placed under the lyric line they were sung on.
   const takeNotesByLine = useMemo(() => {
