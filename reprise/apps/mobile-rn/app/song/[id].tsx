@@ -18,6 +18,8 @@ import { useTakeRecorder, type PendingTake } from "../../src/hooks/use-take-reco
 import { useTheme } from "../../src/lib/theme";
 import { useSongPalette, vividLook } from "../../src/lib/song-palette";
 import { StatusBar } from "expo-status-bar";
+import { VividBackdrop } from "../../src/components/vivid-backdrop";
+import { sectionEnergy } from "../../src/lib/section-feel";
 import { clock, megabytes } from "../../src/lib/format";
 import { DISPLAY, DISPLAY_REGULAR, Text } from "../../src/components/text";
 import { Button, Card, Chip, Label, Segmented } from "../../src/components/ui";
@@ -240,6 +242,13 @@ export default function SongScreen() {
     void rec.start(from ?? null, sectionTake);
   };
   const cursorSection = sectionOf(player.cursor);
+  // The feel of the part playing now (the coach's words for it), for the Vivid backdrop.
+  const playingSection = sectionOf(active);
+  const energy = useMemo(() => {
+    if (!playingSection) return 0.4;
+    const c = cardSection.get(playingSection.name.trim().toLowerCase());
+    return sectionEnergy(playingSection.name, c?.mood);
+  }, [playingSection, cardSection]);
   const recordLabel = player.loop === "section" && cursorSection ? `Record ${capitalise(cursorSection.name)}` : "Record";
 
   if (!song) {
@@ -256,7 +265,7 @@ export default function SongScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: p.wash }}>
       {vivid && <StatusBar style="light" />}
-      {vivid && <LinearGradient pointerEvents="none" colors={[vivid.top, vivid.bottom]} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} />}
+      {vivid && <VividBackdrop hex={songHex} top={vivid.top} bottom={vivid.bottom} energy={energy} playing={player.isPlaying} />}
       {/* Header: back, the song, more */}
       <View style={{ paddingTop: insets.top + 4, paddingHorizontal: 8, paddingBottom: 4, flexDirection: "row", alignItems: "center" }}>
         <Pressable onPress={() => router.back()} hitSlop={10} style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>

@@ -15,7 +15,7 @@ export interface SongPalette {
   onSolid: string;
 }
 
-function hexToHsl(hex: string): [number, number, number] {
+export function hexToHsl(hex: string): [number, number, number] {
   const n = parseInt(hex.slice(1, 7), 16);
   const r = ((n >> 16) & 255) / 255;
   const g = ((n >> 8) & 255) / 255;
@@ -30,7 +30,7 @@ function hexToHsl(hex: string): [number, number, number] {
   return [h, s, l];
 }
 
-function hsl(h: number, s: number, l: number): string {
+export function hsl(h: number, s: number, l: number): string {
   const f = (n: number) => {
     const k = (n + h * 12) % 12;
     const a = s * Math.min(l, 1 - l);
