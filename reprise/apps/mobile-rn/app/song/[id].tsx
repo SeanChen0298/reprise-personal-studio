@@ -13,7 +13,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { reviewInsight, splitLines, translationsByLine, type Line, type Section } from "@reprise/shared/core";
 import { linesWithEdits, takesFor, TRACKS, useLibraryStore, type TrackKind } from "../../src/stores/library-store";
 import { usePrefsStore } from "../../src/stores/prefs-store";
-import { lineAt, useLinePlayer } from "../../src/hooks/use-line-player";
+import { useLinePlayer } from "../../src/hooks/use-line-player";
 import { useTakeRecorder, type PendingTake } from "../../src/hooks/use-take-recorder";
 import { useClassicTheme } from "../../src/lib/theme";
 import { useSongPalette, vividLook } from "../../src/lib/song-palette";
@@ -63,7 +63,7 @@ async function keepTake(songId: string, p: PendingTake, note: string) {
 
 export default function SongScreen() {
   useKeepAwake();
-  const { id, at, play, sing } = useLocalSearchParams<{ id: string; at?: string; play?: string; sing?: string }>();
+  const { id, at, play } = useLocalSearchParams<{ id: string; at?: string; play?: string }>();
   const classicT = useClassicTheme();
   const calmP = useSongPalette(id, classicT);
   const look = usePrefsStore((s) => s.look);
@@ -242,29 +242,6 @@ export default function SongScreen() {
     touch();
     void rec.start(from ?? null, sectionTake);
   };
-  // Remember where you were (the widget offers "Sing from …" there).
-  const getPos = useRef(player.getPositionMs);
-  getPos.current = player.getPositionMs;
-  useEffect(() => {
-    if (!player.isPlaying && player.ready) useLibraryStore.getState().setPosition(id, getPos.current());
-  }, [player.isPlaying, player.ready, id]);
-  useEffect(() => () => useLibraryStore.getState().setPosition(id, getPos.current()), [id]);
-
-  // Opened from the widget's "Sing from …": straight into a sung-along take from there.
-  const sang = useRef(false);
-  useEffect(() => {
-    if (sing !== "1" || sang.current || !player.ready || !lines.length) return;
-    sang.current = true;
-    usePrefsStore.getState().setPracticeOpen(true);
-    const idx = Math.max(0, lineAt(lines, (Number(at) || 0) + 1));
-    const sec = sectionOf(idx);
-    const from = sec ? lines.find((l) => l.order === sec.start_line_order) ?? lines[idx] : lines[idx];
-    player.setCursor(idx);
-    touch();
-    void rec.start(from ?? null, sec);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sing, player.ready, lines]);
-
   const cursorSection = sectionOf(player.cursor);
   // The feel of the part playing now (the coach's words for it), for the Vivid backdrop.
   const playingSection = sectionOf(active);

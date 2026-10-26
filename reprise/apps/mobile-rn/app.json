@@ -92,11 +92,11 @@
             {
               "name": "Pickup",
               "label": "Pick up",
-              "description": "Play, sing or pick up the song you were last working on",
+              "description": "The song you practiced most recently — tap to open it",
               "minWidth": "250dp",
               "minHeight": "110dp",
               "targetCellWidth": 4,
-              "targetCellHeight": 3,
+              "targetCellHeight": 2,
               "maxResizeWidth": "520dp",
               "maxResizeHeight": "320dp",
               "resizeMode": "horizontal|vertical",

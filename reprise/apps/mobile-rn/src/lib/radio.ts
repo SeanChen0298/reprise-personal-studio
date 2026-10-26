@@ -4,12 +4,9 @@
 import TrackPlayer, { AppKilledPlaybackBehavior, Capability, Event, RepeatMode, State, type Track } from "react-native-track-player";
 import * as FileSystem from "expo-file-system";
 import { create } from "zustand";
-import { splitLines, type Line, type Song } from "@reprise/shared/core";
+import type { Song } from "@reprise/shared/core";
 import { useLibraryStore } from "../stores/library-store";
 import { usePrefsStore } from "../stores/prefs-store";
-import { vividColors } from "./song-palette";
-import { lineAt } from "../hooks/use-line-player";
-import { redrawWidgets, writeLive, type LiveData } from "../widgets/pickup-widget";
 
 let setup: Promise<void> | null = null;
 
@@ -120,68 +117,16 @@ export async function pauseRadio(): Promise<void> {
 export async function stopRadio(): Promise<void> {
   useRadio.setState({ on: false });
   await TrackPlayer.reset().catch(() => {});
-  lastLive = "";
-  await writeLive(null);
-  await redrawWidgets(undefined, null);
 }
 
-/** Play / pause from the widget. */
+/** Play / pause. */
 export async function toggleRadio(): Promise<void> {
   try {
     const st = (await TrackPlayer.getPlaybackState()).state;
     if (st === State.Playing || st === State.Buffering) await TrackPlayer.pause();
     else await TrackPlayer.play();
   } catch {
-    // Not set up (the app was closed): nothing to toggle.
-  }
-}
-
-// ── The widget follows Play all: what's playing and the lyric line being sung ──
-const linesCache = new Map<string, Line[]>();
-let lastLive = "";
-
-function songLines(songId: string): Line[] {
-  const hit = linesCache.get(songId);
-  if (hit) return hit;
-  const { snapshot } = useLibraryStore.getState();
-  const song = snapshot?.songs.find((s) => s.id === songId);
-  const all = (snapshot?.lines ?? []).filter((l) => l.song_id === songId).sort((a, b) => a.order - b.order);
-  const lines = splitLines(all, song?.translation_language).lines;
-  linesCache.set(songId, lines);
-  return lines;
-}
-
-async function updateWidget(): Promise<void> {
-  try {
-    await ensureLoaded();
-    const track = await TrackPlayer.getActiveTrack();
-    const st = (await TrackPlayer.getPlaybackState()).state;
-    const songId = typeof track?.id === "string" ? track.id : undefined;
-    const song = songId ? useLibraryStore.getState().snapshot?.songs.find((s) => s.id === songId) : undefined;
-    if (!song || st === State.None || st === State.Stopped) return;
-    const lines = songLines(song.id);
-    const i = lineAt(lines, (await TrackPlayer.getPosition()) * 1000);
-    const l = i >= 0 ? lines[i] : undefined;
-    const { top, bottom } = vividColors(useLibraryStore.getState().snapshot?.colors?.[song.id]);
-    const thumb = `${FileSystem.documentDirectory}thumbs/${song.id}-sq.jpg`;
-    const live: LiveData = {
-      id: song.id,
-      title: song.title,
-      artist: song.artist ?? "",
-      image: (await FileSystem.getInfoAsync(thumb)).exists ? thumb : song.thumbnail_url ?? undefined,
-      top,
-      bottom,
-      playing: st === State.Playing || st === State.Buffering || st === State.Loading,
-      lyric: l ? (l.custom_text ?? l.text).trim() : undefined,
-    };
-    // Redraw only when something you'd see changed (the progress event fires every second).
-    const key = `${live.id}|${live.playing}|${live.lyric ?? ""}`;
-    if (key === lastLive) return;
-    lastLive = key;
-    await writeLive(live);
-    await redrawWidgets(undefined, live);
-  } catch {
-    // The widget is a nicety; never let it disturb playback.
+    // Not set up: nothing to toggle.
   }
 }
 
@@ -197,7 +142,4 @@ export async function playbackService(): Promise<void> {
   });
   TrackPlayer.addEventListener(Event.RemoteSeek, (e) => void TrackPlayer.seekTo(e.position));
   TrackPlayer.addEventListener(Event.RemoteStop, () => void stopRadio());
-  TrackPlayer.addEventListener(Event.PlaybackActiveTrackChanged, () => void updateWidget());
-  TrackPlayer.addEventListener(Event.PlaybackState, () => void updateWidget());
-  TrackPlayer.addEventListener(Event.PlaybackProgressUpdated, () => void updateWidget());
 }

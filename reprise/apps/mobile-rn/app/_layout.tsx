@@ -67,7 +67,6 @@ export default function RootLayout() {
         <Stack.Screen name="song/[id]" />
         <Stack.Screen name="pair" options={{ presentation: "modal", animation: "fade_from_bottom" }} />
         <Stack.Screen name="settings" />
-        <Stack.Screen name="play" options={{ animation: "none" }} />
       </Stack>
     </SafeAreaProvider>
     </GestureHandlerRootView>
