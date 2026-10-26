@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, TextInput, View } from "react-native";
 import { Text } from "./text";
+import { Toggle } from "./toggle";
 import { Audio } from "expo-av";
 import { ISSUE_LABEL, isBreathIssue, reviewInsight, type Line, type Recording } from "@reprise/shared/core";
 import { useLibraryStore } from "../stores/library-store";
@@ -27,7 +28,12 @@ interface Props {
 }
 
 function when(iso: string) {
-  return new Date(iso).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  const d = new Date(iso);
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const days = Math.floor((new Date().setHours(0, 0, 0, 0) - new Date(d).setHours(0, 0, 0, 0)) / 86_400_000);
+  if (days === 0) return `Today, ${time}`;
+  if (days === 1) return `Yesterday, ${time}`;
+  return d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
 export function TakesSheet({ open, onClose, songId, takes, lines, t, onBeforePlay, onJumpToLine, focusId }: Props) {
@@ -104,23 +110,22 @@ export function TakesSheet({ open, onClose, songId, takes, lines, t, onBeforePla
         </Text>
       )}
       {!!backingUri && takes.some((x) => x.song_start_ms != null) && (
-        <Pressable onPress={() => setWithBacking((v) => !v)} style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10, alignSelf: "flex-start" }}>
-          <View style={{ width: 34, height: 20, borderRadius: 10, padding: 2, backgroundColor: withBacking ? t.theme : t.border, alignItems: withBacking ? "flex-end" : "flex-start" }}>
-            <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: "#fff" }} />
-          </View>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 12 }}>
+          <Toggle value={withBacking} onChange={setWithBacking} t={t} />
           <Text style={{ fontSize: 13.5, color: t.textSecondary }}>Play with the backing under it</Text>
-        </Pressable>
+        </View>
       )}
       <View style={{ gap: 10 }}>
         {takes.map((take) => {
           const open = expanded === take.id;
           const insight = take.analysis ? reviewInsight(take.analysis) : null;
           const pending = take.onPhone && !local.takes.find((x) => x.id === take.id)?.uploaded;
-          const source = take.onPhone ? (pending ? "On this phone · not sent yet" : "From this phone") : "On the computer";
+          const source = take.onPhone ? (pending ? "On this phone · not sent yet" : "Sung on the phone") : "";
+          const sungWith = take.backing ? `with ${take.backing === "original" ? "the song" : take.backing === "instrumental" ? "the backing" : "the vocals"}` : "";
           return (
-            <Pressable key={take.id} onPress={() => setExpanded(open ? null : take.id)} style={{ borderRadius: 12, borderWidth: 1, borderColor: open ? t.border : t.borderSubtle, padding: 12, gap: 8 }}>
+            <Pressable key={take.id} onPress={() => setExpanded(open ? null : take.id)} style={{ borderRadius: 18, backgroundColor: (t.dark ? "#FFFFFF0D" : "#0000000A"), padding: 14, gap: 10 }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                <Pressable onPress={() => play(take)} hitSlop={8} style={{ width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center", backgroundColor: t.themeSoft }}>
+                <Pressable onPress={() => play(take)} hitSlop={8} style={{ width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center", backgroundColor: t.surface }}>
                   {loading === take.id ? (
                     <ActivityIndicator size="small" color={t.theme} />
                   ) : playing === take.id ? (
@@ -130,13 +135,8 @@ export function TakesSheet({ open, onClose, songId, takes, lines, t, onBeforePla
                   )}
                 </Pressable>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 14.5, color: t.text }}>
-                    {when(take.created_at)} · {clock(take.duration_ms)}
-                  </Text>
-                  <Text style={{ fontSize: 12, color: t.muted }}>
-                    {source}
-                    {take.backing ? ` · sung with ${take.backing === "original" ? "the song" : take.backing === "instrumental" ? "the backing" : "the vocals"}` : ""}
-                  </Text>
+                  <Text style={{ fontSize: 15, fontWeight: "500", color: t.text }}>{when(take.created_at)}</Text>
+                  <Text style={{ fontSize: 12.5, color: t.muted, marginTop: 1 }}>{[clock(take.duration_ms), sungWith, source].filter(Boolean).join(" · ")}</Text>
                 </View>
                 {!pending && (
                   <Pressable onPress={() => useLibraryStore.getState().editTake(songId, take.id, { is_best_take: !take.is_best_take })} hitSlop={8}>
@@ -170,7 +170,7 @@ export function TakesSheet({ open, onClose, songId, takes, lines, t, onBeforePla
                   }}
                   placeholder="How did it go?"
                   placeholderTextColor={t.muted}
-                  style={{ borderWidth: 1.5, borderColor: t.border, borderRadius: 8, padding: 8, fontSize: 14, color: t.text }}
+                  style={{ borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, fontSize: 14, color: t.text, backgroundColor: t.surface, fontFamily: "Inter_400Regular" }}
                 />
               ) : (
                 <Pressable onPress={() => setEditing({ id: take.id, text: take.note ?? "" })}>
@@ -211,7 +211,7 @@ export function TakesSheet({ open, onClose, songId, takes, lines, t, onBeforePla
               )}
               {open && !take.analysis && take.song_start_ms != null && (
                 <Text style={{ fontSize: 12.5, color: t.muted }}>
-                  {pending ? "The computer checks breath and high notes once it has the take." : "Not reviewed yet — the computer reviews it after the next sync."}
+                  {pending ? "The computer checks breath and high notes once it has the take." : "Not reviewed yet — the computer reviews takes sung along with the song."}
                 </Text>
               )}
             </Pressable>

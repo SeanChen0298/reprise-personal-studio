@@ -1,11 +1,10 @@
-// The song: lyrics that follow the music, loops, speed, tracks, sung-along takes,
-// your notes and voice marks, and the coach's song card from the computer.
+// The song, first: its colour, the lyrics following the music, play controls. Practising
+// (loop, speed, track, takes, record — and the hints, voice marks and notes in the lyrics) is
+// one pull-up away; the coach's card, takes and view options are behind "⋯".
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, PanResponder, Pressable, Switch, TextInput, View } from "react-native";
-import { Image } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
+import { ActivityIndicator, FlatList, PanResponder, Pressable, TextInput, View } from "react-native";
 import Animated, { FadeIn, FadeInDown, FadeOut, FadeOutDown, ZoomIn } from "react-native-reanimated";
-import { DISPLAY, DISPLAY_REGULAR, Text } from "../../src/components/text";
+import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import { router, useLocalSearchParams } from "expo-router";
 import { useKeepAwake } from "expo-keep-awake";
@@ -17,14 +16,18 @@ import { usePrefsStore } from "../../src/stores/prefs-store";
 import { useLinePlayer } from "../../src/hooks/use-line-player";
 import { useTakeRecorder, type PendingTake } from "../../src/hooks/use-take-recorder";
 import { useTheme } from "../../src/lib/theme";
+import { useSongPalette } from "../../src/lib/song-palette";
 import { clock, megabytes } from "../../src/lib/format";
+import { DISPLAY, DISPLAY_REGULAR, Text } from "../../src/components/text";
+import { Button, Card, Chip, Label } from "../../src/components/ui";
+import { Toggle } from "../../src/components/toggle";
 import { LyricRow } from "../../src/components/lyric-row";
-import { Transport } from "../../src/components/transport";
+import { PlayerBar } from "../../src/components/player-bar";
 import { LineSheet } from "../../src/components/line-sheet";
 import { TakesSheet } from "../../src/components/takes-sheet";
 import { SongCardView } from "../../src/components/song-card-view";
 import { Sheet } from "../../src/components/sheet";
-import { BackIcon, ChevronIcon, DownloadIcon } from "../../src/components/icons";
+import { BackIcon, ChevronIcon, DownloadIcon, MoreIcon } from "../../src/components/icons";
 import { pauseRadio } from "../../src/lib/radio";
 
 type Row = { kind: "section"; section: Section; key: string } | { kind: "line"; line: Line; index: number; key: string };
@@ -33,6 +36,8 @@ type Row = { kind: "section"; section: Section; key: string } | { kind: "line"; 
 const HANDS_OFF_MS = 5000;
 
 const TAKES_DIR = `${FileSystem.documentDirectory}phone-takes/`;
+
+const capitalise = (s: string) => s.replace(/^\p{L}/u, (c) => c.toUpperCase());
 
 async function keepTake(songId: string, p: PendingTake, note: string) {
   const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -57,6 +62,8 @@ export default function SongScreen() {
   useKeepAwake();
   const { id, at, play } = useLocalSearchParams<{ id: string; at?: string; play?: string }>();
   const t = useTheme();
+  const p = useSongPalette(id, t);
+  const tone = { solid: p.solid, onSolid: p.onSolid, soft: p.soft, tint: p.tint };
   const insets = useSafeAreaInsets();
   const snapshot = useLibraryStore((s) => s.snapshot);
   const local = useLibraryStore((s) => s.local);
@@ -68,7 +75,7 @@ export default function SongScreen() {
   const countIn = usePrefsStore((s) => s.countIn);
   const autoDownload = usePrefsStore((s) => s.autoDownload);
   const memorise = usePrefsStore((s) => s.memorise);
-  const [focus, setFocus] = useState(false);
+  const practise = usePrefsStore((s) => s.practiseOpen);
 
   const song = snapshot?.songs.find((s) => s.id === id);
   const allLines = useMemo(() => linesWithEdits(snapshot, local, id), [snapshot, local, id]);
@@ -82,7 +89,8 @@ export default function SongScreen() {
   const coach = snapshot?.coach[id];
   const card = coach?.card ?? null;
   const highlights = snapshot?.highlights ?? [];
-  const hints = showHints && !focus ? snapshot?.hints?.[id] : undefined;
+  // Hints are practice information: only with the Practise tray open.
+  const hints = practise && showHints ? snapshot?.hints?.[id] : undefined;
 
   // ── Audio ──────────────────────────────────────────────────────────────
   const files = snapshot?.files[id];
@@ -126,7 +134,7 @@ export default function SongScreen() {
   const player = useLinePlayer({ uri, lines, sectionRange, onLinePlayed: touch, initialMs: at ? Number(at) || 0 : 0, initialPlay: play === "1" });
   // Practice here, so Play all stops talking over it.
   useEffect(() => void pauseRadio(), []);
-  const keep = useCallback((p: PendingTake) => void keepTake(id, p, ""), [id]);
+  const keep = useCallback((pt: PendingTake) => void keepTake(id, pt, ""), [id]);
   const rec = useTakeRecorder(player, lines, countIn, activeTrack, keep);
   const [takeNote, setTakeNote] = useState("");
 
@@ -148,6 +156,8 @@ export default function SongScreen() {
     return m;
   }, [rows]);
   const cardSection = useMemo(() => new Map((card?.sections ?? []).map((s) => [s.name.trim().toLowerCase(), s])), [card]);
+  /** Sections whose coach note is open (tap the section name). */
+  const [openSections, setOpenSections] = useState<Set<string>>(new Set());
 
   const listRef = useRef<FlatList<Row>>(null);
   const handsOffUntil = useRef(0);
@@ -156,12 +166,20 @@ export default function SongScreen() {
     if (Date.now() < handsOffUntil.current) return;
     const row = rowOfLine.get(active);
     if (row == null) return;
-    listRef.current?.scrollToIndex({ index: row, viewPosition: 0.32, animated: true });
+    listRef.current?.scrollToIndex({ index: row, viewPosition: 0.3, animated: true });
   }, [active, rowOfLine]);
 
   const [lineSheet, setLineSheet] = useState<number | null>(null);
   const [takesOpen, setTakesOpen] = useState(false);
   const [takeFocus, setTakeFocus] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [viewOpen, setViewOpen] = useState(false);
+  /** Open another sheet once the menu has slid away. */
+  const fromMenu = (open: () => void) => {
+    setMenuOpen(false);
+    setTimeout(open, 230);
+  };
 
   // A take from this phone waits for the computer's review (the app checks every few seconds while it waits);
   // say so when it arrives.
@@ -175,8 +193,6 @@ export default function SongScreen() {
       else if (waitingReview.current.delete(tk.id)) setReviewReady({ id: tk.id, headline: reviewInsight(tk.analysis).headline });
     }
   }, [takes, local.takes]);
-  const [aboutOpen, setAboutOpen] = useState(false);
-  const [viewOpen, setViewOpen] = useState(false);
 
   const onPressLine = useCallback(
     (idx: number) => {
@@ -217,228 +233,257 @@ export default function SongScreen() {
     void rec.start(from ?? null, sectionTake);
   };
   const cursorSection = sectionOf(player.cursor);
-  const recordLabel = player.loop === "section" && cursorSection ? `Record ${cursorSection.name}` : "Record";
+  const recordLabel = player.loop === "section" && cursorSection ? `Record ${capitalise(cursorSection.name)}` : "Record";
 
   if (!song) {
     return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: t.bg, padding: 24 }}>
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: t.bg, padding: 24, gap: 14 }}>
         <Text style={{ color: t.textSecondary, fontSize: 15, textAlign: "center" }}>This song isn't in the library any more.</Text>
-        <Pressable onPress={() => router.back()} style={{ marginTop: 14 }}>
-          <Text style={{ color: t.theme, fontSize: 15 }}>Back</Text>
-        </Pressable>
+        <Button t={t} kind="soft" label="Back" onPress={() => router.back()} />
       </View>
     );
   }
 
   const hasTimings = lines.some((l) => l.start_ms != null);
 
-  const art = song.thumbnail_b64 ? (song.thumbnail_b64.startsWith("data:") ? song.thumbnail_b64 : `data:image/jpeg;base64,${song.thumbnail_b64}`) : song.thumbnail_url;
-
   return (
-    <View style={{ flex: 1, backgroundColor: t.bg }}>
-      {/* The song's artwork, blurred, as a wash of its colours behind the top of the page */}
-      {!!art && (
-        <Animated.View entering={FadeIn.duration(600)} pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, height: 260 }}>
-          <Image source={{ uri: art }} blurRadius={40} resizeMode="cover" style={{ width: "100%", height: "100%", opacity: t.dark ? 0.3 : 0.16 }} />
-          <LinearGradient colors={[t.dark ? "rgba(12,12,16,0.35)" : "rgba(249,249,249,0.35)", t.bg]} locations={[0, 1]} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} />
-        </Animated.View>
-      )}
-      {/* Header */}
-      <View style={{ paddingTop: insets.top + 6, paddingLeft: 10, paddingRight: 16, paddingBottom: 6, flexDirection: "row", alignItems: "center", gap: 6 }}>
-        <Pressable onPress={() => router.back()} hitSlop={10} style={{ padding: 6 }}>
+    <View style={{ flex: 1, backgroundColor: p.wash }}>
+      {/* Header: back, the song, more */}
+      <View style={{ paddingTop: insets.top + 4, paddingHorizontal: 8, paddingBottom: 4, flexDirection: "row", alignItems: "center" }}>
+        <Pressable onPress={() => router.back()} hitSlop={10} style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
           <BackIcon color={t.text} size={22} />
         </Pressable>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text numberOfLines={1} style={{ fontFamily: DISPLAY, fontSize: 19, color: t.text, letterSpacing: -0.3 }}>
+        <View style={{ flex: 1, minWidth: 0, alignItems: "center" }}>
+          <Text numberOfLines={1} style={{ fontFamily: DISPLAY, fontSize: 18, color: t.text, letterSpacing: -0.3 }}>
             {song.title}
           </Text>
-          <Text numberOfLines={1} style={{ fontSize: 12.5, color: t.muted }}>
+          <Text numberOfLines={1} style={{ fontSize: 12.5, color: t.muted, marginTop: 1 }}>
             {song.artist}
           </Text>
         </View>
-        <Pressable onPress={() => setViewOpen(true)} hitSlop={8} style={{ paddingHorizontal: 8, paddingVertical: 6 }}>
-          <Text style={{ fontSize: 15, color: t.textSecondary, fontFamily: "serif" }}>Aa</Text>
-        </Pressable>
-        <Pressable onPress={() => setTakesOpen(true)} hitSlop={8} style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16, backgroundColor: t.dark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.7)", borderWidth: 1, borderColor: t.borderSubtle }}>
-          <Text style={{ fontSize: 13, color: t.textSecondary }}>Takes {takes.length || ""}</Text>
+        <Pressable onPress={() => setMenuOpen(true)} hitSlop={10} style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
+          <MoreIcon color={t.text} size={22} />
         </Pressable>
       </View>
 
-      {/* About this song (coach card) */}
-      {card && !focus && (
-        <Pressable onPress={() => setAboutOpen(true)} style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 18, paddingBottom: 6 }}>
-          <Text numberOfLines={1} style={{ flex: 1, fontSize: 13, color: t.muted }}>
-            About this song{card.mood ? ` · ${card.mood}` : ""}
-          </Text>
-          <ChevronIcon color={t.muted} size={14} />
-        </Pressable>
-      )}
-
       {/* Audio not here yet */}
       {!uri && (
-        <View style={{ marginHorizontal: 16, marginBottom: 6, padding: 12, borderRadius: 12, backgroundColor: t.surface, borderWidth: 1, borderColor: t.borderSubtle, flexDirection: "row", alignItems: "center", gap: 10 }}>
+        <Card t={t} style={{ marginHorizontal: 16, marginTop: 6, flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12 }}>
           {downloading != null ? (
             <>
-              <ActivityIndicator color={t.theme} size="small" />
-              <Text style={{ flex: 1, fontSize: 13.5, color: t.textSecondary }}>Getting the audio… {Math.round(downloading * 100)}%</Text>
+              <ActivityIndicator color={p.solid} size="small" />
+              <Text style={{ flex: 1, fontSize: 14, color: t.textSecondary }}>Getting the audio… {Math.round(downloading * 100)}%</Text>
             </>
           ) : files?.audio ? (
             pairing ? (
               <>
-                <Text style={{ flex: 1, fontSize: 13.5, color: t.textSecondary }}>The audio isn't on this phone yet.</Text>
-                <Pressable onPress={() => useLibraryStore.getState().downloadSong(id)} style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 9, backgroundColor: t.accent }}>
-                  <DownloadIcon color={t.onAccent} size={14} />
-                  <Text style={{ color: t.onAccent, fontSize: 13, fontWeight: "600" }}>{megabytes(missingBytes)}</Text>
-                </Pressable>
+                <Text style={{ flex: 1, fontSize: 14, color: t.textSecondary }}>The audio isn't on this phone yet.</Text>
+                <Button t={t} tone={tone} label={megabytes(missingBytes)} icon={<DownloadIcon color={p.onSolid} size={14} />} onPress={() => useLibraryStore.getState().downloadSong(id)} />
               </>
             ) : (
-              <Text style={{ flex: 1, fontSize: 13.5, color: t.textSecondary }}>Pair with your computer to get the audio.</Text>
+              <Text style={{ flex: 1, fontSize: 14, color: t.textSecondary }}>Pair with your computer to get the audio.</Text>
             )
           ) : (
-            <Text style={{ flex: 1, fontSize: 13.5, color: t.textSecondary }}>The computer hasn't downloaded this song's audio yet.</Text>
+            <Text style={{ flex: 1, fontSize: 14, color: t.textSecondary }}>The computer hasn't downloaded this song's audio yet.</Text>
           )}
-        </View>
+        </Card>
       )}
-      {uri && downloading != null && (
-        <Text style={{ fontSize: 12, color: t.muted, paddingHorizontal: 18, paddingBottom: 4 }}>Getting the other tracks… {Math.round(downloading * 100)}%</Text>
-      )}
-      {!!player.error && <Text style={{ fontSize: 12.5, color: t.danger, paddingHorizontal: 18 }}>Can't play: {player.error}</Text>}
+      {!!player.error && <Text style={{ fontSize: 12.5, color: t.danger, paddingHorizontal: 18, textAlign: "center" }}>Can't play: {player.error}</Text>}
 
       {/* Lyrics */}
       <View style={{ flex: 1 }} {...swipe.panHandlers}>
-      <FlatList
-        ref={listRef}
-        data={rows}
-        keyExtractor={(r) => r.key}
-        contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 260 }}
-        onScrollBeginDrag={() => (handsOffUntil.current = Date.now() + HANDS_OFF_MS)}
-        onMomentumScrollEnd={() => (handsOffUntil.current = Date.now() + HANDS_OFF_MS)}
-        onScrollToIndexFailed={(info) => {
-          listRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: false });
-          setTimeout(() => listRef.current?.scrollToIndex({ index: info.index, viewPosition: 0.32, animated: true }), 120);
-        }}
-        ListEmptyComponent={<Text style={{ textAlign: "center", color: t.muted, marginTop: 40, fontSize: 14 }}>No lyrics yet — add them on the computer.</Text>}
-        ListHeaderComponent={!hasTimings && lines.length > 0 ? <Text style={{ textAlign: "center", color: t.muted, fontSize: 12.5, marginBottom: 10 }}>These lyrics have no timing yet, so they won't follow the music.</Text> : null}
-        renderItem={({ item }) => {
-          if (item.kind === "section") {
-            const c = cardSection.get(item.section.name.trim().toLowerCase());
-            const voice = [c?.voice?.register, c?.voice?.placement].filter(Boolean).join(" · ");
-            return (
-              <View style={{ alignItems: "center", marginTop: 22, marginBottom: 6, gap: 3 }}>
-                <Text style={{ fontSize: 11.5, fontWeight: "700", letterSpacing: 1.4, color: t.muted, textTransform: "uppercase" }}>{item.section.name}</Text>
-                {!focus && c && (c.mood || voice) && (
-                  <Text style={{ fontSize: 12, color: t.muted }}>
-                    {c.mood}
-                    {c.mood && voice ? " · " : ""}
-                    <Text style={{ color: t.voice }}>{voice}</Text>
+        <FlatList
+          ref={listRef}
+          data={rows}
+          keyExtractor={(r) => r.key}
+          contentContainerStyle={{ paddingHorizontal: 22, paddingTop: 18, paddingBottom: 220 }}
+          showsVerticalScrollIndicator={false}
+          onScrollBeginDrag={() => (handsOffUntil.current = Date.now() + HANDS_OFF_MS)}
+          onMomentumScrollEnd={() => (handsOffUntil.current = Date.now() + HANDS_OFF_MS)}
+          onScrollToIndexFailed={(info) => {
+            listRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: false });
+            setTimeout(() => listRef.current?.scrollToIndex({ index: info.index, viewPosition: 0.3, animated: true }), 120);
+          }}
+          ListEmptyComponent={<Text style={{ textAlign: "center", color: t.muted, marginTop: 40, fontSize: 14 }}>No lyrics yet — add them on the computer.</Text>}
+          ListHeaderComponent={!hasTimings && lines.length > 0 ? <Text style={{ textAlign: "center", color: t.muted, fontSize: 12.5, marginBottom: 10 }}>These lyrics have no timing yet, so they won't follow the music.</Text> : null}
+          renderItem={({ item }) => {
+            if (item.kind === "section") {
+              const c = cardSection.get(item.section.name.trim().toLowerCase());
+              const voice = [c?.voice?.register, c?.voice?.placement].filter(Boolean).join(" · ");
+              const open = openSections.has(item.section.id);
+              const hasNote = !!c && !!(c.mood || voice || c.intent);
+              return (
+                <Pressable
+                  disabled={!hasNote}
+                  onPress={() =>
+                    setOpenSections((s) => {
+                      const n = new Set(s);
+                      if (n.has(item.section.id)) n.delete(item.section.id);
+                      else n.add(item.section.id);
+                      return n;
+                    })
+                  }
+                  style={{ alignItems: "center", marginTop: 26, marginBottom: 8, gap: 6 }}
+                >
+                  <Text style={{ fontFamily: DISPLAY_REGULAR, fontSize: 15, color: open ? p.tint : t.muted, letterSpacing: 0.2 }}>
+                    {capitalise(item.section.name)}
+                    {hasNote ? <Text style={{ fontFamily: DISPLAY_REGULAR, color: open ? p.tint : t.border }}>  {open ? "–" : "+"}</Text> : null}
                   </Text>
-                )}
-              </View>
+                  {open && c && (
+                    <Animated.View entering={FadeIn.duration(200)} style={{ alignItems: "center", gap: 6, paddingHorizontal: 12 }}>
+                      {(!!c.mood || !!voice) && (
+                        <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
+                          {!!c.mood && <Chip t={t}>{c.mood}</Chip>}
+                          {!!voice && <Chip t={t} tone="voice">{voice}</Chip>}
+                        </View>
+                      )}
+                      {!!c.intent && <Text style={{ fontSize: 13.5, lineHeight: 19, color: t.textSecondary, textAlign: "center" }}>{c.intent}</Text>}
+                    </Animated.View>
+                  )}
+                </Pressable>
+              );
+            }
+            return (
+              <LyricRow
+                line={item.line}
+                index={item.index}
+                active={item.index === active}
+                distance={Math.abs(item.index - active)}
+                translation={showTranslation ? transById.get(item.line.id) : undefined}
+                hint={hints?.[item.line.id]}
+                highlights={highlights}
+                showFurigana={showFurigana}
+                memorise={memorise}
+                practise={practise}
+                t={t}
+                onPress={onPressLine}
+                onLongPress={onLongPressLine}
+              />
             );
-          }
-          return (
-            <LyricRow
-              line={item.line}
-              index={item.index}
-              active={item.index === active}
-              distance={Math.abs(item.index - active)}
-              translation={showTranslation ? transById.get(item.line.id) : undefined}
-              hint={hints?.[item.line.id]}
-              highlights={highlights}
-              showFurigana={showFurigana}
-              memorise={memorise}
-              t={t}
-              onPress={onPressLine}
-              onLongPress={onLongPressLine}
-            />
-          );
-        }}
-      />
+          }}
+        />
+        {/* The lyrics fade out at the edges instead of being cut off */}
+        <LinearGradient pointerEvents="none" colors={[p.wash, `${p.wash}00`]} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 28 }} />
+        <LinearGradient pointerEvents="none" colors={[`${p.wash}00`, p.wash]} style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 56 }} />
       </View>
 
       {/* The computer's review of a take from here just arrived */}
       {reviewReady && !rec.pending && !rec.busy && (
-        <Animated.View entering={FadeInDown.springify().damping(18)} exiting={FadeOutDown.duration(180)} style={{ position: "absolute", left: 12, right: 12, bottom: insets.bottom + 190 }}>
-        <Pressable
-          onPress={() => {
-            setTakeFocus(reviewReady.id);
-            setTakesOpen(true);
-            setReviewReady(null);
-          }}
-          style={{ padding: 14, borderRadius: 16, backgroundColor: t.raised, borderWidth: 1, borderColor: t.border, elevation: 6, flexDirection: "row", alignItems: "center", gap: 10 }}
-        >
-          <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: 11, fontWeight: "700", letterSpacing: 1, color: t.theme, textTransform: "uppercase" }}>Your take's review</Text>
-            <Text style={{ fontSize: 14.5, color: t.text, marginTop: 3, lineHeight: 20 }}>{reviewReady.headline}</Text>
-          </View>
-          <Text style={{ fontSize: 13.5, color: t.theme, fontWeight: "600" }}>See</Text>
-          <Pressable onPress={() => setReviewReady(null)} hitSlop={10}>
-            <Text style={{ fontSize: 18, color: t.muted }}>×</Text>
+        <Animated.View entering={FadeInDown.springify().damping(18)} exiting={FadeOutDown.duration(180)} style={{ position: "absolute", left: 14, right: 14, bottom: insets.bottom + (practise ? 300 : 190) }}>
+          <Pressable
+            onPress={() => {
+              setTakeFocus(reviewReady.id);
+              setTakesOpen(true);
+              setReviewReady(null);
+            }}
+          >
+            <Card t={t} style={{ flexDirection: "row", alignItems: "center", gap: 12, elevation: 6 }}>
+              <View style={{ flex: 1, gap: 4 }}>
+                <Label t={t}>Your take</Label>
+                <Text style={{ fontSize: 15, color: t.text, lineHeight: 21 }}>{reviewReady.headline}</Text>
+              </View>
+              <Text style={{ fontSize: 14, color: p.tint, fontWeight: "600" }}>See</Text>
+              <Pressable onPress={() => setReviewReady(null)} hitSlop={10}>
+                <Text style={{ fontSize: 18, color: t.muted }}>×</Text>
+              </Pressable>
+            </Card>
           </Pressable>
-        </Pressable>
         </Animated.View>
       )}
 
       {/* A take just finished */}
       {rec.pending && (
-        <Animated.View entering={FadeInDown.springify().damping(18)} exiting={FadeOutDown.duration(180)} style={{ position: "absolute", left: 12, right: 12, bottom: insets.bottom + 190, padding: 14, borderRadius: 16, backgroundColor: t.raised, borderWidth: 1, borderColor: t.border, gap: 10, elevation: 6 }}>
-          <Text style={{ fontSize: 15, fontWeight: "600", color: t.text }}>Take · {clock(rec.pending.durationMs)}</Text>
-          <TextInput
-            value={takeNote}
-            onChangeText={setTakeNote}
-            placeholder="How did it go? (optional)"
-            placeholderTextColor={t.muted}
-            style={{ borderWidth: 1.5, borderColor: t.border, borderRadius: 9, paddingHorizontal: 10, paddingVertical: 8, fontSize: 14.5, color: t.text }}
-          />
-          <View style={{ flexDirection: "row", gap: 10 }}>
-            <Pressable
-              onPress={async () => {
-                const p = rec.pending!;
-                rec.setPending(null);
-                await keepTake(id, p, takeNote);
-                setTakeNote("");
-              }}
-              style={{ flex: 1, alignItems: "center", paddingVertical: 10, borderRadius: 10, backgroundColor: t.accent }}
-            >
-              <Text style={{ color: t.onAccent, fontWeight: "600", fontSize: 14.5 }}>Keep</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => {
-                void rec.discard();
-                setTakeNote("");
-              }}
-              style={{ paddingHorizontal: 18, alignItems: "center", justifyContent: "center", borderRadius: 10, borderWidth: 1.5, borderColor: t.border }}
-            >
-              <Text style={{ color: t.textSecondary, fontSize: 14.5 }}>Discard</Text>
-            </Pressable>
-          </View>
-          <Text style={{ fontSize: 12, color: t.muted, lineHeight: 17 }}>
-            {pairing ? "A kept take goes to your computer right away when it's reachable; its breath / high-note review shows up here a few seconds later." : "Kept takes go to your computer when you pair, where breath and high notes are checked."}
-          </Text>
+        <Animated.View entering={FadeInDown.springify().damping(18)} exiting={FadeOutDown.duration(180)} style={{ position: "absolute", left: 14, right: 14, bottom: insets.bottom + (practise ? 300 : 190) }}>
+          <Card t={t} style={{ gap: 12, elevation: 6 }}>
+            <Text style={{ fontFamily: DISPLAY, fontSize: 18, color: t.text }}>That take · {clock(rec.pending.durationMs)}</Text>
+            <TextInput
+              value={takeNote}
+              onChangeText={setTakeNote}
+              placeholder="How did it feel? (optional)"
+              placeholderTextColor={t.muted}
+              style={{ borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14.5, color: t.text, backgroundColor: t.dark ? "#FFFFFF0D" : "#0000000A", fontFamily: "Inter_400Regular" }}
+            />
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <Button
+                t={t}
+                tone={tone}
+                label="Keep"
+                style={{ flex: 1 }}
+                onPress={async () => {
+                  const pt = rec.pending!;
+                  rec.setPending(null);
+                  await keepTake(id, pt, takeNote);
+                  setTakeNote("");
+                }}
+              />
+              <Button
+                t={t}
+                kind="plain"
+                label="Discard"
+                onPress={() => {
+                  void rec.discard();
+                  setTakeNote("");
+                }}
+              />
+            </View>
+            <Text style={{ fontSize: 12, color: t.muted, lineHeight: 17 }}>
+              {pairing ? "Kept takes go to your computer, and its breath / high-note review shows up here a few seconds later." : "Kept takes go to your computer once you pair, where breath and high notes are checked."}
+            </Text>
+          </Card>
         </Animated.View>
       )}
       {rec.countdown != null && (
-        <Animated.View entering={FadeIn.duration(200)} exiting={FadeOut.duration(250)} pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", backgroundColor: t.dark ? "rgba(12,12,16,0.82)" : "rgba(249,249,249,0.86)" }}>
+        <Animated.View entering={FadeIn.duration(200)} exiting={FadeOut.duration(250)} pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", backgroundColor: p.wash, opacity: 0.94 }}>
           <Animated.View key={rec.countdown} entering={ZoomIn.springify().damping(12)}>
-            <Text style={{ fontFamily: DISPLAY_REGULAR, fontSize: 110, color: t.danger }}>{rec.countdown}</Text>
+            <Text style={{ fontFamily: DISPLAY_REGULAR, fontSize: 120, color: p.tint }}>{rec.countdown}</Text>
           </Animated.View>
           <Text style={{ fontSize: 14, color: t.muted }}>Headphones on — the song starts after the count</Text>
         </Animated.View>
       )}
-      {!!rec.error && <Text style={{ position: "absolute", bottom: insets.bottom + 180, left: 16, right: 16, fontSize: 13, color: t.danger, textAlign: "center" }}>{rec.error}</Text>}
+      {!!rec.error && <Text style={{ position: "absolute", bottom: insets.bottom + 200, left: 16, right: 16, fontSize: 13, color: t.danger, textAlign: "center" }}>{rec.error}</Text>}
 
-      <Transport
+      <PlayerBar
         player={player}
         t={t}
+        p={p}
         tracks={tracks.length ? tracks : ["audio"]}
         track={activeTrack}
         onTrack={setTrack}
         hasSection={!!cursorSection}
+        practise={practise}
+        onPractise={usePrefsStore.getState().setPractiseOpen}
+        takes={takes.length}
+        onTakes={() => setTakesOpen(true)}
         rec={rec}
         onRecord={startTake}
         onStop={() => void rec.stop()}
         recordLabel={recordLabel}
       />
+
+      {/* ⋯ */}
+      <Sheet open={menuOpen} onClose={() => setMenuOpen(false)} title={song.title} t={t}>
+        <View style={{ gap: 4 }}>
+          {[
+            card && { label: "About this song", sub: card.mood || "The coach's notes on the song", go: () => fromMenu(() => setAboutOpen(true)) },
+            { label: "Takes", sub: takes.length ? `${takes.length} so far` : "None yet", go: () => fromMenu(() => setTakesOpen(true)) },
+            { label: "Lyrics view", sub: "Translation, furigana, memorise", go: () => fromMenu(() => setViewOpen(true)) },
+          ]
+            .filter((x): x is { label: string; sub: string; go: () => void } => !!x)
+            .map((x) => (
+              <Pressable key={x.label} onPress={x.go} style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", paddingVertical: 12, opacity: pressed ? 0.6 : 1 })}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 16, color: t.text }}>{x.label}</Text>
+                  <Text numberOfLines={1} style={{ fontSize: 13, color: t.muted, marginTop: 2 }}>
+                    {x.sub}
+                  </Text>
+                </View>
+                <View style={{ transform: [{ rotate: "-90deg" }] }}>
+                  <ChevronIcon color={t.muted} size={16} />
+                </View>
+              </Pressable>
+            ))}
+        </View>
+      </Sheet>
 
       <LineSheet
         line={lineSheet != null ? lines[lineSheet] ?? null : null}
@@ -470,15 +515,16 @@ export default function SongScreen() {
           player.setCursor(idx);
           handsOffUntil.current = 0;
           const row = rowOfLine.get(idx);
-          if (row != null) listRef.current?.scrollToIndex({ index: row, viewPosition: 0.32, animated: true });
+          if (row != null) listRef.current?.scrollToIndex({ index: row, viewPosition: 0.3, animated: true });
         }}
       />
 
       {card && (
-        <Sheet open={aboutOpen} onClose={() => setAboutOpen(false)} title="About this song" t={t}>
+        <Sheet open={aboutOpen} onClose={() => setAboutOpen(false)} title="About this song" t={t} tall>
           <SongCardView
             card={card}
             lines={lines}
+            sections={sections}
             t={t}
             onJump={(idx) => {
               setAboutOpen(false);
@@ -486,11 +532,11 @@ export default function SongScreen() {
             }}
           />
           {!!coach?.memory.length && (
-            <View style={{ marginTop: 18, gap: 6 }}>
-              <Text style={{ fontSize: 10.5, fontWeight: "700", letterSpacing: 1, color: t.muted, textTransform: "uppercase" }}>What you've learned</Text>
+            <View style={{ marginTop: 22, gap: 8 }}>
+              <Label t={t}>What you've learned</Label>
               {coach.memory.map((m, i) => (
                 <Text key={i} style={{ fontSize: 14, lineHeight: 20, color: t.textSecondary }}>
-                  • {m}
+                  {m}
                 </Text>
               ))}
             </View>
@@ -498,23 +544,25 @@ export default function SongScreen() {
         </Sheet>
       )}
 
-      <Sheet open={viewOpen} onClose={() => setViewOpen(false)} title="View" t={t}>
+      <Sheet open={viewOpen} onClose={() => setViewOpen(false)} title="Lyrics view" t={t}>
         {[
           { label: "Translation", value: showTranslation, set: usePrefsStore.getState().setShowTranslation, hidden: translations.length === 0 },
           { label: "Furigana", value: showFurigana, set: usePrefsStore.getState().setShowFurigana, hidden: !lines.some((l) => l.furigana_html || l.custom_furigana_html) },
-          { label: "Song hints (high notes, long phrases)", value: showHints, set: usePrefsStore.getState().setShowHints, hidden: !snapshot?.hints?.[id] },
-          { label: "Focus (hide the coach's notes and hints)", value: focus, set: setFocus, hidden: !card && !snapshot?.hints?.[id] },
-          { label: "Memorise (only the first word of each line)", value: memorise, set: usePrefsStore.getState().setMemorise, hidden: false },
+          { label: "Song hints while practising", sub: "The original's high notes and long phrases", value: showHints, set: usePrefsStore.getState().setShowHints, hidden: !snapshot?.hints?.[id] },
+          { label: "Memorise", sub: "Only the first word of each line", value: memorise, set: usePrefsStore.getState().setMemorise, hidden: false },
         ]
           .filter((x) => !x.hidden)
           .map((x) => (
-            <View key={x.label} style={{ flexDirection: "row", alignItems: "center", paddingVertical: 10 }}>
-              <Text style={{ flex: 1, fontSize: 15, color: t.text }}>{x.label}</Text>
-              <Switch value={x.value} onValueChange={x.set} trackColor={{ true: t.theme, false: t.border }} thumbColor="#fff" />
+            <View key={x.label} style={{ flexDirection: "row", alignItems: "center", paddingVertical: 11 }}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 15.5, color: t.text }}>{x.label}</Text>
+                {!!x.sub && <Text style={{ fontSize: 12.5, color: t.muted, marginTop: 2 }}>{x.sub}</Text>}
+              </View>
+              <Toggle value={x.value} onChange={x.set} t={t} />
             </View>
           ))}
-        <Text style={{ fontSize: 12.5, color: t.muted, marginTop: 8, lineHeight: 18 }}>
-          Tap a line to play from it · swipe sideways for the previous / next line · hold a line for your note and voice mark · Loop cycles line → section → off · Record sings along from the current line (with a section loop on, it records that section).
+        <Text style={{ fontSize: 12.5, color: t.muted, marginTop: 10, lineHeight: 18 }}>
+          Tap a line to play from it · swipe sideways for the previous / next line · hold a line for your note and voice mark · tap a section name for the coach's note on it.
         </Text>
       </Sheet>
     </View>

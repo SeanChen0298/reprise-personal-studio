@@ -68,8 +68,20 @@ export function Transport({ player, t, tracks, track, onTrack, hasSection, rec, 
         hitSlop={{ top: 10, bottom: 6 }}
         style={{ height: 26, justifyContent: "center" }}
       >
-        <View style={{ height: 3, borderRadius: 2, backgroundColor: t.border }}>
-          <View style={{ height: 3, borderRadius: 2, width: `${(pos / dur) * 100}%`, backgroundColor: rec.recording ? t.danger : t.theme }} />
+        <View style={{ height: 4, borderRadius: 2, backgroundColor: t.border }}>
+          <View style={{ height: 4, borderRadius: 2, width: `${(pos / dur) * 100}%`, backgroundColor: rec.recording ? t.danger : t.theme }} />
+          <View
+            style={{
+              position: "absolute",
+              top: drag != null ? -6 : -4,
+              left: `${(pos / dur) * 100}%`,
+              marginLeft: drag != null ? -8 : -6,
+              width: drag != null ? 16 : 12,
+              height: drag != null ? 16 : 12,
+              borderRadius: 8,
+              backgroundColor: rec.recording ? t.danger : t.theme,
+            }}
+          />
         </View>
       </View>
       <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: -2 }}>

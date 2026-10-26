@@ -2,6 +2,7 @@ import { memo, useEffect } from "react";
 import { Pressable, View } from "react-native";
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { Text } from "./text";
+import { Chip } from "./ui";
 import type { HighlightType, Line, SyncLineHint } from "@reprise/shared/core";
 import { AnnotatedText } from "./annotated-text";
 import type { Theme } from "../lib/theme";
@@ -19,6 +20,8 @@ interface Props {
   showFurigana: boolean;
   /** Only the start of the line (singing from memory). */
   memorise?: boolean;
+  /** Practise tray open: show voice marks, hints and notes. */
+  practise?: boolean;
   t: Theme;
   onPress: (index: number) => void;
   onLongPress: (index: number) => void;
@@ -34,8 +37,9 @@ function lineStart(text: string): string {
   return /[\u3040-\u30ff\u3400-\u9fff]/.test(word.slice(0, 1)) ? s.slice(0, 2) : word;
 }
 
-export const LyricRow = memo(function LyricRow({ line, index, active, distance, translation, hint, highlights, showFurigana, memorise, t, onPress, onLongPress }: Props) {
-  const voice = [line.register, line.placement].filter(Boolean).join(" · ");
+export const LyricRow = memo(function LyricRow({ line, index, active, distance, translation, hint, highlights, showFurigana, memorise, practise, t, onPress, onLongPress }: Props) {
+  const voice = practise ? [line.register, line.placement].filter(Boolean).join(" · ") : "";
+  const note = practise ? line.note : undefined;
   const timed = line.start_ms != null;
   // The current line eases up to full size and brightness; the others settle back (no jump in layout:
   // every line is laid out at full size and scaled).
@@ -54,37 +58,37 @@ export const LyricRow = memo(function LyricRow({ line, index, active, distance, 
       <Animated.View style={[{ paddingVertical: 9, paddingHorizontal: 14, marginHorizontal: -6, borderRadius: 14 }, band]}>
       <Animated.View style={grow}>
       {memorise ? (
-        <Text style={{ textAlign: "center", fontFamily: "serif", fontSize: 22, lineHeight: 22 * 1.4, color: timed ? t.text : t.muted }}>
+        <Text style={{ textAlign: "center", fontFamily: "serif", fontSize: 23, lineHeight: 23 * 1.4, color: timed ? t.text : t.muted }}>
           {lineStart(line.custom_text ?? line.text)}
           <Text style={{ fontFamily: "serif", color: t.muted }}> · · ·</Text>
         </Text>
       ) : (
-        <AnnotatedText line={line} highlights={highlights} fontSize={22} color={timed ? t.text : t.muted} showFurigana={showFurigana} dark={t.dark} />
+        <AnnotatedText line={line} highlights={highlights} fontSize={23} color={timed ? t.text : t.muted} showFurigana={showFurigana} dark={t.dark} />
       )}
       </Animated.View>
       {!!translation && !memorise && (
-        <Text style={{ textAlign: "center", fontSize: 13.5, lineHeight: 19, color: t.muted, marginTop: 3 }}>{translation}</Text>
+        <Text style={{ textAlign: "center", fontSize: 13.5, lineHeight: 19, color: t.muted, marginTop: 4 }}>{translation}</Text>
       )}
-      {(!!voice || !!line.note || !!hint) && (
+      {(!!voice || !!note || !!hint) && (
         <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "center", alignItems: "center", gap: 6, marginTop: 5 }}>
           {!!voice && (
-            <Text style={{ fontSize: 11.5, paddingHorizontal: 7, paddingVertical: 1, borderRadius: 5, overflow: "hidden", color: t.voice, backgroundColor: t.voiceSoft }}>
+            <Chip t={t} tone="voice">
               {voice}
-            </Text>
+            </Chip>
           )}
           {!!hint?.long_ms && (
-            <Text style={{ fontSize: 11, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 5, overflow: "hidden", color: t.dark ? "#7DD3FC" : "#0369A1", backgroundColor: t.dark ? "#0EA5E922" : "#E0F2FE" }}>
+            <Text style={{ fontSize: 12, paddingHorizontal: 9, paddingVertical: 2, borderRadius: 999, overflow: "hidden", color: t.dark ? "#7DD3FC" : "#0369A1", backgroundColor: t.dark ? "#0EA5E922" : "#E0F2FE" }}>
               long · {(hint.long_ms / 1000).toFixed(1)} s
             </Text>
           )}
           {!!hint?.high && (
-            <Text style={{ fontSize: 11, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 5, overflow: "hidden", color: t.dark ? "#FCD34D" : "#B45309", backgroundColor: t.dark ? "#F59E0B22" : "#FEF3C7" }}>
+            <Text style={{ fontSize: 12, paddingHorizontal: 9, paddingVertical: 2, borderRadius: 999, overflow: "hidden", color: t.dark ? "#FCD34D" : "#B45309", backgroundColor: t.dark ? "#F59E0B22" : "#FEF3C7" }}>
               high · {hint.high}
             </Text>
           )}
-          {!!line.note && (
+          {!!note && (
             <Text style={{ fontSize: 12.5, fontStyle: "italic", color: t.textSecondary }} numberOfLines={active ? 4 : 1}>
-              ✎ {line.note}
+              {note}
             </Text>
           )}
         </View>

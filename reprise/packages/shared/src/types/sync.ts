@@ -48,6 +48,10 @@ export interface SyncSnapshot {
   files: Record<string, SyncSongFiles>;
   /** Singer facts the coach keeps. */
   singer_facts: string[];
+  /** Song id → the colour of its artwork (#rrggbb), which the phone tints the song with. */
+  colors?: Record<string, string>;
+  /** Song id → black bars in its thumbnail: fraction of the height at the top (and the bottom), and the thumbnail's width / height. */
+  letterbox?: Record<string, { bars: number; aspect: number }>;
   /** Song id → line id → song hints. */
   hints?: Record<string, Record<string, SyncLineHint>>;
   /** Song id → when it was last practised on the computer. */

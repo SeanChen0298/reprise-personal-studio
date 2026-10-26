@@ -1,8 +1,11 @@
-import { useMemo } from "react";
-import { Alert, Pressable, ScrollView, Switch, View } from "react-native";
-import { DISPLAY, Text } from "../src/components/text";
+// Settings: grouped cards made of the same pieces as the rest of the app.
+import { useMemo, type ReactNode } from "react";
+import { Alert, Pressable, ScrollView, View } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Toggle } from "../src/components/toggle";
+import { DISPLAY, Text } from "../src/components/text";
+import { Button, Card, Label, Segmented } from "../src/components/ui";
 import { useLibraryStore } from "../src/stores/library-store";
 import { usePrefsStore, type ThemeMode } from "../src/stores/prefs-store";
 import { ACCENTS, useTheme } from "../src/lib/theme";
@@ -27,163 +30,180 @@ export default function Settings() {
   const missing = useMemo(() => (snapshot?.songs ?? []).filter((s) => snapshot?.files[s.id]?.audio && !local.downloads[s.id]?.audio), [snapshot, local.downloads]);
   const unsent = local.takes.filter((x) => !x.uploaded).length;
 
-  const section = (title: string) => (
-    <Text style={{ fontSize: 11, fontWeight: "700", letterSpacing: 1.2, color: t.muted, textTransform: "uppercase", marginTop: 26, marginBottom: 8 }}>{title}</Text>
-  );
-  const row = (label: string, right: React.ReactNode, sub?: string) => (
-    <View style={{ flexDirection: "row", alignItems: "center", paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: t.borderSubtle }}>
-      <View style={{ flex: 1, paddingRight: 10 }}>
-        <Text style={{ fontSize: 15, color: t.text }}>{label}</Text>
-        {!!sub && <Text style={{ fontSize: 12.5, color: t.muted, marginTop: 2, lineHeight: 17 }}>{sub}</Text>}
-      </View>
-      {right}
+  const group = (title: string, children: ReactNode) => (
+    <View style={{ marginTop: 26, gap: 10 }}>
+      <Label t={t} style={{ paddingHorizontal: 4 }}>
+        {title}
+      </Label>
+      <Card t={t} style={{ paddingVertical: 4 }}>
+        {children}
+      </Card>
     </View>
   );
-  const button = (label: string, onPress: () => void, danger = false) => (
-    <Pressable onPress={onPress} style={({ pressed }) => ({ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 9, borderWidth: 1.5, borderColor: danger ? t.danger : t.border, opacity: pressed ? 0.6 : 1 })}>
-      <Text style={{ fontSize: 13.5, color: danger ? t.danger : t.text }}>{label}</Text>
-    </Pressable>
+  /** One setting: the words on top, its control below (or beside, when it's small). */
+  const row = (label: string, control: ReactNode, sub?: string, opts: { below?: boolean; last?: boolean } = {}) => (
+    <View style={{ paddingVertical: 12, borderBottomWidth: opts.last ? 0 : 1, borderBottomColor: t.borderSubtle, gap: opts.below ? 10 : 0 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 15.5, color: t.text }}>{label}</Text>
+          {!!sub && <Text style={{ fontSize: 12.5, color: t.muted, marginTop: 3, lineHeight: 17 }}>{sub}</Text>}
+        </View>
+        {!opts.below && control}
+      </View>
+      {opts.below && control}
+    </View>
   );
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: t.bg }} contentContainerStyle={{ paddingHorizontal: 18, paddingTop: insets.top + 8, paddingBottom: insets.bottom + 30 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-        <Pressable onPress={() => router.back()} hitSlop={10} style={{ padding: 4, marginLeft: -6 }}>
-          <BackIcon color={t.text} size={22} />
-        </Pressable>
-        <Text style={{ fontFamily: DISPLAY, fontSize: 24, color: t.text }}>Settings</Text>
-      </View>
-
-      {section("Computer")}
-      {pairing ? (
-        <>
-          {row(
-            pairing.name,
-            button(syncing ? "Syncing…" : "Sync now", () => useLibraryStore.getState().sync({ force: true })),
-            `${pairing.host}${lastSync ? ` · synced ${timeAgo(lastSync)}` : ""}${unsent ? ` · ${unsent} take${unsent === 1 ? "" : "s"} to send` : ""}`,
-          )}
-          {syncError && <Text style={{ fontSize: 13, color: syncError.unreachable ? t.muted : t.danger, marginTop: 8, lineHeight: 18 }}>{syncError.message}</Text>}
-          <View style={{ flexDirection: "row", gap: 10, marginTop: 12 }}>
-            {button("Pair again", () => router.push("/pair"))}
-            {button(
-              "Unpair",
-              () =>
-                Alert.alert("Unpair this phone?", "Songs and audio stay on the phone; it just stops syncing.", [
-                  { text: "Cancel", style: "cancel" },
-                  { text: "Unpair", style: "destructive", onPress: () => useLibraryStore.getState().unpair() },
-                ]),
-              true,
-            )}
-          </View>
-        </>
-      ) : (
-        row("Not paired", button("Pair", () => router.push("/pair")), "On the computer: Settings → Phone")
-      )}
-
-      {section("Audio on this phone")}
-      {row(
-        `${megabytes(stored)} used`,
-        missing.length && pairing
-          ? button(`Get all (${missing.length})`, async () => {
-              for (const s of missing) await useLibraryStore.getState().downloadSong(s.id);
-            })
-          : null,
-        missing.length ? `${missing.length} song${missing.length === 1 ? "" : "s"} not on the phone yet` : "Every song's audio is here.",
-      )}
-      {row(
-        "Keep recent songs ready",
-        <View style={{ flexDirection: "row", gap: 6 }}>
-          {[0, 3, 5, 10].map((n) => (
-            <Pressable key={n} onPress={() => prefs.setKeepRecent(n)} style={{ paddingHorizontal: 11, paddingVertical: 6, borderRadius: 8, backgroundColor: prefs.keepRecent === n ? t.themeSoft : t.bg }}>
-              <Text style={{ fontSize: 13.5, color: prefs.keepRecent === n ? t.themeText : t.textSecondary }}>{n === 0 ? "Off" : n}</Text>
-            </Pressable>
-          ))}
-        </View>,
-        "The audio of the songs you've worked on most recently is fetched at home, so it's there when you're out.",
-      )}
-      {row("Get audio when a song opens", <Switch value={prefs.autoDownload} onValueChange={prefs.setAutoDownload} trackColor={{ true: t.theme, false: t.border }} thumbColor="#fff" />, "Only when the computer is reachable.")}
-      {stored > 0 && (
-        <View style={{ marginTop: 12, alignSelf: "flex-start" }}>
-          {button(
-            "Remove all audio",
-            () =>
-              Alert.alert("Remove all audio from this phone?", "Lyrics, notes and takes stay. You can get the audio again from the computer.", [
-                { text: "Cancel", style: "cancel" },
-                {
-                  text: "Remove",
-                  style: "destructive",
-                  onPress: async () => {
-                    for (const id of Object.keys(useLibraryStore.getState().local.downloads)) await useLibraryStore.getState().removeDownloads(id);
-                  },
-                },
-              ]),
-            true,
-          )}
-        </View>
-      )}
-
-      {section("Play all")}
-      {row(
-        "Plays",
-        <View style={{ flexDirection: "row", gap: 6 }}>
-          {(["audio", "instrumental"] as const).map((k) => (
-            <Pressable key={k} onPress={() => prefs.setRadioTrack(k)} style={{ paddingHorizontal: 11, paddingVertical: 6, borderRadius: 8, backgroundColor: prefs.radioTrack === k ? t.themeSoft : t.bg }}>
-              <Text style={{ fontSize: 13.5, color: prefs.radioTrack === k ? t.themeText : t.textSecondary }}>{k === "audio" ? "The songs" : "Backing"}</Text>
-            </Pressable>
-          ))}
-        </View>,
-        "Backing plays the karaoke version (where the phone has it) — for singing along on a walk. Hold the player bar to stop.",
-      )}
-
-      {section("Takes")}
-      {row(
-        "Count-in",
-        <View style={{ flexDirection: "row", gap: 6 }}>
-          {[0, 2, 3, 4].map((n) => (
-            <Pressable key={n} onPress={() => prefs.setCountIn(n)} style={{ paddingHorizontal: 11, paddingVertical: 6, borderRadius: 8, backgroundColor: prefs.countIn === n ? t.themeSoft : t.bg }}>
-              <Text style={{ fontSize: 13.5, color: prefs.countIn === n ? t.themeText : t.textSecondary }}>{n === 0 ? "Off" : `${n}s`}</Text>
-            </Pressable>
-          ))}
-        </View>,
-        "Use headphones — the song shouldn't go into the mic.",
-      )}
-
-      {section("Look")}
-      {row(
-        "Theme",
-        <View style={{ flexDirection: "row", gap: 6 }}>
-          {(["auto", "light", "dark"] as ThemeMode[]).map((m) => (
-            <Pressable key={m} onPress={() => prefs.setThemeMode(m)} style={{ paddingHorizontal: 11, paddingVertical: 6, borderRadius: 8, backgroundColor: prefs.themeMode === m ? t.themeSoft : t.bg }}>
-              <Text style={{ fontSize: 13.5, color: prefs.themeMode === m ? t.themeText : t.textSecondary }}>{m === "auto" ? "Auto" : m === "light" ? "Light" : "Dark"}</Text>
-            </Pressable>
-          ))}
-        </View>,
-      )}
-      <View style={{ paddingVertical: 12, gap: 10 }}>
-        <Text style={{ fontSize: 15, color: t.text }}>Colour</Text>
-        <View style={{ flexDirection: "row", gap: 12, alignItems: "center" }}>
-          <Pressable onPress={() => prefs.setAccent(null)} style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: prefs.accent == null ? t.themeSoft : t.bg }}>
-            <Text style={{ fontSize: 13, color: prefs.accent == null ? t.themeText : t.textSecondary }}>Same as computer</Text>
+    <View style={{ flex: 1, backgroundColor: t.bg }}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingTop: insets.top + 8, paddingBottom: insets.bottom + 36 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+          <Pressable onPress={() => router.back()} hitSlop={10} style={{ width: 40, height: 44, justifyContent: "center", marginLeft: -6 }}>
+            <BackIcon color={t.text} size={22} />
           </Pressable>
-          {Object.entries(ACCENTS).map(([k, a]) => (
-            <Pressable key={k} onPress={() => prefs.setAccent(k)} hitSlop={6}>
-              <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: a.light, borderWidth: prefs.accent === k ? 3 : 1, borderColor: prefs.accent === k ? t.text : t.border }} />
-            </Pressable>
-          ))}
+          <Text style={{ fontFamily: DISPLAY, fontSize: 28, color: t.text, letterSpacing: -0.6 }}>Settings</Text>
         </View>
-      </View>
 
-      {!!snapshot?.singer_facts.length && (
-        <>
-          {section("What the coach knows about you")}
-          {snapshot.singer_facts.map((f, i) => (
-            <Text key={i} style={{ fontSize: 14, lineHeight: 20, color: t.textSecondary, marginBottom: 4 }}>
-              • {f}
-            </Text>
-          ))}
-          <Text style={{ fontSize: 12, color: t.muted, marginTop: 4 }}>Kept by the coach on your computer.</Text>
-        </>
-      )}
-    </ScrollView>
+        {group(
+          "Your computer",
+          pairing ? (
+            <View style={{ paddingVertical: 12, gap: 12 }}>
+              <View>
+                <Text style={{ fontSize: 16, fontWeight: "500", color: t.text }}>{pairing.name}</Text>
+                <Text style={{ fontSize: 12.5, color: t.muted, marginTop: 3 }}>
+                  {lastSync ? `Synced ${timeAgo(lastSync)}` : "Not synced yet"}
+                  {unsent ? ` · ${unsent} take${unsent === 1 ? "" : "s"} to send` : ""}
+                </Text>
+                {syncError && <Text style={{ fontSize: 13, color: syncError.unreachable ? t.muted : t.danger, marginTop: 6, lineHeight: 18 }}>{syncError.message}</Text>}
+              </View>
+              <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+                <Button t={t} kind="soft" label={syncing ? "Syncing…" : "Sync now"} onPress={() => useLibraryStore.getState().sync({ force: true })} />
+                <Button t={t} kind="plain" label="Pair again" onPress={() => router.push("/pair")} />
+                <Button
+                  t={t}
+                  kind="plain"
+                  danger
+                  label="Unpair"
+                  onPress={() =>
+                    Alert.alert("Unpair this phone?", "Songs and audio stay on the phone; it just stops syncing.", [
+                      { text: "Cancel", style: "cancel" },
+                      { text: "Unpair", style: "destructive", onPress: () => useLibraryStore.getState().unpair() },
+                    ])
+                  }
+                />
+              </View>
+            </View>
+          ) : (
+            row("Not paired", <Button t={t} kind="soft" label="Pair" onPress={() => router.push("/pair")} />, "On the computer: Settings → Phone", { last: true })
+          ),
+        )}
+
+        {group(
+          "Audio on this phone",
+          <>
+            {row(
+              `${megabytes(stored)} used`,
+              missing.length && pairing ? (
+                <Button
+                  t={t}
+                  kind="soft"
+                  label={`Get all (${missing.length})`}
+                  onPress={async () => {
+                    for (const s of missing) await useLibraryStore.getState().downloadSong(s.id);
+                  }}
+                />
+              ) : null,
+              missing.length ? `${missing.length} song${missing.length === 1 ? "" : "s"} not on the phone yet` : "Every song's audio is here.",
+            )}
+            {row(
+              "Keep recent songs ready",
+              <Segmented t={t} options={[0, 3, 5, 10]} value={prefs.keepRecent} onChange={prefs.setKeepRecent} label={(n) => (n === 0 ? "Off" : String(n))} />,
+              "The songs you've worked on most recently are fetched at home, so they're there when you're out.",
+              { below: true },
+            )}
+            {row("Get audio when a song opens", <Toggle value={prefs.autoDownload} onChange={prefs.setAutoDownload} t={t} />, "Only when the computer is reachable.", { last: stored === 0 })}
+            {stored > 0 && (
+              <View style={{ paddingVertical: 8 }}>
+                <Button
+                  t={t}
+                  kind="plain"
+                  danger
+                  label="Remove all audio"
+                  style={{ alignSelf: "flex-start" }}
+                  onPress={() =>
+                    Alert.alert("Remove all audio from this phone?", "Lyrics, notes and takes stay. You can get the audio again from the computer.", [
+                      { text: "Cancel", style: "cancel" },
+                      {
+                        text: "Remove",
+                        style: "destructive",
+                        onPress: async () => {
+                          for (const id of Object.keys(useLibraryStore.getState().local.downloads)) await useLibraryStore.getState().removeDownloads(id);
+                        },
+                      },
+                    ])
+                  }
+                />
+              </View>
+            )}
+          </>,
+        )}
+
+        {group(
+          "Play all",
+          row(
+            "Plays",
+            <Segmented t={t} options={["audio", "instrumental"] as const} value={prefs.radioTrack} onChange={prefs.setRadioTrack} label={(k) => (k === "audio" ? "The songs" : "The backing")} />,
+            "The backing is for singing along on a walk. Hold the player bar to stop.",
+            { below: true, last: true },
+          ),
+        )}
+
+        {group(
+          "Takes",
+          row(
+            "Count-in",
+            <Segmented t={t} options={[0, 2, 3, 4]} value={prefs.countIn} onChange={prefs.setCountIn} label={(n) => (n === 0 ? "Off" : `${n} s`)} />,
+            "Use headphones — the song shouldn't go into the mic.",
+            { below: true, last: true },
+          ),
+        )}
+
+        {group(
+          "Look",
+          <>
+            {row("Theme", <Segmented t={t} options={["auto", "light", "dark"] as ThemeMode[]} value={prefs.themeMode} onChange={prefs.setThemeMode} label={(m) => (m === "auto" ? "Auto" : m === "light" ? "Light" : "Dark")} />)}
+            {row(
+              "Colour",
+              <View style={{ flexDirection: "row", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                <Pressable onPress={() => prefs.setAccent(null)} style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, backgroundColor: prefs.accent == null ? t.themeSoft : "transparent" }}>
+                  <Text style={{ fontSize: 13, color: prefs.accent == null ? t.themeText : t.textSecondary }}>Same as computer</Text>
+                </Pressable>
+                {Object.entries(ACCENTS).map(([k, a]) => (
+                  <Pressable key={k} onPress={() => prefs.setAccent(k)} hitSlop={6}>
+                    <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: t.dark ? a.dark : a.light, borderWidth: prefs.accent === k ? 3 : 0, borderColor: t.surface, elevation: prefs.accent === k ? 3 : 0 }} />
+                  </Pressable>
+                ))}
+              </View>,
+              "Each song's own screen takes its colour from the song's artwork.",
+              { below: true, last: true },
+            )}
+          </>,
+        )}
+
+        {!!snapshot?.singer_facts.length &&
+          group(
+            "What the coach knows about you",
+            <View style={{ paddingVertical: 12, gap: 8 }}>
+              {snapshot.singer_facts.map((f, i) => (
+                <Text key={i} style={{ fontSize: 14.5, lineHeight: 21, color: t.textSecondary }}>
+                  {f}
+                </Text>
+              ))}
+              <Text style={{ fontSize: 12, color: t.muted, marginTop: 2 }}>Kept by the coach on your computer.</Text>
+            </View>,
+          )}
+      </ScrollView>
+      <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, height: insets.top, backgroundColor: t.bg, opacity: 0.94 }} />
+    </View>
   );
 }

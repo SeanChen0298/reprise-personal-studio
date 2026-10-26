@@ -2,6 +2,8 @@
 import { useEffect, useState } from "react";
 import { Pressable, TextInput, View } from "react-native";
 import { Text } from "./text";
+import { PressableScale } from "./pressable-scale";
+import { Button } from "./ui";
 import { PLACEMENTS, REGISTERS, type Line } from "@reprise/shared/core";
 import { Sheet } from "./sheet";
 import type { Theme } from "../lib/theme";
@@ -41,44 +43,51 @@ export function LineSheet({ line, lineNo, t, onClose, onSave, onLoop }: Props) {
       {values.map((v) => {
         const on = v === value;
         return (
-          <Pressable key={v} onPress={() => set(on ? null : v)} style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16, backgroundColor: on ? t.voiceSoft : t.bg, borderWidth: 1, borderColor: on ? t.voice : t.borderSubtle }}>
-            <Text style={{ fontSize: 13.5, color: on ? t.voice : t.textSecondary }}>{v}</Text>
-          </Pressable>
+          <PressableScale key={v} haptic scaleTo={0.92} onPress={() => set(on ? null : v)} style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, backgroundColor: on ? t.voiceSoft : (t.dark ? "#FFFFFF0D" : "#0000000A") }}>
+            <Text style={{ fontSize: 14, fontWeight: on ? "600" : "400", color: on ? t.voice : t.textSecondary }}>{v}</Text>
+          </PressableScale>
         );
       })}
     </View>
   );
 
-  const label = { fontSize: 11, fontWeight: "700", letterSpacing: 1, color: t.muted, textTransform: "uppercase", marginBottom: 7 } as const;
+  const label = { fontSize: 11, fontWeight: "600", letterSpacing: 1.1, color: t.muted, textTransform: "uppercase", marginBottom: 8 } as const;
 
   return (
-    <Sheet open={!!line} onClose={close} title={`Line ${lineNo}`} t={t}>
+    <Sheet open={!!line} onClose={close} title="This line" t={t}>
       {line && (
         <View style={{ gap: 18 }}>
-          <Text style={{ fontFamily: "serif", fontSize: 19, color: t.text, lineHeight: 26 }}>{line.custom_text ?? line.text}</Text>
+          <Text style={{ fontFamily: "serif", fontSize: 21, color: t.text, lineHeight: 29 }}>{line.custom_text ?? line.text}</Text>
           <View>
-            <Text style={label}>My note</Text>
+            <Text style={label}>Your note</Text>
             <TextInput
               value={note}
               onChangeText={setNote}
               placeholder="e.g. breathe before this, darker sound"
               placeholderTextColor={t.muted}
               multiline
-              style={{ minHeight: 64, borderWidth: 1.5, borderColor: t.border, borderRadius: 10, padding: 10, fontSize: 15, color: t.text, backgroundColor: t.bg, textAlignVertical: "top" }}
+              style={{ minHeight: 68, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, color: t.text, backgroundColor: (t.dark ? "#FFFFFF0D" : "#0000000A"), textAlignVertical: "top", fontFamily: "Inter_400Regular" }}
             />
           </View>
           <View>
-            <Text style={label}>Register</Text>
+            <Text style={label}>Your voice here</Text>
             {chips(REGISTERS, register, setRegister)}
           </View>
           <View>
-            <Text style={label}>Placement</Text>
+            <Text style={label}>Where it sits</Text>
             {chips(PLACEMENTS, placement, setPlacement)}
           </View>
-          <Pressable onPress={() => { onLoop(); close(); }} style={{ alignSelf: "flex-start", paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, backgroundColor: t.themeSoft }}>
-            <Text style={{ color: t.themeText, fontSize: 14, fontWeight: "600" }}>Loop this line</Text>
-          </Pressable>
-          <Text style={{ fontSize: 12, color: t.muted }}>Notes and voice marks go to your computer on the next sync.</Text>
+          <Button
+            t={t}
+            kind="soft"
+            label="Loop this line"
+            style={{ alignSelf: "flex-start" }}
+            onPress={() => {
+              onLoop();
+              close();
+            }}
+          />
+          <Text style={{ fontSize: 12, color: t.muted }}>Notes and voice marks go to your computer a few seconds later (whenever it's reachable).</Text>
         </View>
       )}
     </Sheet>

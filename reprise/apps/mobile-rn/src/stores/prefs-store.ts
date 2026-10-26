@@ -23,6 +23,8 @@ interface PrefsState {
   radioShuffle: boolean;
   /** Song screen: show only the start of each line, for singing from memory. */
   memorise: boolean;
+  /** The song screen's Practise tray is open. */
+  practiseOpen: boolean;
   setThemeMode: (v: ThemeMode) => void;
   setAccent: (v: string | null) => void;
   setShowTranslation: (v: boolean) => void;
@@ -34,6 +36,7 @@ interface PrefsState {
   setRadioTrack: (v: "audio" | "instrumental") => void;
   setRadioShuffle: (v: boolean) => void;
   setMemorise: (v: boolean) => void;
+  setPractiseOpen: (v: boolean) => void;
 }
 
 export const usePrefsStore = create<PrefsState>()(
@@ -50,6 +53,7 @@ export const usePrefsStore = create<PrefsState>()(
       radioTrack: "audio",
       radioShuffle: false,
       memorise: false,
+      practiseOpen: false,
       setThemeMode: (v) => set({ themeMode: v }),
       setAccent: (v) => set({ accent: v }),
       setShowTranslation: (v) => set({ showTranslation: v }),
@@ -61,6 +65,7 @@ export const usePrefsStore = create<PrefsState>()(
       setRadioTrack: (v) => set({ radioTrack: v }),
       setRadioShuffle: (v) => set({ radioShuffle: v }),
       setMemorise: (v) => set({ memorise: v }),
+      setPractiseOpen: (v) => set({ practiseOpen: v }),
     }),
     { name: "reprise-prefs", storage: createJSONStorage(() => AsyncStorage) },
   ),

@@ -1,9 +1,11 @@
-// Library: the song to pick up again (big, one action), then every song.
+// Library: the song to pick up again (in its colour, one action), what you sang recently, then every song.
 import { useMemo, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, TextInput, View } from "react-native";
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, ScrollView, TextInput, View } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { DISPLAY, Text } from "../src/components/text";
 import { PressableScale } from "../src/components/pressable-scale";
+import { Button, Card } from "../src/components/ui";
+import { paletteFor } from "../src/lib/song-palette";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Song } from "@reprise/shared/core";
@@ -63,107 +65,102 @@ export default function Library() {
   const shuffle = usePrefsStore((s) => s.radioShuffle);
   const playable = useMemo(() => (snapshot?.songs ?? []).filter((s) => local.downloads[s.id]?.audio).length, [snapshot, local.downloads]);
 
+  const heroP = paletteFor(hero ? snapshot?.colors?.[hero.song.id] : undefined, t);
+  const recentMore = recent.slice(1, 9).map((r) => r.song);
+
   const header = (
     <View>
-      <View style={{ flexDirection: "row", alignItems: "center", paddingTop: insets.top + 10, paddingBottom: 14 }}>
-        <Text style={{ fontFamily: DISPLAY, fontSize: 28, color: t.text, letterSpacing: -0.6 }}>Reprise</Text>
-        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.theme, marginLeft: 4, marginTop: 6 }} />
+      <View style={{ flexDirection: "row", alignItems: "center", paddingTop: insets.top + 12, paddingBottom: 18 }}>
+        <Text style={{ fontFamily: DISPLAY, fontSize: 30, color: t.text, letterSpacing: -0.8 }}>Reprise</Text>
         <View style={{ flex: 1 }} />
         <SyncPill t={t} />
-        <Pressable onPress={() => router.push("/settings")} hitSlop={10} style={{ marginLeft: 14 }}>
+        <Pressable onPress={() => router.push("/settings")} hitSlop={10} style={{ marginLeft: 16 }}>
           <SettingsIcon color={t.textSecondary} size={21} />
         </Pressable>
       </View>
 
-      {syncError && !syncError.unreachable && (
-        <Text style={{ fontSize: 12.5, color: t.danger, marginBottom: 12 }}>{syncError.message}</Text>
-      )}
+      {syncError && !syncError.unreachable && <Text style={{ fontSize: 12.5, color: t.danger, marginBottom: 12 }}>{syncError.message}</Text>}
 
       {!snapshot && (
-        <View style={{ padding: 20, borderRadius: 14, backgroundColor: t.surface, borderWidth: 1, borderColor: t.borderSubtle, gap: 10, marginTop: 8 }}>
-          <Text style={{ fontFamily: DISPLAY, fontSize: 22, color: t.text }}>Your songs, on your phone</Text>
-          <Text style={{ fontSize: 14, lineHeight: 20, color: t.textSecondary }}>
+        <Card t={t} style={{ gap: 12, marginTop: 8 }}>
+          <Text style={{ fontFamily: DISPLAY, fontSize: 23, color: t.text }}>Your songs, on your phone</Text>
+          <Text style={{ fontSize: 14.5, lineHeight: 21, color: t.textSecondary }}>
             Reprise on your phone gets its songs from Reprise on your computer, over your home Wi-Fi — lyrics, your marks and
-            notes, sections, the coach's song cards and the audio. Then it works anywhere.
+            notes, the coach's song cards and the audio. Then it works anywhere.
           </Text>
-          <Text style={{ fontSize: 14, lineHeight: 20, color: t.textSecondary }}>
-            On the computer: Settings → Phone → switch on “Sync with my phone”.
-          </Text>
+          <Text style={{ fontSize: 14.5, lineHeight: 21, color: t.textSecondary }}>On the computer: Settings → Phone → switch on “Sync with my phone”.</Text>
           {pairing ? (
             <Text style={{ fontSize: 13.5, color: t.muted }}>{syncing ? "Syncing…" : syncError?.message ?? "Pull down to sync."}</Text>
           ) : (
-            <Pressable onPress={() => router.push("/pair")} style={{ alignSelf: "flex-start", marginTop: 4, paddingHorizontal: 18, paddingVertical: 11, borderRadius: 10, backgroundColor: t.accent }}>
-              <Text style={{ color: t.onAccent, fontSize: 14.5, fontWeight: "600" }}>Pair with computer</Text>
-            </Pressable>
+            <Button t={t} label="Pair with computer" onPress={() => router.push("/pair")} style={{ alignSelf: "flex-start", marginTop: 4 }} />
           )}
-        </View>
+        </Card>
       )}
 
+      {/* The song to pick up again, in its own colour */}
       {hero && !query && (
         <Animated.View entering={FadeInDown.duration(420)}>
-        <PressableScale onPress={() => open(hero.song)} style={{ borderRadius: 20, backgroundColor: t.surface, borderWidth: 1, borderColor: t.borderSubtle, overflow: "hidden", marginBottom: 22, elevation: 2, shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 10, shadowOffset: { width: 0, height: 3 } }}>
-          <Thumb song={hero.song} radius={0} aspect={2.1} zoom={1.16} />
-          <View style={{ padding: 16, gap: 4 }}>
-            <Text style={{ fontSize: 11, fontWeight: "600", letterSpacing: 1, color: t.theme, textTransform: "uppercase" }}>
-              {hero.kind === "added" ? "Start here" : "Pick up where you left off"}
-            </Text>
-            <Text numberOfLines={1} style={{ fontFamily: DISPLAY, fontSize: 27, color: t.text, letterSpacing: -0.6 }}>
-              {hero.song.title}
-            </Text>
-            <Text numberOfLines={1} style={{ fontSize: 14, color: t.muted }}>
-              {hero.song.artist}
-            </Text>
-            <View style={{ flexDirection: "row", alignItems: "center", marginTop: 12 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10, backgroundColor: t.accent }}>
-                <PlayIcon color={t.onAccent} size={13} />
-                <Text style={{ color: t.onAccent, fontSize: 14.5, fontWeight: "600" }}>{hero.kind === "added" ? "Open" : "Continue"}</Text>
-              </View>
-              <Text style={{ marginLeft: 12, fontSize: 12.5, color: t.textSecondary }}>
-                {hero.kind === "take" ? "Last take" : hero.kind === "practice" ? "Last practised" : "Added"} {timeAgo(hero.at)}
+          <PressableScale onPress={() => open(hero.song)} style={{ borderRadius: 26, backgroundColor: heroP.soft, overflow: "hidden", marginBottom: 26 }}>
+            <Thumb song={hero.song} radius={0} aspect={16 / 9} zoom={1.12} />
+            <View style={{ padding: 18, paddingTop: 16, gap: 3 }}>
+              <Text style={{ fontSize: 12, fontWeight: "600", color: heroP.tint }}>{hero.kind === "added" ? "Start here" : "Pick up where you left off"}</Text>
+              <Text numberOfLines={1} style={{ fontFamily: DISPLAY, fontSize: 28, color: t.text, letterSpacing: -0.6, marginTop: 2 }}>
+                {hero.song.title}
               </Text>
+              <Text numberOfLines={1} style={{ fontSize: 14, color: t.textSecondary }}>
+                {hero.song.artist}
+                {hero.kind !== "added" ? ` · ${hero.kind === "take" ? "last take" : "practised"} ${timeAgo(hero.at)}` : ""}
+              </Text>
+              <View style={{ flexDirection: "row", marginTop: 14 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8, height: 42, paddingHorizontal: 20, borderRadius: 21, backgroundColor: heroP.solid }}>
+                  <PlayIcon color={heroP.onSolid} size={13} />
+                  <Text style={{ color: heroP.onSolid, fontSize: 14.5, fontWeight: "600" }}>{hero.kind === "added" ? "Open" : "Continue"}</Text>
+                </View>
+              </View>
             </View>
-          </View>
-        </PressableScale>
+          </PressableScale>
         </Animated.View>
       )}
 
       {playable > 0 && !query && (
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 20 }}>
-          <PressableScale
-            haptic
-            scaleTo={0.94}
-            onPress={() => void playAll()}
-            style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 22, backgroundColor: t.themeSoft }}
-          >
-            <PlayIcon color={t.themeText} size={13} />
-            <Text style={{ fontSize: 14, fontWeight: "600", color: t.themeText }}>Play all</Text>
-          </PressableScale>
-          <PressableScale
-            haptic
-            scaleTo={0.94}
-            onPress={() => usePrefsStore.getState().setRadioShuffle(!shuffle)}
-            style={{ paddingHorizontal: 14, paddingVertical: 10, borderRadius: 22, borderWidth: 1, borderColor: shuffle ? t.theme : t.borderSubtle }}
-          >
-            <Text style={{ fontSize: 13.5, color: shuffle ? t.themeText : t.textSecondary }}>Shuffle</Text>
-          </PressableScale>
-          <Text style={{ flex: 1, fontSize: 12.5, color: t.muted, textAlign: "right" }}>
-            {playable} song{playable === 1 ? "" : "s"}
-          </Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 26 }}>
+          <Button t={t} kind="soft" label="Play all" icon={<PlayIcon color={t.themeText} size={12} />} onPress={() => void playAll()} />
+          <Button t={t} kind={shuffle ? "soft" : "plain"} label={shuffle ? "Shuffle on" : "Shuffle"} onPress={() => usePrefsStore.getState().setRadioShuffle(!shuffle)} />
+        </View>
+      )}
+
+      {recentMore.length > 1 && !query && (
+        <View style={{ marginBottom: 26 }}>
+          <Text style={{ fontFamily: DISPLAY, fontSize: 20, color: t.text, marginBottom: 12 }}>Recently</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingRight: 16 }} style={{ marginRight: -16 }}>
+            {recentMore.map((s) => (
+              <PressableScale key={s.id} onPress={() => open(s)} style={{ width: 150, gap: 7 }}>
+                <Thumb song={s} radius={16} aspect={1} zoom={1.05} />
+                <View>
+                  <Text numberOfLines={1} style={{ fontSize: 14, fontWeight: "500", color: t.text }}>
+                    {s.title}
+                  </Text>
+                  <Text numberOfLines={1} style={{ fontSize: 12.5, color: t.muted }}>
+                    {s.artist}
+                  </Text>
+                </View>
+              </PressableScale>
+            ))}
+          </ScrollView>
         </View>
       )}
 
       {allSongs.length > 0 && (
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 6 }}>
-          <Text style={{ fontSize: 13.5, fontWeight: "600", color: t.textSecondary }}>All songs</Text>
-          <Text style={{ fontSize: 12.5, color: t.muted }}>{songs.length}</Text>
+        <View style={{ gap: 12, marginBottom: 12 }}>
+          <Text style={{ fontFamily: DISPLAY, fontSize: 20, color: t.text }}>{query ? `${songs.length} found` : "All songs"}</Text>
           {allSongs.length > 6 && (
             <TextInput
               value={query}
               onChangeText={setQuery}
-              placeholder="Search"
+              placeholder="Search songs or artists"
               placeholderTextColor={t.muted}
               autoCorrect={false}
-              style={{ flex: 1, marginLeft: 8, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 9, backgroundColor: t.surface, borderWidth: 1, borderColor: t.borderSubtle, color: t.text, fontSize: 14 }}
+              style={{ height: 42, paddingHorizontal: 16, borderRadius: 21, backgroundColor: t.dark ? "#FFFFFF0D" : "#0000000A", color: t.text, fontSize: 14.5, fontFamily: "Inter_400Regular" }}
             />
           )}
         </View>
@@ -173,43 +170,52 @@ export default function Library() {
 
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>
-    <FlatList
-      style={{ flex: 1, backgroundColor: t.bg }}
-      contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: insets.bottom + (radioOn ? 100 : 24) }}
-      data={songs}
-      keyExtractor={(s) => s.id}
-      ListHeaderComponent={header}
-      refreshControl={
-        <RefreshControl refreshing={syncing} onRefresh={() => (pairing ? useLibraryStore.getState().sync({ force: true }) : router.push("/pair"))} tintColor={t.theme} colors={[t.theme]} />
-      }
-      renderItem={({ item, index }) => {
-        const progress = downloading[item.id];
-        const hasAudio = !!snapshot?.files[item.id]?.audio;
-        return (
-          <Animated.View entering={FadeInDown.delay(Math.min(index, 10) * 35).duration(380)}>
-          <PressableScale scaleTo={0.98} onPress={() => open(item)} style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 8 }}>
-            <Thumb song={item} width={72} radius={6} />
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text numberOfLines={1} style={{ fontSize: 15, color: t.text }}>
-                {item.title}
-              </Text>
-              <Text numberOfLines={1} style={{ fontSize: 13, color: t.muted, marginTop: 1 }}>
-                {item.artist}
-              </Text>
-            </View>
-            {progress != null ? (
-              <ActivityIndicator size="small" color={t.theme} />
-            ) : hasAudio && !onPhone(item.id) ? (
-              <Pressable onPress={() => useLibraryStore.getState().downloadSong(item.id)} hitSlop={10}>
-                <DownloadIcon color={t.muted} size={18} />
-              </Pressable>
-            ) : null}
-          </PressableScale>
-          </Animated.View>
-        );
-      }}
-    />
-    {radioOn && <NowPlaying t={t} />}
+      <FlatList
+        style={{ flex: 1, backgroundColor: t.bg }}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: insets.bottom + (radioOn ? 104 : 28) }}
+        data={songs}
+        keyExtractor={(s) => s.id}
+        numColumns={2}
+        columnWrapperStyle={{ gap: 12 }}
+        ListHeaderComponent={header}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl refreshing={syncing} onRefresh={() => (pairing ? useLibraryStore.getState().sync({ force: true }) : router.push("/pair"))} tintColor={t.theme} colors={[t.theme]} />
+        }
+        renderItem={({ item, index }) => {
+          const progress = downloading[item.id];
+          const hasAudio = !!snapshot?.files[item.id]?.audio;
+          return (
+            <Animated.View entering={FadeInDown.delay(Math.min(index, 10) * 30).duration(360)} style={{ flex: 1, maxWidth: "50%", marginBottom: 18 }}>
+              <PressableScale scaleTo={0.97} onPress={() => open(item)} style={{ gap: 7 }}>
+                <View>
+                  <Thumb song={item} radius={16} zoom={1.05} />
+                  {(progress != null || (hasAudio && !onPhone(item.id))) && (
+                    <Pressable
+                      onPress={() => useLibraryStore.getState().downloadSong(item.id)}
+                      hitSlop={8}
+                      style={{ position: "absolute", right: 8, bottom: 8, width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.45)" }}
+                    >
+                      {progress != null ? <ActivityIndicator size="small" color="#fff" /> : <DownloadIcon color="#fff" size={15} />}
+                    </Pressable>
+                  )}
+                </View>
+                <View>
+                  <Text numberOfLines={1} style={{ fontSize: 14.5, fontWeight: "500", color: t.text }}>
+                    {item.title}
+                  </Text>
+                  <Text numberOfLines={1} style={{ fontSize: 12.5, color: t.muted, marginTop: 1 }}>
+                    {item.artist}
+                  </Text>
+                </View>
+              </PressableScale>
+            </Animated.View>
+          );
+        }}
+      />
+      {/* Rows scroll under the status bar: give it the page colour */}
+      <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, height: insets.top, backgroundColor: t.bg, opacity: 0.94 }} />
+      {radioOn && <NowPlaying t={t} />}
     </View>
   );
 }

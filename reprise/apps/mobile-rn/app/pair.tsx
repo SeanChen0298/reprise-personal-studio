@@ -54,6 +54,7 @@ export default function Pair() {
     fontSize: 15,
     color: t.text,
     backgroundColor: t.surface,
+    fontFamily: "Inter_400Regular",
   } as const;
 
   return (

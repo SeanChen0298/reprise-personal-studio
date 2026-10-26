@@ -5,6 +5,7 @@
 // for it to serve, and imports what the phone uploads to `C:/Reprise/sync/inbox/`:
 // takes (audio + `<id>.take.json`) and edits (`changes-*.json`).
 
+import { artworkInfo } from "./song-colour";
 import { invoke } from "@tauri-apps/api/core";
 import { exists, mkdir, readDir, readTextFile, remove, rename, stat, writeTextFile } from "@tauri-apps/plugin-fs";
 import { normaliseCard } from "@reprise/shared";
@@ -108,8 +109,13 @@ export async function buildSnapshot(host: string): Promise<SyncSnapshot> {
   const files: Record<string, SyncSongFiles> = {};
   const coach: Record<string, SyncCoach> = {};
   const hints: Record<string, Record<string, SyncLineHint>> = {};
+  const colors: Record<string, string> = {};
+  const letterbox: Record<string, { bars: number; aspect: number }> = {};
   await Promise.all(
     songs.map(async (song) => {
+      const art = await artworkInfo(song);
+      if (art.color) colors[song.id] = art.color;
+      if (art.bars > 0.02) letterbox[song.id] = { bars: art.bars, aspect: art.aspect };
       const [audio, vocals, instrumental] = await Promise.all([
         fileRef(song.download_status === "done" ? song.audio_path : undefined),
         fileRef(song.stem_status === "done" ? song.vocals_path : undefined),
@@ -145,6 +151,8 @@ export async function buildSnapshot(host: string): Promise<SyncSnapshot> {
     theme: usePreferencesStore.getState().theme,
     practiced: usePreferencesStore.getState().lastPracticed,
     hints,
+    colors,
+    letterbox,
   };
 }
 

@@ -4,12 +4,12 @@ import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, View, use
 import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import Animated, { Easing, runOnJS, useAnimatedStyle, useSharedValue, withSpring, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Text } from "./text";
+import { DISPLAY, Text } from "./text";
 import type { Theme } from "../lib/theme";
 
 const SPRING = { damping: 22, stiffness: 240, mass: 0.9 };
 
-export function Sheet({ open, onClose, title, t, children, scroll = true }: { open: boolean; onClose: () => void; title: string; t: Theme; children: ReactNode; scroll?: boolean }) {
+export function Sheet({ open, onClose, title, t, children, scroll = true, tall }: { open: boolean; onClose: () => void; title: string; t: Theme; children: ReactNode; scroll?: boolean; /** Always 86% high (pages inside don't make it jump). */ tall?: boolean }) {
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   // Stays mounted while the closing animation runs.
@@ -54,14 +54,14 @@ export function Sheet({ open, onClose, title, t, children, scroll = true }: { op
             <Pressable onPress={onClose} style={{ flex: 1 }} />
           </Animated.View>
           <View style={{ flex: 1 }} pointerEvents="box-none" />
-          <Animated.View style={[{ maxHeight: "86%", backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingBottom: insets.bottom + 12, elevation: 16 }, sheetStyle]}>
+          <Animated.View style={[{ maxHeight: "86%", height: tall ? "86%" : undefined, backgroundColor: t.surface, borderTopLeftRadius: 26, borderTopRightRadius: 26, paddingBottom: insets.bottom + 12, elevation: 16 }, sheetStyle]}>
             <GestureDetector gesture={drag}>
               <View>
                 <View style={{ alignItems: "center", paddingTop: 9 }}>
                   <View style={{ width: 38, height: 4, borderRadius: 2, backgroundColor: t.border }} />
                 </View>
                 <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingTop: 12, paddingBottom: 8 }}>
-                  <Text numberOfLines={1} style={{ flex: 1, fontSize: 17, fontWeight: "600", color: t.text }}>
+                  <Text numberOfLines={1} style={{ flex: 1, fontFamily: DISPLAY, fontSize: 19, color: t.text }}>
                     {title}
                   </Text>
                   <Pressable onPress={onClose} hitSlop={12}>
@@ -71,7 +71,7 @@ export function Sheet({ open, onClose, title, t, children, scroll = true }: { op
               </View>
             </GestureDetector>
             {scroll ? (
-              <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 8, paddingBottom: 12 }} keyboardShouldPersistTaps="handled">
+              <ScrollView style={tall ? { flex: 1 } : undefined} contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 8, paddingBottom: 12 }} keyboardShouldPersistTaps="handled">
                 {children}
               </ScrollView>
             ) : (
