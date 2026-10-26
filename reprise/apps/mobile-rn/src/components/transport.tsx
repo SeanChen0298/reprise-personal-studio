@@ -1,6 +1,8 @@
 // Bottom transport: seek bar, line / section loop, prev / play / next, speed, track, record.
 import { useRef, useState } from "react";
-import { Pressable, Text, View, type GestureResponderEvent } from "react-native";
+import { Pressable, View, type GestureResponderEvent } from "react-native";
+import { Text } from "./text";
+import { PressableScale } from "./pressable-scale";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { LinePlayer, LoopMode } from "../hooks/use-line-player";
 import type { TrackKind } from "../stores/library-store";
@@ -77,7 +79,9 @@ export function Transport({ player, t, tracks, track, onTrack, hasSection, rec, 
 
       {/* Main controls */}
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 4 }}>
-        <Pressable
+        <PressableScale
+          haptic
+          scaleTo={0.92}
           onPress={() => {
             let next = LOOP_NEXT[player.loop];
             if (next === "section" && !hasSection) next = "off";
@@ -88,20 +92,22 @@ export function Transport({ player, t, tracks, track, onTrack, hasSection, rec, 
         >
           <LoopIcon color={player.loop !== "off" ? t.theme : t.textSecondary} size={17} />
           <Text style={{ fontSize: 12, color: player.loop !== "off" ? t.theme : t.textSecondary }}>{loopLabel}</Text>
-        </Pressable>
-        <Pressable onPress={() => player.step(-1)} disabled={rec.busy} style={btn()}>
+        </PressableScale>
+        <PressableScale scaleTo={0.85} onPress={() => player.step(-1)} disabled={rec.busy} style={btn()}>
           <PrevIcon color={t.text} size={22} />
-        </Pressable>
-        <Pressable
+        </PressableScale>
+        <PressableScale
+          haptic
+          scaleTo={0.9}
           onPress={() => player.toggle()}
           disabled={rec.busy || !player.ready}
-          style={{ width: 62, height: 62, borderRadius: 31, alignItems: "center", justifyContent: "center", backgroundColor: t.theme, opacity: player.ready ? 1 : 0.4 }}
+          style={{ width: 62, height: 62, borderRadius: 31, alignItems: "center", justifyContent: "center", backgroundColor: t.theme, opacity: player.ready ? 1 : 0.4, elevation: 4, shadowColor: t.theme, shadowOpacity: 0.35, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } }}
         >
           {player.isPlaying ? <PauseIcon color="#fff" size={24} /> : <PlayIcon color="#fff" size={24} />}
-        </Pressable>
-        <Pressable onPress={() => player.step(1)} disabled={rec.busy} style={btn()}>
+        </PressableScale>
+        <PressableScale scaleTo={0.85} onPress={() => player.step(1)} disabled={rec.busy} style={btn()}>
           <NextIcon color={t.text} size={22} />
-        </Pressable>
+        </PressableScale>
         <View style={{ flexDirection: "row", alignItems: "center" }}>
           <Pressable onPress={() => player.setSpeed(player.speed - 0.05)} disabled={rec.busy || player.speed <= 0.5} hitSlop={4} style={{ width: 34, height: 44, alignItems: "center", justifyContent: "center" }}>
             <Text style={{ fontSize: 20, color: player.speed <= 0.5 ? t.border : t.textSecondary }}>−</Text>

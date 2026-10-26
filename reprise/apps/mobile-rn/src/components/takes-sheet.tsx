@@ -1,6 +1,7 @@
 // Takes for the song: the computer's (with its breath / high-note review) and the ones recorded here.
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, TextInput, View } from "react-native";
+import { Text } from "./text";
 import { Audio } from "expo-av";
 import { ISSUE_LABEL, isBreathIssue, reviewInsight, type Line, type Recording } from "@reprise/shared/core";
 import { useLibraryStore } from "../stores/library-store";

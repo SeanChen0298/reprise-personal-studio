@@ -5,6 +5,7 @@ import * as Linking from "expo-linking";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useLibraryStore } from "../src/stores/library-store";
 import { parsePairingUrl } from "../src/lib/sync-client";
 import { useTheme } from "../src/lib/theme";
@@ -56,14 +57,16 @@ export default function RootLayout() {
   }
 
   return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <SafeAreaProvider>
       <StatusBar style={t.dark ? "light" : "dark"} />
-      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: t.bg }, animation: "slide_from_right" }}>
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: t.bg }, animation: "ios_from_right", animationDuration: 320 }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="song/[id]" />
-        <Stack.Screen name="pair" options={{ presentation: "modal", animation: "slide_from_bottom" }} />
+        <Stack.Screen name="pair" options={{ presentation: "modal", animation: "fade_from_bottom" }} />
         <Stack.Screen name="settings" />
       </Stack>
     </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

@@ -1,7 +1,11 @@
 // The song: lyrics that follow the music, loops, speed, tracks, sung-along takes,
 // your notes and voice marks, and the coach's song card from the computer.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, PanResponder, Pressable, Switch, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, FlatList, PanResponder, Pressable, Switch, TextInput, View } from "react-native";
+import { Image } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
+import Animated, { FadeIn, FadeInDown, FadeOut, FadeOutDown, ZoomIn } from "react-native-reanimated";
+import { DISPLAY, DISPLAY_REGULAR, Text } from "../../src/components/text";
 import * as Haptics from "expo-haptics";
 import { router, useLocalSearchParams } from "expo-router";
 import { useKeepAwake } from "expo-keep-awake";
@@ -228,15 +232,24 @@ export default function SongScreen() {
 
   const hasTimings = lines.some((l) => l.start_ms != null);
 
+  const art = song.thumbnail_b64 ? (song.thumbnail_b64.startsWith("data:") ? song.thumbnail_b64 : `data:image/jpeg;base64,${song.thumbnail_b64}`) : song.thumbnail_url;
+
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>
+      {/* The song's artwork, blurred, as a wash of its colours behind the top of the page */}
+      {!!art && (
+        <Animated.View entering={FadeIn.duration(600)} pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, height: 340 }}>
+          <Image source={{ uri: art }} blurRadius={40} resizeMode="cover" style={{ width: "100%", height: "100%", opacity: t.dark ? 0.55 : 0.4 }} />
+          <LinearGradient colors={[t.dark ? "rgba(12,12,16,0.25)" : "rgba(249,249,249,0.2)", t.bg]} locations={[0, 1]} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} />
+        </Animated.View>
+      )}
       {/* Header */}
       <View style={{ paddingTop: insets.top + 6, paddingLeft: 10, paddingRight: 16, paddingBottom: 6, flexDirection: "row", alignItems: "center", gap: 6 }}>
         <Pressable onPress={() => router.back()} hitSlop={10} style={{ padding: 6 }}>
           <BackIcon color={t.text} size={22} />
         </Pressable>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text numberOfLines={1} style={{ fontFamily: "serif", fontSize: 19, color: t.text }}>
+          <Text numberOfLines={1} style={{ fontFamily: DISPLAY, fontSize: 19, color: t.text, letterSpacing: -0.3 }}>
             {song.title}
           </Text>
           <Text numberOfLines={1} style={{ fontSize: 12.5, color: t.muted }}>
@@ -246,7 +259,7 @@ export default function SongScreen() {
         <Pressable onPress={() => setViewOpen(true)} hitSlop={8} style={{ paddingHorizontal: 8, paddingVertical: 6 }}>
           <Text style={{ fontSize: 15, color: t.textSecondary, fontFamily: "serif" }}>Aa</Text>
         </Pressable>
-        <Pressable onPress={() => setTakesOpen(true)} hitSlop={8} style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14, backgroundColor: t.surface, borderWidth: 1, borderColor: t.borderSubtle }}>
+        <Pressable onPress={() => setTakesOpen(true)} hitSlop={8} style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16, backgroundColor: t.dark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.7)", borderWidth: 1, borderColor: t.borderSubtle }}>
           <Text style={{ fontSize: 13, color: t.textSecondary }}>Takes {takes.length || ""}</Text>
         </Pressable>
       </View>
@@ -345,13 +358,14 @@ export default function SongScreen() {
 
       {/* The computer's review of a take from here just arrived */}
       {reviewReady && !rec.pending && !rec.busy && (
+        <Animated.View entering={FadeInDown.springify().damping(18)} exiting={FadeOutDown.duration(180)} style={{ position: "absolute", left: 12, right: 12, bottom: insets.bottom + 190 }}>
         <Pressable
           onPress={() => {
             setTakeFocus(reviewReady.id);
             setTakesOpen(true);
             setReviewReady(null);
           }}
-          style={{ position: "absolute", left: 12, right: 12, bottom: insets.bottom + 190, padding: 14, borderRadius: 14, backgroundColor: t.raised, borderWidth: 1, borderColor: t.border, elevation: 6, flexDirection: "row", alignItems: "center", gap: 10 }}
+          style={{ padding: 14, borderRadius: 16, backgroundColor: t.raised, borderWidth: 1, borderColor: t.border, elevation: 6, flexDirection: "row", alignItems: "center", gap: 10 }}
         >
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 11, fontWeight: "700", letterSpacing: 1, color: t.theme, textTransform: "uppercase" }}>Your take's review</Text>
@@ -362,11 +376,12 @@ export default function SongScreen() {
             <Text style={{ fontSize: 18, color: t.muted }}>×</Text>
           </Pressable>
         </Pressable>
+        </Animated.View>
       )}
 
       {/* A take just finished */}
       {rec.pending && (
-        <View style={{ position: "absolute", left: 12, right: 12, bottom: insets.bottom + 190, padding: 14, borderRadius: 14, backgroundColor: t.raised, borderWidth: 1, borderColor: t.border, gap: 10, elevation: 6 }}>
+        <Animated.View entering={FadeInDown.springify().damping(18)} exiting={FadeOutDown.duration(180)} style={{ position: "absolute", left: 12, right: 12, bottom: insets.bottom + 190, padding: 14, borderRadius: 16, backgroundColor: t.raised, borderWidth: 1, borderColor: t.border, gap: 10, elevation: 6 }}>
           <Text style={{ fontSize: 15, fontWeight: "600", color: t.text }}>Take · {clock(rec.pending.durationMs)}</Text>
           <TextInput
             value={takeNote}
@@ -397,16 +412,18 @@ export default function SongScreen() {
               <Text style={{ color: t.textSecondary, fontSize: 14.5 }}>Discard</Text>
             </Pressable>
           </View>
-          <Text style={{ fontSize: 12, color: t.muted }}>
+          <Text style={{ fontSize: 12, color: t.muted, lineHeight: 17 }}>
             {pairing ? "A kept take goes to your computer right away when it's reachable; its breath / high-note review shows up here a few seconds later." : "Kept takes go to your computer when you pair, where breath and high notes are checked."}
           </Text>
-        </View>
+        </Animated.View>
       )}
       {rec.countdown != null && (
-        <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", backgroundColor: t.dark ? "rgba(12,12,16,0.82)" : "rgba(249,249,249,0.86)" }}>
-          <Text style={{ fontSize: 96, fontWeight: "200", color: t.danger }}>{rec.countdown}</Text>
+        <Animated.View entering={FadeIn.duration(200)} exiting={FadeOut.duration(250)} pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", backgroundColor: t.dark ? "rgba(12,12,16,0.82)" : "rgba(249,249,249,0.86)" }}>
+          <Animated.View key={rec.countdown} entering={ZoomIn.springify().damping(12)}>
+            <Text style={{ fontFamily: DISPLAY_REGULAR, fontSize: 110, color: t.danger }}>{rec.countdown}</Text>
+          </Animated.View>
           <Text style={{ fontSize: 14, color: t.muted }}>Headphones on — the song starts after the count</Text>
-        </View>
+        </Animated.View>
       )}
       {!!rec.error && <Text style={{ position: "absolute", bottom: insets.bottom + 180, left: 16, right: 16, fontSize: 13, color: t.danger, textAlign: "center" }}>{rec.error}</Text>}
 

@@ -1,6 +1,7 @@
 // The coach's song card (made on the computer), as short pages: Overview / Story / Sections / Voice.
 import { useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, View } from "react-native";
+import { Text } from "./text";
 import { parseLineRefs, splitLineRefs, type Line, type SongCard } from "@reprise/shared/core";
 import type { Theme } from "../lib/theme";
 

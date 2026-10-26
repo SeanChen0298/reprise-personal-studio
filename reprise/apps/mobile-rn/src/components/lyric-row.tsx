@@ -1,5 +1,7 @@
-import { memo } from "react";
-import { Pressable, Text, View } from "react-native";
+import { memo, useEffect } from "react";
+import { Pressable, View } from "react-native";
+import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
+import { Text } from "./text";
 import type { HighlightType, Line, SyncLineHint } from "@reprise/shared/core";
 import { AnnotatedText } from "./annotated-text";
 import type { Theme } from "../lib/theme";
@@ -22,7 +24,8 @@ interface Props {
   onLongPress: (index: number) => void;
 }
 
-const FADE = [1, 0.62, 0.45, 0.38];
+// No band behind the current line: it's just the brightest; the rest step back.
+const FADE = [1, 0.5, 0.36, 0.28];
 
 /** The first word (or first two characters of Japanese / Chinese). */
 function lineStart(text: string): string {
@@ -34,28 +37,31 @@ function lineStart(text: string): string {
 export const LyricRow = memo(function LyricRow({ line, index, active, distance, translation, hint, highlights, showFurigana, memorise, t, onPress, onLongPress }: Props) {
   const voice = [line.register, line.placement].filter(Boolean).join(" · ");
   const timed = line.start_ms != null;
+  // The current line eases up to full size and brightness; the others settle back (no jump in layout:
+  // every line is laid out at full size and scaled).
+  const on = useSharedValue(active ? 1 : 0);
+  const fade = useSharedValue(active ? 1 : FADE[Math.min(distance, FADE.length - 1)]);
+  useEffect(() => {
+    const ease = { duration: 320, easing: Easing.out(Easing.cubic) };
+    on.value = withTiming(active ? 1 : 0, ease);
+    fade.value = withTiming(active ? 1 : FADE[Math.min(distance, FADE.length - 1)], ease);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, distance]);
+  const band = useAnimatedStyle(() => ({ opacity: fade.value }));
+  const grow = useAnimatedStyle(() => ({ transform: [{ scale: 0.94 + 0.06 * on.value }] }));
   return (
-    <Pressable
-      onPress={() => onPress(index)}
-      onLongPress={() => onLongPress(index)}
-      delayLongPress={350}
-      style={{
-        paddingVertical: 9,
-        paddingHorizontal: 14,
-        marginHorizontal: -6,
-        borderRadius: 12,
-        backgroundColor: active ? t.themeSoft : "transparent",
-        opacity: active ? 1 : FADE[Math.min(distance, FADE.length - 1)],
-      }}
-    >
+    <Pressable onPress={() => onPress(index)} onLongPress={() => onLongPress(index)} delayLongPress={350}>
+      <Animated.View style={[{ paddingVertical: 9, paddingHorizontal: 14, marginHorizontal: -6, borderRadius: 14 }, band]}>
+      <Animated.View style={grow}>
       {memorise ? (
-        <Text style={{ textAlign: "center", fontFamily: "serif", fontSize: active ? 22 : 20, lineHeight: (active ? 22 : 20) * 1.4, color: timed ? t.text : t.muted, fontWeight: active ? "600" : "400" }}>
+        <Text style={{ textAlign: "center", fontFamily: "serif", fontSize: 22, lineHeight: 22 * 1.4, color: timed ? t.text : t.muted }}>
           {lineStart(line.custom_text ?? line.text)}
-          <Text style={{ color: t.muted, fontWeight: "400" }}> · · ·</Text>
+          <Text style={{ fontFamily: "serif", color: t.muted }}> · · ·</Text>
         </Text>
       ) : (
-        <AnnotatedText line={line} highlights={highlights} fontSize={active ? 22 : 20} color={timed ? t.text : t.muted} bold={active} showFurigana={showFurigana} dark={t.dark} />
+        <AnnotatedText line={line} highlights={highlights} fontSize={22} color={timed ? t.text : t.muted} showFurigana={showFurigana} dark={t.dark} />
       )}
+      </Animated.View>
       {!!translation && !memorise && (
         <Text style={{ textAlign: "center", fontSize: 13.5, lineHeight: 19, color: t.muted, marginTop: 3 }}>{translation}</Text>
       )}
@@ -83,6 +89,7 @@ export const LyricRow = memo(function LyricRow({ line, index, active, distance, 
           )}
         </View>
       )}
+      </Animated.View>
     </Pressable>
   );
 });

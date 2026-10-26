@@ -1,6 +1,9 @@
 // Library: the song to pick up again (big, one action), then every song.
 import { useMemo, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, TextInput, View } from "react-native";
+import Animated, { FadeInDown } from "react-native-reanimated";
+import { DISPLAY, Text } from "../src/components/text";
+import { PressableScale } from "../src/components/pressable-scale";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Song } from "@reprise/shared/core";
@@ -63,7 +66,7 @@ export default function Library() {
   const header = (
     <View>
       <View style={{ flexDirection: "row", alignItems: "center", paddingTop: insets.top + 10, paddingBottom: 14 }}>
-        <Text style={{ fontFamily: "serif", fontSize: 26, color: t.text, letterSpacing: -0.5 }}>Reprise</Text>
+        <Text style={{ fontFamily: DISPLAY, fontSize: 28, color: t.text, letterSpacing: -0.6 }}>Reprise</Text>
         <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.theme, marginLeft: 4, marginTop: 6 }} />
         <View style={{ flex: 1 }} />
         <SyncPill t={t} />
@@ -78,7 +81,7 @@ export default function Library() {
 
       {!snapshot && (
         <View style={{ padding: 20, borderRadius: 14, backgroundColor: t.surface, borderWidth: 1, borderColor: t.borderSubtle, gap: 10, marginTop: 8 }}>
-          <Text style={{ fontFamily: "serif", fontSize: 22, color: t.text }}>Your songs, on your phone</Text>
+          <Text style={{ fontFamily: DISPLAY, fontSize: 22, color: t.text }}>Your songs, on your phone</Text>
           <Text style={{ fontSize: 14, lineHeight: 20, color: t.textSecondary }}>
             Reprise on your phone gets its songs from Reprise on your computer, over your home Wi-Fi — lyrics, your marks and
             notes, sections, the coach's song cards and the audio. Then it works anywhere.
@@ -97,13 +100,14 @@ export default function Library() {
       )}
 
       {hero && !query && (
-        <Pressable onPress={() => open(hero.song)} style={{ borderRadius: 16, backgroundColor: t.surface, borderWidth: 1, borderColor: t.borderSubtle, overflow: "hidden", marginBottom: 22 }}>
-          <Thumb song={hero.song} radius={0} aspect={2.1} />
+        <Animated.View entering={FadeInDown.duration(420)}>
+        <PressableScale onPress={() => open(hero.song)} style={{ borderRadius: 20, backgroundColor: t.surface, borderWidth: 1, borderColor: t.borderSubtle, overflow: "hidden", marginBottom: 22, elevation: 2, shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 10, shadowOffset: { width: 0, height: 3 } }}>
+          <Thumb song={hero.song} radius={0} aspect={2.1} zoom={1.16} />
           <View style={{ padding: 16, gap: 4 }}>
             <Text style={{ fontSize: 11, fontWeight: "600", letterSpacing: 1, color: t.theme, textTransform: "uppercase" }}>
               {hero.kind === "added" ? "Start here" : "Pick up where you left off"}
             </Text>
-            <Text numberOfLines={1} style={{ fontFamily: "serif", fontSize: 26, color: t.text, letterSpacing: -0.5 }}>
+            <Text numberOfLines={1} style={{ fontFamily: DISPLAY, fontSize: 27, color: t.text, letterSpacing: -0.6 }}>
               {hero.song.title}
             </Text>
             <Text numberOfLines={1} style={{ fontSize: 14, color: t.muted }}>
@@ -119,26 +123,31 @@ export default function Library() {
               </Text>
             </View>
           </View>
-        </Pressable>
+        </PressableScale>
+        </Animated.View>
       )}
 
       {playable > 0 && !query && (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 20 }}>
-          <Pressable
+          <PressableScale
+            haptic
+            scaleTo={0.94}
             onPress={() => void playAll()}
-            style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 22, backgroundColor: t.themeSoft, opacity: pressed ? 0.7 : 1 })}
+            style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 22, backgroundColor: t.themeSoft }}
           >
             <PlayIcon color={t.themeText} size={13} />
             <Text style={{ fontSize: 14, fontWeight: "600", color: t.themeText }}>Play all</Text>
-          </Pressable>
-          <Pressable
+          </PressableScale>
+          <PressableScale
+            haptic
+            scaleTo={0.94}
             onPress={() => usePrefsStore.getState().setRadioShuffle(!shuffle)}
             style={{ paddingHorizontal: 14, paddingVertical: 10, borderRadius: 22, borderWidth: 1, borderColor: shuffle ? t.theme : t.borderSubtle }}
           >
             <Text style={{ fontSize: 13.5, color: shuffle ? t.themeText : t.textSecondary }}>Shuffle</Text>
-          </Pressable>
+          </PressableScale>
           <Text style={{ flex: 1, fontSize: 12.5, color: t.muted, textAlign: "right" }}>
-            {playable} on this phone · keeps going with the screen off
+            {playable} song{playable === 1 ? "" : "s"}
           </Text>
         </View>
       )}
@@ -173,11 +182,12 @@ export default function Library() {
       refreshControl={
         <RefreshControl refreshing={syncing} onRefresh={() => (pairing ? useLibraryStore.getState().sync({ force: true }) : router.push("/pair"))} tintColor={t.theme} colors={[t.theme]} />
       }
-      renderItem={({ item }) => {
+      renderItem={({ item, index }) => {
         const progress = downloading[item.id];
         const hasAudio = !!snapshot?.files[item.id]?.audio;
         return (
-          <Pressable onPress={() => open(item)} style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 8, opacity: pressed ? 0.6 : 1 })}>
+          <Animated.View entering={FadeInDown.delay(Math.min(index, 10) * 35).duration(380)}>
+          <PressableScale scaleTo={0.98} onPress={() => open(item)} style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 8 }}>
             <Thumb song={item} width={72} radius={6} />
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text numberOfLines={1} style={{ fontSize: 15, color: t.text }}>
@@ -194,7 +204,8 @@ export default function Library() {
                 <DownloadIcon color={t.muted} size={18} />
               </Pressable>
             ) : null}
-          </Pressable>
+          </PressableScale>
+          </Animated.View>
         );
       }}
     />

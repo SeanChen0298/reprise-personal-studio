@@ -1,6 +1,7 @@
 // Long-press a line: your note on it, your voice mark (register / placement), loop it.
 import { useEffect, useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { Pressable, TextInput, View } from "react-native";
+import { Text } from "./text";
 import { PLACEMENTS, REGISTERS, type Line } from "@reprise/shared/core";
 import { Sheet } from "./sheet";
 import type { Theme } from "../lib/theme";

@@ -1,6 +1,7 @@
 // Pair with the computer: scan the QR code from Settings → Phone, or type the address and code.
 import { useRef, useState } from "react";
-import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, TextInput, View } from "react-native";
+import { DISPLAY, Text } from "../src/components/text";
 import { router } from "expo-router";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -59,7 +60,7 @@ export default function Pair() {
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1, backgroundColor: t.bg }}>
       <ScrollView contentContainerStyle={{ padding: 20, paddingTop: insets.top + 16, paddingBottom: insets.bottom + 24, gap: 16 }} keyboardShouldPersistTaps="handled">
         <View style={{ flexDirection: "row", alignItems: "center" }}>
-          <Text style={{ fontFamily: "serif", fontSize: 24, color: t.text, flex: 1 }}>Pair with computer</Text>
+          <Text style={{ fontFamily: DISPLAY, fontSize: 24, color: t.text, flex: 1 }}>Pair with computer</Text>
           <Pressable onPress={() => router.back()} hitSlop={10}>
             <Text style={{ fontSize: 15, color: t.theme }}>Close</Text>
           </Pressable>

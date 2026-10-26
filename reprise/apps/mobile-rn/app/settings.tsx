@@ -1,5 +1,6 @@
 import { useMemo } from "react";
-import { Alert, Pressable, ScrollView, Switch, Text, View } from "react-native";
+import { Alert, Pressable, ScrollView, Switch, View } from "react-native";
+import { DISPLAY, Text } from "../src/components/text";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLibraryStore } from "../src/stores/library-store";
@@ -50,7 +51,7 @@ export default function Settings() {
         <Pressable onPress={() => router.back()} hitSlop={10} style={{ padding: 4, marginLeft: -6 }}>
           <BackIcon color={t.text} size={22} />
         </Pressable>
-        <Text style={{ fontFamily: "serif", fontSize: 24, color: t.text }}>Settings</Text>
+        <Text style={{ fontFamily: DISPLAY, fontSize: 24, color: t.text }}>Settings</Text>
       </View>
 
       {section("Computer")}
