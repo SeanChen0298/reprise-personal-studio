@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { formatMs } from "../lib/status-config";
-import { ISSUE_LABEL, isBreathIssue, reviewInsight } from "../lib/take-review";
+import { ISSUE_LABEL, isBreathIssue, issueClip, issueLineParts, reviewInsight } from "../lib/take-review";
 import { PitchCompare } from "./pitch-compare";
 import type { Line, Recording, Song, TakeAnalysis, TakeIssue } from "../types/song";
 
@@ -63,6 +63,7 @@ export function TakeReviewPanel({
   noteFocusNonce,
   onPlayYou,
   onPlayOriginal,
+  onCompare,
   onReanalyze,
   onClose,
   onAddNote,
@@ -86,6 +87,8 @@ export function TakeReviewPanel({
   noteFocusNonce: number;
   onPlayYou: (issue: TakeIssue, key: string) => void;
   onPlayOriginal: (issue: TakeIssue, key: string) => void;
+  /** The original, then you, on the same stretch. */
+  onCompare: (issue: TakeIssue, key: string) => void;
   onReanalyze: () => void;
   onClose: () => void;
   onAddNote: (text: string, takeMs: number) => void;
@@ -239,7 +242,7 @@ export function TakeReviewPanel({
               {showCheck && (
                 <div className="mt-3">
                   {a.issues.length > 0 && (
-                    <p className="text-[11px] text-[var(--text-muted)] mb-1">Click a problem to see your pitch against the original there.</p>
+                    <p className="text-[11px] text-[var(--text-muted)] mb-1">The underlined part of the line is where it happens. Original / You play just that bit (the original's voice alone, when the song has been separated); Both plays them one after the other. Click a problem for the pitch chart.</p>
                   )}
                   {a.issues.map((issue, i) => {
                     const key = `${rec.id}:${i}`;
@@ -260,11 +263,31 @@ export function TakeReviewPanel({
                               </span>
                               <span className="text-[11.5px] text-[var(--text-secondary)] truncate">{issue.detail}</span>
                             </div>
-                            {line && <div className="text-[12px] text-[var(--text-muted)] truncate mt-[2px]">{line.custom_text ?? line.text}</div>}
+                            {line &&
+                              (() => {
+                                const text = line.custom_text ?? line.text;
+                                const parts = issueLineParts(text, issue);
+                                return (
+                                  <div className="text-[13px] text-[var(--text-muted)] truncate mt-[3px]" title={parts ? "Roughly where in the line — estimated from where the original sings" : undefined}>
+                                    {parts ? (
+                                      <>
+                                        {parts[0]}
+                                        <span className={`font-semibold text-[var(--text-primary)] underline decoration-2 underline-offset-[3px] ${breath ? "decoration-sky-500" : "decoration-amber-500"}`}>
+                                          {parts[1]}
+                                        </span>
+                                        {parts[2]}
+                                      </>
+                                    ) : (
+                                      text
+                                    )}
+                                  </div>
+                                );
+                              })()}
                           </div>
                           <div className="flex items-center gap-1 flex-shrink-0">
-                            <PlayChip label="You" active={playingKey === `you:${key}`} onClick={() => onPlayYou(issue, key)} />
-                            <PlayChip label="Original" active={playingKey === `orig:${key}`} onClick={() => onPlayOriginal(issue, key)} />
+                            <PlayChip label="Original" active={playingKey === `orig:${key}` || playingKey === `cmp-orig:${key}`} onClick={() => onPlayOriginal(issue, key)} />
+                            <PlayChip label="You" active={playingKey === `you:${key}` || playingKey === `cmp-you:${key}`} onClick={() => onPlayYou(issue, key)} />
+                            <PlayChip label="Both" active={!!playingKey?.startsWith("cmp") && playingKey.endsWith(key)} onClick={() => onCompare(issue, key)} />
                           </div>
                         </div>
                         {open && (
@@ -272,10 +295,10 @@ export function TakeReviewPanel({
                             <PitchCompare
                               song={song}
                               rec={rec}
-                              fromMs={Math.max(0, issue.song_ms - 1500)}
-                              toMs={issue.song_ms + 2500}
-                              markFromMs={issue.song_ms}
-                              markToMs={issue.song_ms + (breath ? 600 : 800)}
+                              fromMs={issueClip(issue).fromMs}
+                              toMs={Math.max(issueClip(issue).toMs, issueClip(issue).fromMs + 3000)}
+                              markFromMs={issue.from_ms ?? issue.song_ms}
+                              markToMs={issue.to_ms ?? issue.song_ms + (breath ? 600 : 800)}
                             />
                           </div>
                         )}

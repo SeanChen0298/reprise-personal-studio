@@ -24,7 +24,7 @@ export { DEFAULT_HIGHLIGHTS } from "./types/highlight";
 export type { SyncFileRef, SyncSongFiles, SyncCoach, SyncLineHint, SyncSnapshot, PhoneTake, PhoneChanges } from "./types/sync";
 export { REGISTERS, PLACEMENTS, normaliseCard, parseLineRefs, splitLineRefs } from "./lib/song-card";
 export { collapseRepeats, splitLines, translationsByLine } from "./lib/lyrics";
-export { ISSUE_LABEL, isBreathIssue, reviewInsight, issueSongStartMs } from "./lib/take-words";
+export { ISSUE_LABEL, isBreathIssue, reviewInsight, issueSongStartMs, issueClip, issueLineParts } from "./lib/take-words";
 export type { ReviewInsight } from "./lib/take-words";
 export type { VoiceSpec, SongCard } from "./lib/song-card";
 export { generateFurigana } from "./lib/furigana";

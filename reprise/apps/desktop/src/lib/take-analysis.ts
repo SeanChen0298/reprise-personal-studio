@@ -20,7 +20,8 @@ import {
 } from "./vocal-map";
 import type { Line, TakeAnalysis, TakeHalfStats, TakeIssue } from "../types/song";
 
-export const ANALYSIS_VERSION = 1;
+/** 2: problems carry their stretch (from_ms / to_ms) and the characters they're on. */
+export const ANALYSIS_VERSION = 2;
 
 const SAMPLE_RATE = 24000; // 240 samples per 10 ms frame
 const YIN_WINDOW_MS = 25;
@@ -254,9 +255,41 @@ export function analyzeTake(
     { phrases: 0, breath_issues: 0, high_notes: 0, high_issues: 0 },
   ];
   const half = (songFrame: number) => halves[songFrame < midFrame ? 0 : 1];
-  const add = (kind: TakeIssue["kind"], songFrame: number, detail: string) => {
+  /** Characters of `line` sung between two song frames: its text spread over where the original sings in it. */
+  const charsOf = (line: Line, fromF: number, toF: number): [number, number] | undefined => {
+    const text = [...(line.custom_text ?? line.text)];
+    if (!text.length || line.start_ms == null) return undefined;
+    const next = lines.filter((l) => l.start_ms != null && l.start_ms > line.start_ms!).sort((a, b) => a.start_ms! - b.start_ms!)[0];
+    const ls = Math.round(line.start_ms / HOP_MS);
+    const le = Math.round((line.end_ms ?? next?.start_ms ?? line.start_ms + 5000) / HOP_MS);
+    if (le <= ls) return undefined;
+    let total = 0;
+    for (let f = ls; f < le; f++) if (refMask[f]) total++;
+    const sungUpTo = (frame: number) => {
+      let n = 0;
+      for (let f = ls; f < Math.min(le, frame); f++) if (refMask[f]) n++;
+      return total ? n / total : (Math.min(le, Math.max(ls, frame)) - ls) / (le - ls);
+    };
+    // Only letters count (spaces and punctuation aren't sung).
+    const sung = text.map((c, i) => [c, i] as const).filter(([c]) => /[\p{L}\p{N}]/u.test(c)).map(([, i]) => i);
+    if (!sung.length) return undefined;
+    const a = Math.min(sung.length - 1, Math.floor(sungUpTo(fromF) * sung.length));
+    const b = Math.max(a + 1, Math.min(sung.length, Math.ceil(sungUpTo(toF) * sung.length)));
+    return [sung[a], sung[b - 1] + 1];
+  };
+  /** A problem at `songFrame`; `spanFrom` / `spanTo` is the stretch it's about. */
+  const add = (kind: TakeIssue["kind"], songFrame: number, detail: string, spanFrom = songFrame, spanTo = songFrame + 80) => {
     const songMs = songFrame * HOP_MS;
-    issues.push({ kind, song_ms: songMs, line_id: lineAt(lines, songMs)?.id, detail });
+    const line = lineAt(lines, songMs);
+    issues.push({
+      kind,
+      song_ms: songMs,
+      from_ms: Math.round(spanFrom * HOP_MS),
+      to_ms: Math.round(spanTo * HOP_MS),
+      line_id: line?.id,
+      chars: line ? charsOf(line, spanFrom, spanTo) : undefined,
+      detail,
+    });
   };
 
   // ── Breath: phrase by phrase ────────────────────────────────────────────
@@ -285,7 +318,7 @@ export function analyzeTake(
 
     const earlyMs = (pe - 1 - last) * HOP_MS;
     if (len * HOP_MS >= 1500 && earlyMs >= 400) {
-      add("ran_out", last, `voice stopped ${(earlyMs / 1000).toFixed(1)} s before the phrase ended`);
+      add("ran_out", last, `voice stopped ${(earlyMs / 1000).toFixed(1)} s before the phrase ended`, last, pe);
       flagged = true;
       ranOut = true;
     }
@@ -301,9 +334,9 @@ export function analyzeTake(
       if ((g - f) * HOP_MS >= 300) {
         const fromEndMs = (pe - f) * HOP_MS;
         if (fromEndMs <= 1500 && len * HOP_MS >= 1500) {
-          add("ran_out", f, `voice cut out ${(fromEndMs / 1000).toFixed(1)} s before the phrase ended`);
+          add("ran_out", f, `voice cut out ${(fromEndMs / 1000).toFixed(1)} s before the phrase ended`, f, pe);
         } else if (fromEndMs > margin * HOP_MS) {
-          add("extra_breath", f, `stopped for ${((g - f) / 100).toFixed(1)} s mid-phrase (${fmtTime(f * HOP_MS)})`);
+          add("extra_breath", f, `stopped for ${((g - f) / 100).toFixed(1)} s mid-phrase (${fmtTime(f * HOP_MS)})`, f, g);
         } else {
           f = g;
           continue;
@@ -334,7 +367,7 @@ export function analyzeTake(
       const refDrop = refHead.length && refTail.length ? Math.max(0, median(refHead) - median(refTail)) : 0;
       const drop = median(head) - median(tail) - refDrop;
       if (head.length > 20 && tail.length > 10 && drop >= 10) {
-        add("fading", pe - Math.round(len * 0.3), `${Math.round(drop)} dB quieter by the end of the phrase than the original`);
+        add("fading", pe - Math.round(len * 0.3), `${Math.round(drop)} dB quieter by the end of the phrase than the original`, pe - Math.round(len * 0.3), pe);
         flagged = true;
       }
     }
@@ -342,7 +375,7 @@ export function analyzeTake(
     const prevBreath = pi > 0 ? map.breaths[pi - 1] : null;
     const lateMs = (first - ps) * HOP_MS;
     if (prevBreath?.quick && lateMs >= 300) {
-      add("late_entry", first, `came in ${(lateMs / 1000).toFixed(1)} s late after a quick breath`);
+      add("late_entry", first, `came in ${(lateMs / 1000).toFixed(1)} s late after a quick breath`, ps, first);
       flagged = true;
     }
 
@@ -409,20 +442,20 @@ export function analyzeTake(
     }
     let flagged = true;
     if (sounding / (me - ms) < 0.4) {
-      add("high_dropped", ms, `${note} — voice mostly dropped out`);
+      add("high_dropped", ms, `${note} — voice mostly dropped out`, ms, me);
     } else if (pitched < 8 || cents.length < 8) {
       flagged = false; // sound but no trackable pitch (very breathy, or noisy) — don't guess
     } else if (jumps >= 3) {
-      add("high_cracked", ms, `${note} — voice broke or flipped`);
+      add("high_cracked", ms, `${note} — voice broke or flipped`, ms, me);
     } else {
       const med = median(cents);
       const spread = median(cents.map((c) => Math.abs(c - med))) * 1.4826;
       // Vibrato is fine: only wobble well beyond the original singer's own counts.
       const refMed = median(refCents);
       const refSpread = median(refCents.map((c) => Math.abs(c - refMed))) * 1.4826;
-      if (med <= -FLAT_SHARP_CENTS) add("high_flat", ms, `${note} — ${Math.round(-med)} cents flat`);
-      else if (med >= FLAT_SHARP_CENTS) add("high_sharp", ms, `${note} — ${Math.round(med)} cents sharp`);
-      else if (spread > 60 && spread > refSpread + 35 && cents.length >= 10) add("high_unsteady", ms, `${note} — pitch wobbling (±${Math.round(spread)} cents)`);
+      if (med <= -FLAT_SHARP_CENTS) add("high_flat", ms, `${note} — ${Math.round(-med)} cents flat`, ms, me);
+      else if (med >= FLAT_SHARP_CENTS) add("high_sharp", ms, `${note} — ${Math.round(med)} cents sharp`, ms, me);
+      else if (spread > 60 && spread > refSpread + 35 && cents.length >= 10) add("high_unsteady", ms, `${note} — pitch wobbling (±${Math.round(spread)} cents)`, ms, me);
       else flagged = false;
     }
     // How much louder than the rest of the take, beyond how much the original gets louder here.
@@ -430,7 +463,7 @@ export function analyzeTake(
       map.stemDb && map.stemTypicalDb != null ? median(refLoudness) - map.stemTypicalDb : 0;
     const louder = median(loudness) - typicalDb - refLift;
     if (louder >= 9) {
-      add("high_pushed", ms, `${note} — ${Math.round(louder)} dB louder than the original gets here`);
+      add("high_pushed", ms, `${note} — ${Math.round(louder)} dB louder than the original gets here`, ms, me);
       flagged = true;
     }
     if (flagged) h.high_issues++;

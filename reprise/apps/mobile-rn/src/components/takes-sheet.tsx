@@ -4,7 +4,7 @@ import { ActivityIndicator, Alert, Pressable, TextInput, View } from "react-nati
 import { Text } from "./text";
 import { Toggle } from "./toggle";
 import { Audio } from "expo-av";
-import { ISSUE_LABEL, isBreathIssue, reviewInsight, type Line, type Recording } from "@reprise/shared/core";
+import { ISSUE_LABEL, isBreathIssue, issueClip, issueLineParts, reviewInsight, type Line, type Recording, type TakeIssue } from "@reprise/shared/core";
 import { useLibraryStore } from "../stores/library-store";
 import { Sheet } from "./sheet";
 import { PauseIcon, PlayIcon, StarIcon, TrashIcon } from "./icons";
@@ -67,6 +67,56 @@ export function TakesSheet({ open, onClose, songId, takes, lines, t, onBeforePla
     },
     [],
   );
+
+  /** Which clip is playing: `${issueKey}:orig` / `:you`. */
+  const [clip, setClip] = useState<string | null>(null);
+  const clipRef = useRef<Audio.Sound | null>(null);
+  const stopClip = async () => {
+    const s = clipRef.current;
+    clipRef.current = null;
+    setClip(null);
+    await s?.unloadAsync().catch(() => {});
+  };
+  useEffect(() => () => void clipRef.current?.unloadAsync(), []);
+  // The original singer's voice alone (the vocal track) when it's on the phone — voice against voice.
+  const originalUri = local.downloads[songId]?.vocals?.uri ?? local.downloads[songId]?.audio?.uri;
+
+  const playClip = async (uri: string, fromMs: number, toMs: number, key: string): Promise<void> => {
+    await stopClip();
+    await stop();
+    onBeforePlay();
+    return new Promise((resolve) => {
+      Audio.Sound.createAsync({ uri }, { shouldPlay: true, positionMillis: Math.max(0, fromMs), progressUpdateIntervalMillis: 50 }, (st) => {
+        if (!st.isLoaded) return;
+        if (st.positionMillis >= toMs || st.didJustFinish) {
+          void stopClip().then(() => resolve());
+        }
+      })
+        .then(({ sound }) => {
+          clipRef.current = sound;
+          setClip(key);
+        })
+        .catch(() => resolve());
+    });
+  };
+
+  const clipOriginal = (issue: TakeIssue, key: string) => {
+    const c = issueClip(issue);
+    return originalUri ? playClip(originalUri, c.fromMs, c.toMs, `${key}:orig`) : Promise.resolve();
+  };
+  const clipYou = async (take: Take, issue: TakeIssue, key: string) => {
+    if (take.song_start_ms == null) return;
+    const uri = await useLibraryStore.getState().fetchTakeAudio(take);
+    if (!uri) return;
+    const c = issueClip(issue);
+    const shift = -take.song_start_ms + (take.analysis?.lag_ms ?? 0);
+    await playClip(uri, c.fromMs + shift, c.toMs + shift, `${key}:you`);
+  };
+  const clipBoth = async (take: Take, issue: TakeIssue, key: string) => {
+    await clipOriginal(issue, key);
+    await new Promise((r) => setTimeout(r, 350));
+    await clipYou(take, issue, key);
+  };
 
   const play = async (take: Take) => {
     if (playing === take.id) return stop();
@@ -191,20 +241,51 @@ export function TakesSheet({ open, onClose, songId, takes, lines, t, onBeforePla
                   {take.analysis.issues.slice(0, 12).map((issue, i) => {
                     const idx = lineIndex(issue.line_id);
                     const l = idx >= 0 ? lines[idx] : null;
-                    return (
-                      <Pressable key={i} onPress={() => idx >= 0 && onJumpToLine(idx)} style={{ flexDirection: "row", gap: 8, alignItems: "flex-start" }}>
-                        <View style={{ width: 7, height: 7, borderRadius: 4, marginTop: 6, backgroundColor: isBreathIssue(issue.kind) ? "#0EA5E9" : "#F59E0B" }} />
-                        <View style={{ flex: 1 }}>
-                          <Text style={{ fontSize: 13.5, color: t.text }}>
-                            {ISSUE_LABEL[issue.kind]} <Text style={{ color: t.muted }}>· {issue.detail}</Text>
-                          </Text>
-                          {l && (
-                            <Text numberOfLines={1} style={{ fontSize: 12.5, color: t.theme }}>
-                              L{idx + 1} {l.custom_text ?? l.text}
-                            </Text>
-                          )}
-                        </View>
+                    const text = l ? l.custom_text ?? l.text : "";
+                    const parts = l ? issueLineParts(text, issue) : null;
+                    const key = `${take.id}:${i}`;
+                    const tone = isBreathIssue(issue.kind) ? "#0EA5E9" : "#F59E0B";
+                    const clipBtn = (label: string, k: string, go: () => void) => (
+                      <Pressable
+                        key={label}
+                        onPress={() => (clip?.startsWith(key) ? void stopClip() : go())}
+                        hitSlop={6}
+                        style={{ paddingHorizontal: 11, paddingVertical: 5, borderRadius: 999, backgroundColor: clip === `${key}:${k}` ? t.theme : t.surface }}
+                      >
+                        <Text style={{ fontSize: 12, fontWeight: "500", color: clip === `${key}:${k}` ? t.onAccent : t.textSecondary }}>{label}</Text>
                       </Pressable>
+                    );
+                    return (
+                      <View key={i} style={{ gap: 6, paddingTop: 6 }}>
+                        <Pressable onPress={() => idx >= 0 && onJumpToLine(idx)} style={{ flexDirection: "row", gap: 8, alignItems: "flex-start" }}>
+                          <View style={{ width: 7, height: 7, borderRadius: 4, marginTop: 6, backgroundColor: tone }} />
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 13.5, color: t.text }}>
+                              {ISSUE_LABEL[issue.kind]} <Text style={{ color: t.muted }}>· {issue.detail}</Text>
+                            </Text>
+                            {l && (
+                              <Text numberOfLines={2} style={{ fontSize: 15, color: t.muted, fontFamily: "serif", marginTop: 2 }}>
+                                {parts ? (
+                                  <>
+                                    {parts[0]}
+                                    <Text style={{ fontFamily: "serif", color: t.text, textDecorationLine: "underline", textDecorationColor: tone, fontWeight: "600" }}>{parts[1]}</Text>
+                                    {parts[2]}
+                                  </>
+                                ) : (
+                                  text
+                                )}
+                              </Text>
+                            )}
+                          </View>
+                        </Pressable>
+                        {take.song_start_ms != null && (
+                          <View style={{ flexDirection: "row", gap: 6, paddingLeft: 15 }}>
+                            {!!originalUri && clipBtn("Original", "orig", () => void clipOriginal(issue, key))}
+                            {clipBtn("You", "you", () => void clipYou(take, issue, key))}
+                            {!!originalUri && clipBtn("Both", "both", () => void clipBoth(take, issue, key))}
+                          </View>
+                        )}
+                      </View>
                     );
                   })}
                 </View>

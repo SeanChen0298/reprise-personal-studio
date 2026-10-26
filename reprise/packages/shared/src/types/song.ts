@@ -144,7 +144,13 @@ export interface TakeIssue {
   kind: TakeIssueKind;
   /** Song timeline position of the problem (ms). */
   song_ms: number;
+  /** The stretch it's about (song ms) — the high note, the missing end of a phrase, the gap… (analysis v2+). */
+  from_ms?: number;
+  to_ms?: number;
   line_id?: string;
+  /** Characters of the line sung in that stretch, [start, end) in the line's shown text — estimated by
+   *  spreading the text over where the original is singing in the line. */
+  chars?: [number, number];
   /** Human-readable detail, e.g. "stopped 0.6 s early" or "D5, 45 cents flat". */
   detail: string;
 }

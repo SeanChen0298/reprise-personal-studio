@@ -7,7 +7,7 @@ import { remove } from "@tauri-apps/plugin-fs";
 import { useRecorder } from "../../hooks/use-recorder";
 import { useSongStore } from "../../stores/song-store";
 import { usePreferencesStore } from "../../stores/preferences-store";
-import { analyzeRecording, canReview, issueSongStartMs, needsAnalysis } from "../../lib/take-review";
+import { analyzeRecording, canReview, issueClip, needsAnalysis } from "../../lib/take-review";
 import type { UseLinePlayerReturn } from "../../hooks/use-line-player";
 import type { Line, Recording, Section, Song, TakeIssue } from "../../types/song";
 
@@ -387,7 +387,7 @@ export function useTakes({ song, lines, sections, player, backing, originalPath,
     setPending(null);
   }, [pending]);
 
-  // ── Snippets: ~8 s of your take vs the original around a spot ────────────
+  // ── Snippets: just the stretch a problem is about, you vs the original ───
   const snippetRef = useRef<HTMLAudioElement | null>(null);
   const [snippetKey, setSnippetKey] = useState<string | null>(null);
   const stopSnippet = useCallback(() => {
@@ -398,8 +398,8 @@ export function useTakes({ song, lines, sections, player, backing, originalPath,
   useEffect(() => () => stopSnippet(), [stopSnippet]);
 
   const playSnippet = useCallback(
-    (key: string, path: string, fromMs: number, volume: number) => {
-      if (snippetKey === key) return stopSnippet();
+    (key: string, path: string, fromMs: number, volume: number, toMs = fromMs + 8000, then?: () => void) => {
+      if (snippetKey === key && !then) return stopSnippet();
       stopSnippet();
       mixRef.current?.take.pause();
       mixRef.current?.backing.pause();
@@ -409,9 +409,13 @@ export function useTakes({ song, lines, sections, player, backing, originalPath,
       const el = new Audio(convertFileSrc(path));
       el.volume = volume;
       el.currentTime = Math.max(0, fromMs / 1000);
-      const stopAt = fromMs / 1000 + 8;
-      el.ontimeupdate = () => el.currentTime >= stopAt && stopSnippet();
-      el.onended = () => stopSnippet();
+      const stopAt = toMs / 1000;
+      const done = () => {
+        stopSnippet();
+        then?.();
+      };
+      el.ontimeupdate = () => el.currentTime >= stopAt && done();
+      el.onended = () => done();
       snippetRef.current = el;
       setSnippetKey(key);
       el.play().catch(() => stopSnippet());
@@ -469,19 +473,32 @@ export function useTakes({ song, lines, sections, player, backing, originalPath,
   );
 
   const playIssueYou = useCallback(
-    (issue: TakeIssue, key: string) => {
+    (issue: TakeIssue, key: string, then?: () => void, as = `you:${key}`) => {
       if (!reviewRec?.analysis || reviewRec.song_start_ms == null) return;
-      const takeMs = issueSongStartMs(issue) - reviewRec.song_start_ms + reviewRec.analysis.lag_ms;
-      playSnippet(`you:${key}`, reviewRec.file_path, takeMs, 1);
+      const clip = issueClip(issue);
+      const shift = -reviewRec.song_start_ms + reviewRec.analysis.lag_ms;
+      playSnippet(as, reviewRec.file_path, clip.fromMs + shift, 1, clip.toMs + shift, then);
     },
     [reviewRec, playSnippet],
   );
 
+  // The original singer's voice on its own (the vocal stem) when there is one — voice against voice.
+  const originalVoice = song.stem_status === "done" && song.vocals_path ? song.vocals_path : originalPath;
   const playIssueOriginal = useCallback(
-    (issue: TakeIssue, key: string) => {
-      if (originalPath) playSnippet(`orig:${key}`, originalPath, issueSongStartMs(issue), player.volume);
+    (issue: TakeIssue, key: string, then?: () => void, as = `orig:${key}`) => {
+      const clip = issueClip(issue);
+      if (originalVoice) playSnippet(as, originalVoice, clip.fromMs, player.volume, clip.toMs, then);
     },
-    [originalPath, playSnippet, player.volume],
+    [originalVoice, playSnippet, player.volume],
+  );
+
+  /** The original, then you, on the same stretch. */
+  const playIssueCompare = useCallback(
+    (issue: TakeIssue, key: string) => {
+      if (snippetKey?.startsWith(`cmp`) && snippetKey.endsWith(key)) return stopSnippet();
+      playIssueOriginal(issue, key, () => setTimeout(() => playIssueYou(issue, key, undefined, `cmp-you:${key}`), 350), `cmp-orig:${key}`);
+    },
+    [snippetKey, stopSnippet, playIssueOriginal, playIssueYou],
   );
 
   /** Problems of the reviewed take, by line, for the lyric sheet. */
@@ -528,6 +545,7 @@ export function useTakes({ song, lines, sections, player, backing, originalPath,
     stopSnippet,
     playIssueYou,
     playIssueOriginal,
+    playIssueCompare,
     issuesByLine,
     repeat,
     setRepeat,

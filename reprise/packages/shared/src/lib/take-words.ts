@@ -85,5 +85,21 @@ export function reviewInsight(a: TakeAnalysis): ReviewInsight {
 
 /** Where to start playback for an issue, a little before it. */
 export function issueSongStartMs(issue: TakeIssue): number {
-  return Math.max(0, issue.song_ms - 2000);
+  return issueClip(issue).fromMs;
+}
+
+/** What to play to hear a problem: just its stretch, with a moment before (to hear it arrive) and after. */
+export function issueClip(issue: TakeIssue): { fromMs: number; toMs: number } {
+  const from = issue.from_ms ?? issue.song_ms;
+  const to = issue.to_ms ?? issue.song_ms + 1200;
+  return { fromMs: Math.max(0, from - 900), toMs: Math.min(to, from + 5000) + 500 };
+}
+
+/** A line's text split around the characters a problem is on: [before, the part, after]. */
+export function issueLineParts(text: string, issue: TakeIssue): [string, string, string] | null {
+  if (!issue.chars) return null;
+  const chars = [...text];
+  const [a, b] = issue.chars;
+  if (a < 0 || b <= a || a >= chars.length) return null;
+  return [chars.slice(0, a).join(""), chars.slice(a, b).join(""), chars.slice(b).join("")];
 }

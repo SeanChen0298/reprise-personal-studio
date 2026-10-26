@@ -281,6 +281,7 @@ export function TakesPanel({
           noteFocusNonce={noteFocusNonce}
           onPlayYou={t.playIssueYou}
           onPlayOriginal={t.playIssueOriginal}
+          onCompare={t.playIssueCompare}
           onReanalyze={() => t.runAnalysis(open)}
           onClose={() => {
             t.stopSnippet();

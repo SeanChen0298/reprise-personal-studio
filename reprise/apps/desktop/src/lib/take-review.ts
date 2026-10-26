@@ -73,5 +73,5 @@ export async function analyzeRecording(
 }
 
 // Presentation (shared with the phone app)
-export { ISSUE_LABEL, isBreathIssue, reviewInsight, issueSongStartMs } from "@reprise/shared";
+export { ISSUE_LABEL, isBreathIssue, reviewInsight, issueSongStartMs, issueClip, issueLineParts } from "@reprise/shared";
 export type { ReviewInsight } from "@reprise/shared";
