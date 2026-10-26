@@ -2,6 +2,7 @@
 // about it) changes, write widget.json and ask Android to redraw the widget.
 import { useEffect } from "react";
 import * as FileSystem from "expo-file-system";
+import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import { splitLines, type Song, type SyncSnapshot } from "@reprise/shared/core";
 import { linesWithEdits, useLibraryStore } from "../stores/library-store";
 import { recentSongs } from "../lib/recent";
@@ -40,9 +41,32 @@ async function artworkFile(song: Song): Promise<string | undefined> {
   return undefined;
 }
 
+/** A square of the artwork without its black letterbox bars (widgets can't crop images themselves). */
+async function squareArt(song: Song, snap: SyncSnapshot): Promise<string | undefined> {
+  const src = await artworkFile(song);
+  if (!src?.startsWith("file:")) return src;
+  const out = `${FileSystem.documentDirectory}thumbs/${song.id}-sq.jpg`;
+  try {
+    if ((await FileSystem.getInfoAsync(out)).exists) return out;
+    const info = await manipulateAsync(src, []);
+    const bars = snap.letterbox?.[song.id]?.bars ?? 0;
+    const contentH = info.height * (1 - 2 * bars);
+    const side = Math.floor(Math.min(info.width, contentH));
+    const res = await manipulateAsync(
+      src,
+      [{ crop: { originX: Math.floor((info.width - side) / 2), originY: Math.floor(info.height * bars + (contentH - side) / 2), width: side, height: side } }, { resize: { width: 160, height: 160 } }],
+      { compress: 0.85, format: SaveFormat.JPEG },
+    );
+    await FileSystem.moveAsync({ from: res.uri, to: out });
+    return out;
+  } catch {
+    return src;
+  }
+}
+
 async function widgetSong(song: Song, snap: SyncSnapshot): Promise<WidgetSong> {
   const { top, bottom } = vividColors(snap.colors?.[song.id]);
-  return { id: song.id, title: song.title, artist: song.artist ?? "", image: await artworkFile(song), top, bottom };
+  return { id: song.id, title: song.title, artist: song.artist ?? "", image: await squareArt(song, snap), top, bottom };
 }
 
 export function usePickupWidget() {

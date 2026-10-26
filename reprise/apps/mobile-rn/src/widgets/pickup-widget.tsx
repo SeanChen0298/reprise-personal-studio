@@ -74,10 +74,11 @@ const ICON = {
   mic: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect x="9" y="2" width="6" height="12" rx="3" fill="#FFFFFF"/><path d="M5 11a7 7 0 0014 0M12 18v4" stroke="#FFFFFF" stroke-width="2" fill="none" stroke-linecap="round"/></svg>',
 };
 
-function Round({ svg, action, size = 40, filled }: { svg: string; action: string; size?: number; filled?: boolean }) {
+function Round({ svg, action, data, size = 40, filled }: { svg: string; action: string; data?: Record<string, unknown>; size?: number; filled?: boolean }) {
   return (
     <FlexWidget
       clickAction={action}
+      clickActionData={data}
       style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: filled ? "#FFFFFF33" : "#00000000", alignItems: "center", justifyContent: "center", marginLeft: 6 }}
     >
       <SvgWidget svg={svg} style={{ width: size * 0.46, height: size * 0.46 }} />
@@ -121,8 +122,17 @@ export function PickupWidget({ d, live, width, height }: { d: PickupData | null;
           <TextWidget text={song.title} style={{ fontSize: 18, color: "#FFFFFF", fontFamily: "Fraunces_600SemiBold" }} maxLines={1} truncate="END" />
           <TextWidget text={song.artist} style={{ fontSize: 12, color: "#FFFFFFB8" }} maxLines={1} truncate="END" />
         </FlexWidget>
-        <Round svg={playing ? ICON.pause : ICON.play} action={live ? "TOGGLE" : "PLAY"} size={44} filled />
-        <Round svg={ICON.next} action={live ? "NEXT" : "PLAY_NEXT"} size={38} />
+        {/* Starting the player needs the app on screen (Android), so ▶ opens it; once playing, the buttons work from here. */}
+        {live ? (
+          <Round svg={playing ? ICON.pause : ICON.play} action="TOGGLE" size={44} filled />
+        ) : (
+          <Round svg={ICON.play} action="OPEN_URI" data={{ uri: `reprise://play?song=${song.id}` }} size={44} filled />
+        )}
+        {live ? (
+          <Round svg={ICON.next} action="NEXT" size={38} />
+        ) : (
+          <Round svg={ICON.next} action="OPEN_URI" data={{ uri: `reprise://play?song=${d?.recent[0]?.id ?? song.id}` }} size={38} />
+        )}
       </FlexWidget>
 
       {/* The lyric being sung, or something to remember */}
@@ -210,10 +220,7 @@ export async function widgetTaskHandler(props: WidgetTaskHandlerProps): Promise<
     case "WIDGET_CLICK": {
       // Loaded lazily: it pulls in the stores, which plain redraws don't need.
       const radio = await import("../lib/radio");
-      const d = await readPickup();
-      if (props.clickAction === "PLAY" && d) await radio.playAll(d.id, { keepOrder: true });
-      else if (props.clickAction === "PLAY_NEXT" && d) await radio.playAll(d.recent[0]?.id ?? d.id, { keepOrder: true });
-      else if (props.clickAction === "TOGGLE") await radio.toggleRadio();
+      if (props.clickAction === "TOGGLE") await radio.toggleRadio();
       else if (props.clickAction === "NEXT") await TrackPlayer.skipToNext().catch(() => {});
       await draw();
       break;

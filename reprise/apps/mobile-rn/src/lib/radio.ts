@@ -163,7 +163,7 @@ async function updateWidget(): Promise<void> {
     const i = lineAt(lines, (await TrackPlayer.getPosition()) * 1000);
     const l = i >= 0 ? lines[i] : undefined;
     const { top, bottom } = vividColors(useLibraryStore.getState().snapshot?.colors?.[song.id]);
-    const thumb = `${FileSystem.documentDirectory}thumbs/${song.id}.jpg`;
+    const thumb = `${FileSystem.documentDirectory}thumbs/${song.id}-sq.jpg`;
     const live: LiveData = {
       id: song.id,
       title: song.title,
