@@ -9,12 +9,14 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useLibraryStore } from "../src/stores/library-store";
 import { parsePairingUrl } from "../src/lib/sync-client";
 import { useTheme } from "../src/lib/theme";
+import { usePickupWidget } from "../src/hooks/use-pickup-widget";
 
 void SplashScreen.preventAutoHideAsync().catch(() => {});
 
 export default function RootLayout() {
   const ready = useLibraryStore((s) => s.ready);
   const t = useTheme();
+  usePickupWidget();
 
   useEffect(() => {
     void useLibraryStore

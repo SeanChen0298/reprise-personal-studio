@@ -72,7 +72,7 @@ export function useSongPalette(songId: string | undefined, t: Theme): SongPalett
 }
 
 export interface VividLook {
-  /** The screen in the song's colour: a theme for everything drawn on it… */
+  /** The screen in the song's color: a theme for everything drawn on it… */
   t: Theme;
   p: SongPalette;
   /** …and its background, a gradient from the top to the bottom. */
@@ -80,12 +80,16 @@ export interface VividLook {
   bottom: string;
 }
 
-/** The song screen's "Vivid" look: the page is the song's colour (deep, so white lyrics read well). */
-export function vividLook(hex: string | undefined, t: Theme): VividLook {
-  const [h, s0] = hex && /^#[0-9a-f]{6}$/i.test(hex) ? hexToHsl(hex) : hexToHsl(t.dark ? "#3b4a6b" : "#2f4a8a");
+/** The deep gradient of a song's color (the Vivid page, the home-screen widget). */
+export function vividColors(hex: string | undefined): { top: string; bottom: string; h: number; s: number } {
+  const [h, s0] = hex && /^#[0-9a-f]{6}$/i.test(hex) ? hexToHsl(hex) : hexToHsl("#3b4a6b");
   const s = Math.min(0.7, Math.max(0.18, s0));
-  const top = hsl(h, s * 0.85, 0.3);
-  const bottom = hsl(h, s * 0.75, 0.12);
+  return { top: hsl(h, s * 0.85, 0.3), bottom: hsl(h, s * 0.75, 0.12), h, s };
+}
+
+/** The song screen's "Vivid" look: the page is the song's color (deep, so white lyrics read well). */
+export function vividLook(hex: string | undefined, t: Theme): VividLook {
+  const { top, bottom, h, s } = vividColors(hex);
   const theme: Theme = {
     ...t,
     dark: true,
