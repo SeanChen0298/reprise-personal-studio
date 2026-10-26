@@ -1,9 +1,9 @@
 // The Vivid look's moving background: soft glows in the song's colors drifting behind the lyrics.
 // `energy` (from the current section's feel) sets how fast and far they move and how much the
 // brighter, warmer glows show; changes ease in. Drifting gently while paused; still with reduce motion.
-import { memo, useEffect, useMemo } from "react";
+import { memo, useEffect, useMemo, useRef } from "react";
 import { StyleSheet, useWindowDimensions, View } from "react-native";
-import Animated, { Easing, useAnimatedStyle, useFrameCallback, useReducedMotion, useSharedValue, withTiming, type SharedValue } from "react-native-reanimated";
+import Animated, { Easing, useAnimatedStyle, useFrameCallback, useReducedMotion, useSharedValue, withSequence, withTiming, type SharedValue } from "react-native-reanimated";
 import Svg, { Defs, RadialGradient, Rect, Stop } from "react-native-svg";
 import { LinearGradient } from "expo-linear-gradient";
 import { hexToHsl, hsl } from "../lib/song-palette";
@@ -26,16 +26,20 @@ interface Glow {
   bright: boolean;
 }
 
-function Blob({ g, id, w, h, phase, energy }: { g: Glow; id: string; w: number; h: number; phase: SharedValue<number>; energy: SharedValue<number> }) {
+function Blob({ g, id, w, h, phase, energy, swell }: { g: Glow; id: string; w: number; h: number; phase: SharedValue<number>; energy: SharedValue<number>; swell: SharedValue<number> }) {
   const d = g.size * w;
   const style = useAnimatedStyle(() => {
     const e = energy.value;
-    const reach = 0.9 + e * 1.1;
+    const sw = swell.value;
+    // Quiet parts: small, slow sway. Big parts: wide sweeps.
+    const reach = 0.5 + e * 1.9;
     const tx = (g.x + Math.sin(phase.value * g.fx + g.px) * g.ax * reach) * w - d / 2;
     const ty = (g.y + Math.cos(phase.value * g.fy + g.py) * g.ay * reach) * h - d / 2;
-    const breathe = 1 + Math.sin(phase.value * 0.9 + g.px) * (0.08 + e * 0.14);
+    const breathe = 1 + Math.sin(phase.value * 0.9 + g.px) * (0.05 + e * 0.2) + sw * (g.bright ? 0.35 : 0.12);
+    // The bright, warm glows belong to the big parts: absent when it's quiet, full in a chorus.
+    const brightness = Math.min(1, Math.max(0, (e - 0.3) * 1.8));
     return {
-      opacity: g.bright ? 0.25 + e * 0.75 : 1 - e * 0.3,
+      opacity: g.bright ? Math.min(1, brightness + sw * 0.8) : 0.75 + e * 0.25,
       transform: [{ translateX: tx }, { translateY: ty }, { scale: breathe }],
     };
   });
@@ -74,9 +78,19 @@ export const VividBackdrop = memo(function VividBackdrop({ hex, top, bottom, ene
   );
 
   const e = useSharedValue(energy);
+  // A swell of light when a new part starts, so the change is felt, not just slowly drifted into.
+  const swell = useSharedValue(0);
+  const first = useRef(true);
   useEffect(() => {
-    e.value = withTiming(energy, { duration: 2400, easing: Easing.inOut(Easing.cubic) });
-  }, [energy, e]);
+    e.value = withTiming(energy, { duration: 1600, easing: Easing.inOut(Easing.cubic) });
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    if (!reduce) swell.value = withSequence(withTiming(1, { duration: 450, easing: Easing.out(Easing.cubic) }), withTiming(0, { duration: 2200, easing: Easing.inOut(Easing.cubic) }));
+  }, [energy, e, swell, reduce]);
+  // Quiet parts sit deeper (darker over the glows); big parts open up.
+  const shade = useAnimatedStyle(() => ({ opacity: 0.42 - e.value * 0.36 }));
 
   // A clock whose speed follows the energy (so speed changes are smooth, never a jump).
   const phase = useSharedValue(0);
@@ -87,17 +101,17 @@ export const VividBackdrop = memo(function VividBackdrop({ hex, top, bottom, ene
   useFrameCallback((f) => {
     if (reduce) return;
     const dt = Math.min(64, f.timeSincePreviousFrame ?? 16) / 1000;
-    phase.value += dt * (0.55 + e.value * 1.5) * run.value;
+    phase.value += dt * (0.25 + e.value * 2.6) * run.value;
   }, true);
 
   return (
     <View pointerEvents="none" style={StyleSheet.absoluteFill}>
       <LinearGradient colors={[top, bottom]} style={StyleSheet.absoluteFill} />
       {glows.map((g, i) => (
-        <Blob key={i} g={g} id={`glow${i}`} w={w} h={h} phase={phase} energy={e} />
+        <Blob key={i} g={g} id={`glow${i}`} w={w} h={h} phase={phase} energy={e} swell={swell} />
       ))}
       {/* Keeps the lyrics readable over the brightest glows */}
-      <View style={[StyleSheet.absoluteFill, { backgroundColor: bottom, opacity: 0.18 }]} />
+      <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: bottom }, shade]} />
     </View>
   );
 });
