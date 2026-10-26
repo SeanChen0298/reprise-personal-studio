@@ -234,7 +234,7 @@ song (`strum_pattern` in `chord_settings.json`), not detected.
 
 ## Furigana
 
-Auto-generated via `kuroshiro` + `kuromoji` analyzer. Output is `<ruby>` HTML stored in `furigana_html` / `custom_furigana_html` on Line rows. Never manually edit furigana HTML — regenerate via `generateFurigana()` in `packages/shared/src/lib/furigana.ts`. The kuromoji dictionary (~17 MB) is bundled at `apps/desktop/public/kuromoji/dict` and served from the app origin, so it works fully offline.
+Auto-generated via `kuroshiro` + `kuromoji` analyzer. Output is `<ruby>` HTML stored in `furigana_html` / `custom_furigana_html` on Line rows. Never manually edit furigana HTML — regenerate via `generateFurigana()` in `packages/shared/src/lib/furigana.ts`. **Romaji** (`generateRomaji()`, same file: kuromoji tokens → Hepburn by pronunciation, so particle は → "wa"; endings glued to their word) is stored as `Line.romaji` with `romaji_of` = the text it was made from (remade when it differs; the song page fills missing ones on open) and synced to the phone; shown with the Romaji toggle on both. The kuromoji dictionary (~17 MB) is bundled at `apps/desktop/public/kuromoji/dict` and served from the app origin, so it works fully offline.
 
 ---
 
