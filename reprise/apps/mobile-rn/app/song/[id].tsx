@@ -15,7 +15,7 @@ import { linesWithEdits, takesFor, TRACKS, useLibraryStore, type TrackKind } fro
 import { usePrefsStore } from "../../src/stores/prefs-store";
 import { lineAt, useLinePlayer } from "../../src/hooks/use-line-player";
 import { useTakeRecorder, type PendingTake } from "../../src/hooks/use-take-recorder";
-import { useTheme } from "../../src/lib/theme";
+import { useClassicTheme } from "../../src/lib/theme";
 import { useSongPalette, vividLook } from "../../src/lib/song-palette";
 import { StatusBar } from "expo-status-bar";
 import { VividBackdrop } from "../../src/components/vivid-backdrop";
@@ -64,13 +64,14 @@ async function keepTake(songId: string, p: PendingTake, note: string) {
 export default function SongScreen() {
   useKeepAwake();
   const { id, at, play, sing } = useLocalSearchParams<{ id: string; at?: string; play?: string; sing?: string }>();
-  const appT = useTheme();
-  const calmP = useSongPalette(id, appT);
-  const look = usePrefsStore((s) => s.songLook);
+  const classicT = useClassicTheme();
+  const calmP = useSongPalette(id, classicT);
+  const look = usePrefsStore((s) => s.look);
   const songHex = useLibraryStore((s) => s.snapshot?.colors?.[id]);
-  const vivid = useMemo(() => (look === "vivid" ? vividLook(songHex, appT) : null), [look, songHex, appT]);
-  /** What the screen draws with (sheets use the app's own theme, `appT`). */
-  const t = vivid?.t ?? appT;
+  // Vivid: this screen (and its sheets) in this song's colors.
+  const vivid = useMemo(() => (look === "vivid" ? vividLook(songHex, classicT) : null), [look, songHex, classicT]);
+  const t = vivid?.t ?? classicT;
+  const appT = t;
   const p = vivid?.p ?? calmP;
   const tone = { solid: p.solid, onSolid: p.onSolid, soft: p.soft, tint: p.tint };
   const insets = useSafeAreaInsets();
@@ -510,9 +511,9 @@ export default function SongScreen() {
         <View style={{ flexDirection: "row", alignItems: "center", paddingVertical: 8, marginBottom: 6 }}>
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 16, color: appT.text }}>Look</Text>
-            <Text style={{ fontSize: 13, color: appT.muted, marginTop: 2 }}>{look === "vivid" ? "In the song's color" : "Quiet, with a touch of its color"}</Text>
+            <Text style={{ fontSize: 13, color: appT.muted, marginTop: 2 }}>{look === "vivid" ? "Dark, in the songs' colors" : "Light, with a touch of color"}</Text>
           </View>
-          <Segmented t={appT} options={["calm", "vivid"] as const} value={look} onChange={usePrefsStore.getState().setSongLook} label={(v) => (v === "calm" ? "Calm" : "Vivid")} />
+          <Segmented t={appT} options={["classic", "vivid"] as const} value={look} onChange={usePrefsStore.getState().setLook} label={(v) => (v === "classic" ? "Classic" : "Vivid")} />
         </View>
         <View style={{ gap: 4 }}>
           {[

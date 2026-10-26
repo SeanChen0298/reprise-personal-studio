@@ -7,7 +7,7 @@ import { Toggle } from "../src/components/toggle";
 import { DISPLAY, Text } from "../src/components/text";
 import { Button, Card, Label, Segmented } from "../src/components/ui";
 import { useLibraryStore } from "../src/stores/library-store";
-import { usePrefsStore, type ThemeMode } from "../src/stores/prefs-store";
+import { usePrefsStore, type Look } from "../src/stores/prefs-store";
 import { ACCENTS, useTheme } from "../src/lib/theme";
 import { megabytes, timeAgo } from "../src/lib/format";
 import { BackIcon } from "../src/components/icons";
@@ -171,7 +171,11 @@ export default function Settings() {
         {group(
           "Look",
           <>
-            {row("Theme", <Segmented t={t} options={["auto", "light", "dark"] as ThemeMode[]} value={prefs.themeMode} onChange={prefs.setThemeMode} label={(m) => (m === "auto" ? "Auto" : m === "light" ? "Light" : "Dark")} />)}
+            {row(
+              "Look",
+              <Segmented t={t} options={["classic", "vivid"] as Look[]} value={prefs.look} onChange={prefs.setLook} label={(m) => (m === "classic" ? "Classic" : "Vivid")} />,
+              prefs.look === "vivid" ? "Dark, in the colors of your songs — the one you're on colors the app." : "Light, with a touch of each song's color.",
+            )}
             {row(
               "Color",
               <View style={{ flexDirection: "row", gap: 12, alignItems: "center", flexWrap: "wrap" }}>

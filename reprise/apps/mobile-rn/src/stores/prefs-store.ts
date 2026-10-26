@@ -2,10 +2,11 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-export type ThemeMode = "auto" | "light" | "dark";
+/** Classic: light, with a touch of the song's color. Vivid: dark, in the colors of your songs (it's the dark mode). */
+export type Look = "classic" | "vivid";
 
 interface PrefsState {
-  themeMode: ThemeMode;
+  look: Look;
   /** Accent color; follows the desktop's theme unless picked here. */
   accent: string | null;
   showTranslation: boolean;
@@ -25,9 +26,7 @@ interface PrefsState {
   memorize: boolean;
   /** The song screen's Practice tray is open. */
   practiceOpen: boolean;
-  /** The song screen's look: calm (white / black with a touch of the song's color) or vivid (the song's color). */
-  songLook: "calm" | "vivid";
-  setThemeMode: (v: ThemeMode) => void;
+  setLook: (v: Look) => void;
   setAccent: (v: string | null) => void;
   setShowTranslation: (v: boolean) => void;
   setShowFurigana: (v: boolean) => void;
@@ -39,13 +38,12 @@ interface PrefsState {
   setRadioShuffle: (v: boolean) => void;
   setMemorize: (v: boolean) => void;
   setPracticeOpen: (v: boolean) => void;
-  setSongLook: (v: "calm" | "vivid") => void;
 }
 
 export const usePrefsStore = create<PrefsState>()(
   persist(
     (set) => ({
-      themeMode: "auto",
+      look: "classic",
       accent: null,
       showTranslation: true,
       showFurigana: true,
@@ -57,8 +55,7 @@ export const usePrefsStore = create<PrefsState>()(
       radioShuffle: false,
       memorize: false,
       practiceOpen: false,
-      songLook: "calm",
-      setThemeMode: (v) => set({ themeMode: v }),
+      setLook: (v) => set({ look: v }),
       setAccent: (v) => set({ accent: v }),
       setShowTranslation: (v) => set({ showTranslation: v }),
       setShowFurigana: (v) => set({ showFurigana: v }),
@@ -70,8 +67,19 @@ export const usePrefsStore = create<PrefsState>()(
       setRadioShuffle: (v) => set({ radioShuffle: v }),
       setMemorize: (v) => set({ memorize: v }),
       setPracticeOpen: (v) => set({ practiceOpen: v }),
-      setSongLook: (v) => set({ songLook: v }),
     }),
-    { name: "reprise-prefs", storage: createJSONStorage(() => AsyncStorage) },
+    {
+      name: "reprise-prefs",
+      storage: createJSONStorage(() => AsyncStorage),
+      version: 1,
+      // Before: themeMode (auto / light / dark) and the song screen's songLook (calm / vivid).
+      migrate: (old, from) => {
+        const o = (old ?? {}) as Record<string, unknown>;
+        if (from < 1) o.look = o.songLook === "vivid" || o.themeMode === "dark" ? "vivid" : "classic";
+        delete o.songLook;
+        delete o.themeMode;
+        return o as unknown as PrefsState;
+      },
+    },
   ),
 );

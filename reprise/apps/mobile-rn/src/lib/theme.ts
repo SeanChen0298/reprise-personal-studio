@@ -1,6 +1,8 @@
-import { useColorScheme } from "react-native";
+import { useMemo } from "react";
 import { usePrefsStore } from "../stores/prefs-store";
 import { useLibraryStore } from "../stores/library-store";
+import { recentSongs } from "./recent";
+import { vividLook } from "./song-palette";
 
 /** Same accents as the desktop (Settings → Preferences → Theme). */
 export const ACCENTS: Record<string, { light: string; dark: string; soft: string; softDark: string; text: string }> = {
@@ -63,16 +65,36 @@ const DARK = {
   voiceSoft: "#C4B5FD22",
 };
 
+/** The song you're on (the one the library offers to pick up): its color tints the Vivid look. */
+export function useCurrentSongColor(): { id?: string; hex?: string } {
+  const snapshot = useLibraryStore((s) => s.snapshot);
+  const practiced = useLibraryStore((s) => s.local.practiced);
+  const takes = useLibraryStore((s) => s.local.takes);
+  return useMemo(() => {
+    const id = recentSongs(snapshot, practiced, takes)[0]?.song.id;
+    return { id, hex: id ? snapshot?.colors?.[id] : undefined };
+  }, [snapshot, practiced, takes]);
+}
+
+/** Classic (light) — the base every look starts from. */
+export function useClassicTheme(): Theme {
+  return useBaseTheme(false);
+}
+
 export function useTheme(): Theme {
-  const scheme = useColorScheme();
-  const mode = usePrefsStore((s) => s.themeMode);
+  const look = usePrefsStore((s) => s.look);
+  const classic = useBaseTheme(false);
+  const { hex } = useCurrentSongColor();
+  return useMemo(() => (look === "vivid" ? vividLook(hex, classic).t : classic), [look, hex, classic]);
+}
+
+function useBaseTheme(dark: boolean): Theme {
   const picked = usePrefsStore((s) => s.accent);
   const desktopTheme = useLibraryStore((s) => s.snapshot?.theme);
-  const dark = mode === "dark" || (mode === "auto" && scheme === "dark");
   const a = ACCENTS[picked ?? desktopTheme ?? "blue"] ?? ACCENTS.blue;
   const base = dark ? DARK : LIGHT;
   const theme = dark ? a.dark : a.light;
-  return {
+  return useMemo(() => ({
     dark,
     ...base,
     theme,
@@ -81,7 +103,7 @@ export function useTheme(): Theme {
     themeText: dark ? a.dark : a.text,
     accent: dark ? "#F3F4F6" : "#111111",
     onAccent: dark ? "#111111" : "#FFFFFF",
-  };
+  }), [dark, a, base, theme]);
 }
 
 export const SERIF = "serif";

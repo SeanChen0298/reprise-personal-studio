@@ -5,7 +5,9 @@ import Animated, { FadeInDown } from "react-native-reanimated";
 import { DISPLAY, Text } from "../src/components/text";
 import { PressableScale } from "../src/components/pressable-scale";
 import { Button, Card } from "../src/components/ui";
-import { paletteFor } from "../src/lib/song-palette";
+import { paletteFor, vividColors } from "../src/lib/song-palette";
+import { LinearGradient } from "expo-linear-gradient";
+import { VividBackdrop } from "../src/components/vivid-backdrop";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Song } from "@reprise/shared/core";
@@ -168,10 +170,20 @@ export default function Library() {
     </View>
   );
 
+  const look = usePrefsStore((s) => s.look);
+  const heroHex = hero ? snapshot?.colors?.[hero.song.id] : undefined;
+  const vivid = look === "vivid" ? vividColors(heroHex) : null;
+
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>
+      {/* The song you're on colors the page: its moving glows (Vivid) or a soft wash at the top (Classic) */}
+      {vivid ? (
+        <VividBackdrop hex={heroHex} top={vivid.top} bottom={vivid.bottom} energy={0.3} playing={radioOn} />
+      ) : (
+        <LinearGradient pointerEvents="none" colors={[heroP.soft, t.bg]} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 520 }} />
+      )}
       <FlatList
-        style={{ flex: 1, backgroundColor: t.bg }}
+        style={{ flex: 1, backgroundColor: "transparent" }}
         contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: insets.bottom + (radioOn ? 104 : 28) }}
         data={songs}
         keyExtractor={(s) => s.id}
@@ -214,7 +226,7 @@ export default function Library() {
         }}
       />
       {/* Rows scroll under the status bar: give it the page color */}
-      <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, height: insets.top, backgroundColor: t.bg, opacity: 0.94 }} />
+      <LinearGradient pointerEvents="none" colors={[vivid ? vivid.top : heroP.soft, `${vivid ? vivid.top : heroP.soft}00`]} locations={[0.55, 1]} style={{ position: "absolute", top: 0, left: 0, right: 0, height: insets.top + 14 }} />
       {radioOn && <NowPlaying t={t} />}
     </View>
   );

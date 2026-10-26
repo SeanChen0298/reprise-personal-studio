@@ -24,7 +24,8 @@ export function Toggle({ value, onChange, t }: { value: boolean; onChange: (v: b
       }}
     >
       <Animated.View style={[{ width: 42, height: 24, borderRadius: 12, justifyContent: "center" }, track]}>
-        <Animated.View style={[{ width: 20, height: 20, borderRadius: 10, backgroundColor: "#fff", elevation: 2 }, knob]} />
+        {/* In Vivid the "on" track is white, so the knob takes the page's deep color there. */}
+        <Animated.View style={[{ width: 20, height: 20, borderRadius: 10, backgroundColor: value && t.theme.toUpperCase() === "#FFFFFF" ? t.onAccent : "#fff", elevation: 2 }, knob]} />
       </Animated.View>
     </Pressable>
   );
