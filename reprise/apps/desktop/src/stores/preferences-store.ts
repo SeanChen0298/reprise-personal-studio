@@ -36,6 +36,8 @@ interface PreferencesState {
   recordingPlaybackGain: number;
   playbackVolume: number;
   autoDemucs: boolean;
+  /** Prepare every song in the background: lyrics, stems, pitch, chords, timing, readings, sections. */
+  autoPrepare: boolean;
   autoPitch: boolean;
   /** Library "raw YouTube titles" banner dismissed. */
   titleTidyDismissed: boolean;
@@ -56,6 +58,7 @@ interface PreferencesState {
   setCountInEnabled: (v: boolean) => void;
   setRecordingPlaybackGain: (v: number) => void;
   setPlaybackVolume: (v: number) => void;
+  setAutoPrepare: (v: boolean) => void;
   setAutoDemucs: (v: boolean) => void;
   setAutoPitch: (v: boolean) => void;
   setTitleTidyDismissed: (v: boolean) => void;
@@ -74,6 +77,7 @@ export const usePreferencesStore = create<PreferencesState>()(
       recordingPlaybackGain: 8.0,
       playbackVolume: 1.0,
       autoDemucs: false,
+      autoPrepare: true,
       autoPitch: false,
       titleTidyDismissed: false,
       recordCountIn: 3,
@@ -105,6 +109,7 @@ export const usePreferencesStore = create<PreferencesState>()(
       setRecordingPlaybackGain: (v) => set({ recordingPlaybackGain: v }),
       setPlaybackVolume: (v) => set({ playbackVolume: Math.round(Math.min(1, Math.max(0, v)) * 100) / 100 }),
       setAutoDemucs: (v) => set({ autoDemucs: v }),
+      setAutoPrepare: (v) => set({ autoPrepare: v }),
       setAutoPitch: (v) => set({ autoPitch: v }),
       setTitleTidyDismissed: (v) => set({ titleTidyDismissed: v }),
       setRecordCountIn: (v) => set({ recordCountIn: v }),

@@ -48,10 +48,8 @@ export function SettingsPage() {
   const countIn = countInEnabled ? "2" : "none";
   const recordingPlaybackGain = usePreferencesStore((s) => s.recordingPlaybackGain);
   const setRecordingPlaybackGain = usePreferencesStore((s) => s.setRecordingPlaybackGain);
-  const autoDemucs = usePreferencesStore((s) => s.autoDemucs);
-  const setAutoDemucs = usePreferencesStore((s) => s.setAutoDemucs);
-  const autoPitch = usePreferencesStore((s) => s.autoPitch);
-  const setAutoPitch = usePreferencesStore((s) => s.setAutoPitch);
+  const autoPrepare = usePreferencesStore((s) => s.autoPrepare);
+  const setAutoPrepare = usePreferencesStore((s) => s.setAutoPrepare);
   const [confirmDelete, setConfirmDelete] = useState(true);
 
   // Backup & restore
@@ -672,15 +670,9 @@ export function SettingsPage() {
                   {sectionHeader("Audio processing")}
 
                   {settingRow(
-                    "Auto stem separation (Demucs)",
-                    "Automatically run Demucs on every downloaded song. Jobs are queued and processed one at a time.",
-                    toggle(autoDemucs, setAutoDemucs),
-                  )}
-
-                  {settingRow(
-                    "Auto pitch analysis (torchcrepe)",
-                    "Automatically run pitch analysis after stem separation completes. Queued with Demucs jobs.",
-                    toggle(autoPitch, setAutoPitch),
+                    "Prepare songs automatically",
+                    "In the background, every downloaded song gets what it's missing: lyrics (from LRCLIB), stems, pitch and chords, timing for untimed lyrics, furigana and romaji, and — when a coach key is set — sections from the coach. One step at a time; each is tried once per song.",
+                    toggle(autoPrepare, setAutoPrepare),
                     true,
                   )}
                 </div>

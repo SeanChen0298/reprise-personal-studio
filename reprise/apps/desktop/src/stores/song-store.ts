@@ -96,6 +96,9 @@ interface SongStore {
   incrementPlayCount: (songId: string, lineId: string) => Promise<void>;
   /** Generate furigana HTML for all Japanese lines of a song and persist it. Fire-and-forget safe. */
   generateFuriganaForSong: (songId: string) => Promise<void>;
+  /** Lyrics for a song that has none: LRCLIB synced lyrics that fit its length, else the
+   *  download's YouTube subtitles, else LRCLIB plain lyrics. Returns whether any were found. */
+  findLyricsForSong: (songId: string, subtitles?: TimedLyricLine[]) => Promise<boolean>;
   updateLineCustomText: (songId: string, lineId: string, customText: string) => Promise<void>;
   updateLineAnnotations: (songId: string, lineId: string, annotations: Annotation[]) => Promise<void>;
   getLinesForSong: (songId: string) => Line[];
@@ -331,42 +334,7 @@ export const useSongStore = create<SongStore>()((set, get) => ({
 
       const existingLines = get().lines[id];
       if (!existingLines || existingLines.length === 0) {
-        // Lyrics for a fresh song: LRCLIB synced lyrics that fit this recording's
-        // length, else YouTube subtitles, else LRCLIB plain lyrics (untimed).
-        let lyrics: TimedLyricLine[] | undefined;
-        let plain: TimedLyricLine[] | undefined;
-        try {
-          const durationMs = song.duration_ms ?? (await audioDurationMs(result.audioPath));
-          if (durationMs && !song.duration_ms) get().updateSong(id, { duration_ms: durationMs }).catch(() => {});
-          const cands = await searchLyrics({ title: song.title, artist: song.artist, durationMs });
-          lyrics = confidentMatch(cands, durationMs)?.lines;
-          const top = cands[0];
-          if (top && durationMs && top.durationMs && Math.abs(top.durationMs - durationMs) <= 3000) {
-            plain = top.lines.map((l) => ({ ...l, start_ms: UNTIMED, end_ms: UNTIMED }));
-          }
-        } catch (e) {
-          console.warn("LRCLIB lookup failed:", e);
-        }
-        if (!lyrics && result.lyrics && result.lyrics.length > 0) lyrics = result.lyrics;
-        lyrics ??= plain;
-        if (lyrics && lyrics.length > 0) {
-          const now = new Date().toISOString();
-          const newLines: Line[] = lyrics.map((tl, i) => ({
-            id: crypto.randomUUID(),
-            song_id: id,
-            text: tl.text,
-            order: i,
-            start_ms: tl.start_ms === UNTIMED ? undefined : tl.start_ms,
-            end_ms: tl.end_ms === UNTIMED ? undefined : tl.end_ms,
-            status: "new" as const,
-            created_at: now,
-            updated_at: now,
-          }));
-          await get().setLines(id, newLines);
-          if (isJapanese(song.language)) {
-            get().generateFuriganaForSong(id).catch(() => {});
-          }
-        }
+        await get().findLyricsForSong(id, result.lyrics ?? undefined);
       }
     } catch (err) {
       await get().updateSong(id, {
@@ -374,6 +342,43 @@ export const useSongStore = create<SongStore>()((set, get) => ({
         download_error: err instanceof Error ? err.message : "Download failed",
       });
     }
+  },
+
+  findLyricsForSong: async (id, subtitles) => {
+    const song = get().songs.find((s) => s.id === id);
+    if (!song || (get().lines[id]?.length ?? 0) > 0) return false;
+    let lyrics: TimedLyricLine[] | undefined;
+    let plain: TimedLyricLine[] | undefined;
+    try {
+      const durationMs = song.duration_ms ?? (song.audio_path ? await audioDurationMs(song.audio_path) : undefined);
+      if (durationMs && !song.duration_ms) get().updateSong(id, { duration_ms: durationMs }).catch(() => {});
+      const cands = await searchLyrics({ title: song.title, artist: song.artist, durationMs });
+      lyrics = confidentMatch(cands, durationMs)?.lines;
+      const top = cands[0];
+      if (top && durationMs && top.durationMs && Math.abs(top.durationMs - durationMs) <= 3000) {
+        plain = top.lines.map((l) => ({ ...l, start_ms: UNTIMED, end_ms: UNTIMED }));
+      }
+    } catch (e) {
+      console.warn("LRCLIB lookup failed:", e);
+    }
+    if (!lyrics && subtitles && subtitles.length > 0) lyrics = subtitles;
+    lyrics ??= plain;
+    if (!lyrics || lyrics.length === 0) return false;
+    const now = new Date().toISOString();
+    const newLines: Line[] = lyrics.map((tl, i) => ({
+      id: crypto.randomUUID(),
+      song_id: id,
+      text: tl.text,
+      order: i,
+      start_ms: tl.start_ms === UNTIMED ? undefined : tl.start_ms,
+      end_ms: tl.end_ms === UNTIMED ? undefined : tl.end_ms,
+      status: "new" as const,
+      created_at: now,
+      updated_at: now,
+    }));
+    await get().setLines(id, newLines);
+    if (isJapanese(song.language)) get().generateFuriganaForSong(id).catch(() => {});
+    return true;
   },
 
   separateSongStems: async (id) => {
