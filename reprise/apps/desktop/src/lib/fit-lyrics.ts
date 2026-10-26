@@ -58,8 +58,12 @@ export function fitLyrics(input: FitLine[], sections: FitSection[], singing: Phr
 
   // 1. The whole-song shift.
   const g = bestOffset(spans, sung);
-  // Same bar as the lyrics check's "Shift all lines": a clear improvement, or no shift.
-  const offsetMs = Math.abs(g.ms) >= 300 && g.fitAfter - g.fitBefore >= 0.08 ? g.ms : 0;
+  // Same bar as the lyrics check's "Shift all lines": a clear improvement — or a smaller one that
+  // agrees with where the voice first comes in (the first line should start with the first singing:
+  // a constant shift barely moves the overall fit, but the first entry shows it plainly).
+  const entryShift = sung[0].startMs - lines[0].start_ms!;
+  const agrees = Math.abs(entryShift) <= 10000 && Math.abs(g.ms - entryShift) <= 800;
+  const offsetMs = Math.abs(g.ms) >= 300 && (g.fitAfter - g.fitBefore >= 0.08 || (agrees && g.fitAfter - g.fitBefore >= 0.01)) ? g.ms : 0;
   const starts = starts0.map((s) => s + offsetMs);
 
   // 2. A section's own shift, when it clearly fits better and keeps the order.

@@ -672,7 +672,7 @@ export function LyricsInputPage() {
       // and replaces null-language legacy lines for backward compat.
       await setLinesForLanguage(id!, lyricsLang || null, newLines);
       // New lyrics or timing: fit them to the vocals again (the automatic preparation does it).
-      forgetPrepared(id!, "fit");
+      forgetPrepared(id!, "fit2");
 
       // Persist the primary language on the song if it changed
       if (lyricsLang && lyricsLang !== song!.language) {

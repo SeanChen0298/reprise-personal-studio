@@ -29,7 +29,8 @@ import { CHORD_ANALYSIS_VERSION } from "../lib/chord-analysis";
 import { readTextFile } from "@tauri-apps/plugin-fs";
 import { loadVocalMap } from "../lib/take-review";
 
-type Step = "lyrics" | "sections" | "fit";
+// "fit2": fitting got the singer's-entry check (Oct 2026), so every song is fitted once more.
+type Step = "lyrics" | "sections" | "fit2";
 const TRIED_KEY = "reprise-auto-prepared";
 
 function tried(): Record<string, Partial<Record<Step, number>>> {
@@ -206,8 +207,8 @@ export function useAutoProcess() {
       }
       const primary = primaryLines(song, all);
       const timed = primary.filter((l) => l.start_ms != null).length;
-      if (song.pitch_status === "done" && timed >= 5 && timed >= primary.length * 0.8 && !t[song.id]?.fit) {
-        markTried(song.id, "fit");
+      if (song.pitch_status === "done" && timed >= 5 && timed >= primary.length * 0.8 && !t[song.id]?.fit2) {
+        markTried(song.id, "fit2");
         job = () => fitToVocals(song, primary, sections[song.id] ?? []);
         break;
       }
