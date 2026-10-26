@@ -53,6 +53,8 @@ export function useLinePlayer({ uri, lines, sectionRange, onLinePlayed, initialM
   /** The loop's span, fixed when the loop starts (so it doesn't drift with the playhead). */
   const loopRangeRef = useRef<[number, number] | null>(null);
   const [cursor, setCursor] = useState(() => Math.max(0, lineAt(lines, initialMs)));
+  /** Playing a line starts a moment before it (lead-in): until it begins, the chosen line stays lit. */
+  const [leadTo, setLeadTo] = useState<number | null>(null);
   const posRef = useRef(initialMs);
   const playingRef = useRef(initialPlay);
   const linesRef = useRef(lines);
@@ -192,6 +194,7 @@ export function useLinePlayer({ uri, lines, sectionRange, onLinePlayed, initialM
       // A running loop moves to the new line before seeking (or it would pull the playhead back).
       if (loopModeRef.current !== "off") loopRangeRef.current = rangeFor(loopModeRef.current, idx);
       stopAtRef.current = null;
+      setLeadTo(l.start_ms);
       await seek(Math.max(0, l.start_ms - leadInMs));
       await soundRef.current?.playAsync();
     },
@@ -231,8 +234,12 @@ export function useLinePlayer({ uri, lines, sectionRange, onLinePlayed, initialM
 
   /** The line under the playhead (follows a section loop too). */
   const playingIndex = useMemo(() => lineAt(lines, positionMs), [lines, positionMs]);
-  /** The line to highlight: the playing one while playing, else the cursor. */
-  const activeIndex = isPlaying && playingIndex >= 0 ? playingIndex : cursor;
+  // The lead-in is over once the playhead reaches the line (or moved elsewhere).
+  useEffect(() => {
+    if (leadTo != null && (positionMs >= leadTo || positionMs < leadTo - 3000)) setLeadTo(null);
+  }, [positionMs, leadTo]);
+  /** The line to highlight: the playing one while playing (the chosen one during its lead-in), else the cursor. */
+  const activeIndex = isPlaying && playingIndex >= 0 && leadTo == null ? playingIndex : cursor;
 
   /** The current line's progress 0–1 (for the bar under it). */
   const lineProgress = useMemo(() => {
