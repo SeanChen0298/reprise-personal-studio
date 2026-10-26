@@ -84,8 +84,13 @@ const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
 /**
  * Find lyrics for a song: by title + artist first, then with the YouTube title
  * cleaned up, then as a free-text search. Closest length and synced first.
+ * `wide`: run every search (title alone, title + artist, the artist's uploads of the right
+ * length) and return up to 20 versions, instead of stopping at the first that has lyrics.
  */
-export async function searchLyrics(song: { title: string; artist?: string; durationMs?: number }): Promise<LyricsCandidate[]> {
+export async function searchLyrics(
+  song: { title: string; artist?: string; durationMs?: number },
+  opts: { wide?: boolean } = {},
+): Promise<LyricsCandidate[]> {
   const artist = song.artist?.trim() ?? "";
   const parsed = parseSongTitle(song.title, artist);
   const queries: [string, Record<string, string>][] = [];
@@ -95,6 +100,11 @@ export async function searchLyrics(song: { title: string; artist?: string; durat
   }
   queries.push(["search", { q: `${parsed.title || song.title} ${parsed.artist || artist}`.trim() }]);
   queries.push(["search", { q: parsed.title || song.title }]);
+  if (opts.wide) {
+    queries.push(["search", { track_name: parsed.title || song.title }]);
+    // The artist's songs: the right one may be listed under another name (original script, a subtitle…).
+    if (parsed.artist || artist) queries.push(["search", { artist_name: parsed.artist || artist, q: parsed.artist || artist }]);
+  }
 
   const seen = new Map<number, LrclibTrack>();
   let lastError: unknown = null;
@@ -104,8 +114,8 @@ export async function searchLyrics(song: { title: string; artist?: string; durat
     } catch (err) {
       lastError = err;
     }
-    // Enough to choose from once something with lyrics turned up.
-    if ([...seen.values()].some((t) => !t.instrumental && (t.syncedLyrics || t.plainLyrics))) break;
+    // Enough to choose from once something with lyrics turned up (unless searching wide).
+    if (!opts.wide && [...seen.values()].some((t) => !t.instrumental && (t.syncedLyrics || t.plainLyrics))) break;
   }
   if (seen.size === 0 && lastError) throw lastError;
 
@@ -125,8 +135,10 @@ export async function searchLyrics(song: { title: string; artist?: string; durat
 
   return [...seen.values()]
     .filter((t) => !t.instrumental && (t.syncedLyrics || t.plainLyrics))
+    // The artist's other songs only count when they're the length of this recording.
+    .filter((t) => !opts.wide || score(t) > 0 || (song.durationMs != null && t.duration != null && Math.abs(t.duration * 1000 - song.durationMs) <= 3000))
     .sort((a, b) => score(b) - score(a))
-    .slice(0, 8)
+    .slice(0, opts.wide ? 20 : 8)
     .map((t) => {
       const durationMs = t.duration ? Math.round(t.duration * 1000) : undefined;
       const synced = t.syncedLyrics ? parseSyncedLyrics(t.syncedLyrics, durationMs) : [];
@@ -148,9 +160,10 @@ export async function searchLyrics(song: { title: string; artist?: string; durat
  * 3 s of the audio (so the timestamps fit this recording).
  */
 export function confidentMatch(cands: LyricsCandidate[], durationMs?: number): LyricsCandidate | null {
-  const c = cands.find((x) => x.synced);
-  if (!c || !durationMs || !c.durationMs) return null;
-  return Math.abs(c.durationMs - durationMs) <= 3000 ? c : null;
+  if (!durationMs) return null;
+  // Any synced version of the right length — not only the first one listed (LRCLIB often has a
+  // short or differently cut upload first).
+  return cands.find((c) => c.synced && c.durationMs != null && Math.abs(c.durationMs - durationMs) <= 3000) ?? null;
 }
 
 /** Length of a local audio file, read from its metadata. */

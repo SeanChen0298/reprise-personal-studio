@@ -11,6 +11,8 @@ import {
   buildSongFolder,
 } from "../lib/audio-download";
 import { audioDurationMs, searchLyrics, UNTIMED, type LyricsCandidate } from "../lib/lrclib";
+import { borrowTiming } from "../lib/borrow-timing";
+import { forgetPrepared } from "../hooks/use-auto-process";
 import { isTranslationSupported, translateLinesToEnglish, type TranslateProgress } from "../lib/translate";
 import type { Line, Section } from "../types/song";
 
@@ -501,25 +503,48 @@ export function LyricsInputPage() {
   const [lrcResults, setLrcResults] = useState<LyricsCandidate[] | null>(null);
   const [lrcError, setLrcError] = useState<string | null>(null);
   const [songDurationMs, setSongDurationMs] = useState<number | undefined>(song?.duration_ms);
-  async function handleFindOnline() {
+  /** What to search for (starts as the song's title / artist; edit to try other names). */
+  const [lrcTitle, setLrcTitle] = useState(song?.title ?? "");
+  const [lrcArtist, setLrcArtist] = useState(song?.artist ?? "");
+  const [timingNote, setTimingNote] = useState<string | null>(null);
+  async function handleFindOnline(wide = false) {
     if (!song) return;
     setLrcSearching(true);
     setLrcError(null);
+    setTimingNote(null);
     try {
       let durationMs = songDurationMs;
       if (!durationMs && song.audio_path) {
         durationMs = await audioDurationMs(song.audio_path);
         setSongDurationMs(durationMs);
       }
-      const found = await searchLyrics({ title: song.title, artist: song.artist, durationMs });
+      const found = await searchLyrics({ title: lrcTitle.trim() || song.title, artist: lrcArtist.trim() || song.artist, durationMs }, { wide });
       setLrcResults(found);
-      if (found.length === 0) setLrcError("No lyrics found for this title — try YouTube subtitles or paste them.");
+      if (found.length === 0) setLrcError(wide ? "Nothing found — try the title in its original script, or paste the lyrics." : "No lyrics found — try Search wider, or other names.");
     } catch (err) {
       setLrcError(err instanceof Error ? err.message : "Couldn't reach LRCLIB");
     } finally {
       setLrcSearching(false);
     }
   }
+  /** Keep the lines you have; take only this version's times (matched by the words). */
+  function borrowCandidateTiming(c: LyricsCandidate) {
+    const starts = borrowTiming(editLines, c.lines);
+    if (!starts) {
+      setTimingNote("Its lines don't match yours closely enough — pick one with the same lyrics, or use its lyrics instead.");
+      return;
+    }
+    setEditLines((prev) =>
+      prev.map((l, i) => {
+        const start = starts[i];
+        const next = starts.slice(i + 1).find((x) => x != null);
+        return { ...l, start_ms: start, end_ms: start == null ? undefined : next != null ? Math.min(next, start + 12000) : start + 6000 };
+      }),
+    );
+    setTimingNote(`Timing taken from this version for ${starts.filter((s) => s != null).length} lines — Save lyrics to keep it. It's fitted to the vocals afterwards.`);
+    setLrcResults(null);
+  }
+
   function pickCandidate(c: LyricsCandidate) {
     setEditLines(
       c.lines.map((l) => ({
@@ -631,6 +656,8 @@ export function LyricsInputPage() {
           order: i,
           start_ms: l.start_ms ?? existing?.start_ms,
           end_ms: l.end_ms ?? existing?.end_ms,
+          // New timing isn't the old automatic alignment's "unsure" any more.
+          align_confidence: l.start_ms != null && l.start_ms !== existing?.start_ms ? undefined : existing?.align_confidence,
           status: existing?.status ?? ("new" as const),
           created_at: existing?.created_at ?? now,
           updated_at: now,
@@ -644,6 +671,8 @@ export function LyricsInputPage() {
       // Language-scoped save: preserves lines of other languages (e.g. translation),
       // and replaces null-language legacy lines for backward compat.
       await setLinesForLanguage(id!, lyricsLang || null, newLines);
+      // New lyrics or timing: fit them to the vocals again (the automatic preparation does it).
+      forgetPrepared(id!, "fit");
 
       // Persist the primary language on the song if it changed
       if (lyricsLang && lyricsLang !== song!.language) {
@@ -840,27 +869,49 @@ export function LyricsInputPage() {
                     </svg>
                     Find lyrics online
                   </div>
+                  <input
+                    value={lrcTitle}
+                    onChange={(e) => setLrcTitle(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && void handleFindOnline()}
+                    placeholder="Title"
+                    title="The title to search for — try the original script (水平線) or a romanized name"
+                    className="w-[180px] px-2 py-[4px] rounded-[6px] border border-[var(--border)] bg-[var(--bg)] text-[12.5px] text-[var(--text-primary)] outline-none focus:border-[var(--theme)]"
+                  />
+                  <input
+                    value={lrcArtist}
+                    onChange={(e) => setLrcArtist(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && void handleFindOnline()}
+                    placeholder="Artist"
+                    className="w-[140px] px-2 py-[4px] rounded-[6px] border border-[var(--border)] bg-[var(--bg)] text-[12.5px] text-[var(--text-primary)] outline-none focus:border-[var(--theme)]"
+                  />
                   <button
                     onClick={() => void handleFindOnline()}
                     disabled={lrcSearching}
                     title="Search LRCLIB, a free lyrics database — many songs come with a time for every line"
                     className="flex items-center gap-[5px] px-3 py-[5px] rounded-[6px] bg-[var(--accent)] text-white text-[12px] font-medium hover:opacity-80 transition-opacity disabled:opacity-50 flex-shrink-0"
                   >
-                    {lrcSearching ? "Searching…" : lrcResults ? "Search again" : "Search LRCLIB"}
+                    {lrcSearching ? "Searching…" : "Search LRCLIB"}
                   </button>
-                  <span className="text-[11px] text-[var(--text-muted)]">Synced lyrics arrive with line timings.</span>
+                  <button
+                    onClick={() => void handleFindOnline(true)}
+                    disabled={lrcSearching}
+                    title="Try every way of finding it (title alone, the artist's other uploads of this length…) and list up to 20 versions"
+                    className="px-3 py-[5px] rounded-[6px] border border-[var(--border)] bg-transparent text-[12px] text-[var(--text-secondary)] hover:border-[var(--theme)] hover:text-[var(--theme)] disabled:opacity-50 flex-shrink-0"
+                  >
+                    Search wider
+                  </button>
                   {lrcError && <span className="text-[11px] text-red-500 truncate" title={lrcError}>{lrcError}</span>}
                 </div>
+                {timingNote && <p className="text-[11.5px] text-[var(--text-secondary)]">{timingNote}</p>}
                 {lrcResults && lrcResults.length > 0 && (
                   <div className="flex flex-col gap-[2px] pt-1 border-t border-[var(--border-subtle)]">
                     {lrcResults.map((c) => {
                       const off = songDurationMs && c.durationMs ? Math.abs(c.durationMs - songDurationMs) : null;
                       return (
-                        <button
+                        <div
                           key={c.id}
-                          onClick={() => pickCandidate(c)}
                           title={c.lines.slice(0, 6).map((l) => l.text).join(" / ")}
-                          className="flex items-center gap-2 text-left px-2 py-[6px] rounded-[6px] bg-transparent border-none cursor-pointer hover:bg-[var(--bg)]"
+                          className="flex items-center gap-2 text-left px-2 py-[6px] rounded-[6px] hover:bg-[var(--bg)]"
                         >
                           <span className="min-w-0 flex-1">
                             <span className="block text-[12.5px] text-[var(--text-primary)] truncate">
@@ -881,10 +932,29 @@ export function LyricsInputPage() {
                           >
                             {c.synced ? "synced" : "text only"}
                           </span>
-                        </button>
+                          {c.synced && editLines.some((l) => l.text.trim()) && (
+                            <button
+                              onClick={() => borrowCandidateTiming(c)}
+                              title="Keep your lines (and their notes and marks); take only this version's times, matched by the words"
+                              className="text-[11.5px] px-2 py-[3px] rounded-[5px] border border-[var(--border)] bg-transparent text-[var(--text-secondary)] cursor-pointer hover:border-[var(--theme)] hover:text-[var(--theme)] flex-shrink-0"
+                            >
+                              Use its timing
+                            </button>
+                          )}
+                          <button
+                            onClick={() => pickCandidate(c)}
+                            title="Replace your lines with this version's lyrics (and times)"
+                            className="text-[11.5px] px-2 py-[3px] rounded-[5px] border-none bg-[var(--theme-light)] text-[var(--theme-text)] cursor-pointer flex-shrink-0"
+                          >
+                            Use its lyrics
+                          </button>
+                        </div>
                       );
                     })}
-                    <p className="text-[10.5px] text-[var(--text-muted)] px-2 pt-1">Picking one replaces the lines below (nothing is saved until Save lyrics).</p>
+                    <p className="text-[10.5px] text-[var(--text-muted)] px-2 pt-1">
+                      “Use its lyrics” replaces the lines below; “Use its timing” keeps them and copies only the times. Nothing is saved until Save lyrics. The length is
+                      in amber when it doesn't match your audio (its times won't fit).
+                    </p>
                   </div>
                 )}
               </div>

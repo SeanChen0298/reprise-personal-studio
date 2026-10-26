@@ -46,6 +46,18 @@ function markTried(songId: string, step: Step) {
   }
 }
 
+/** Let a step run again for a song (its lyrics or timing changed). */
+export function forgetPrepared(songId: string, step: Step) {
+  try {
+    const t = tried();
+    if (!t[songId]) return;
+    delete t[songId][step];
+    localStorage.setItem(TRIED_KEY, JSON.stringify(t));
+  } catch {
+    // Storage unavailable: nothing to forget.
+  }
+}
+
 const primaryLines = (song: Song, lines: Line[]) => splitLines(lines, song.translation_language).lines;
 
 /** Ask the coach to split the song into sections and save them (no preview: it's the automatic run). */

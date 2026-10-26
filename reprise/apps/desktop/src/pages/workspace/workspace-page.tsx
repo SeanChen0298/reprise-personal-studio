@@ -815,6 +815,7 @@ function Workspace({ songId }: { songId: string }) {
             },
           ]
         : []),
+      { id: "lrclib", group: "Lyrics", label: "Find lyrics or timing on LRCLIB…", run: () => navigate(`/song/${songId}/lyrics`) },
       { id: "note", group: "Lyrics", label: panel === "takes" && takes.reviewRec ? "Note a moment in the open take" : "Write a note on this line", shortcut: "N", featured: true, run: () => (panel === "takes" && takes.reviewRec ? setNoteFocusNonce((n) => n + 1) : cursorLine && setNoteLineId(cursorLine.id)) },
       { id: "edit", group: "Lyrics", label: "Edit line text", shortcut: "F", featured: true, run: () => cursorLine && setEditingLineId(cursorLine.id) },
       { id: "section", group: "Lyrics", featured: true, label: cursorLine && sections.some((s) => s.start_line_order === cursorLine.order) ? "Rename this section" : "Start a section at this line", shortcut: "#", run: startSectionEdit },
