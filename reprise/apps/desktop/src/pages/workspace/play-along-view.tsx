@@ -24,6 +24,8 @@ import { DEFAULT_STRUM_PATTERN, readChordSettings, saveChordSettings, STRUM_PRES
 import { useGuitarGuide } from "../../hooks/use-guitar-guide";
 import { useTaskQueueStore } from "../../stores/task-queue-store";
 import { ChordDiagram } from "../../components/chord-diagram";
+import { ScoreView } from "./score-view";
+import { scoreTex } from "../../lib/score-tex";
 
 interface PlayAlongViewProps {
   song: Song;
@@ -46,8 +48,9 @@ interface Playhead {
   line: number;    // index into lines, -1 if none
 }
 
-/** sheet: the songbook with strumming · pick: the songbook with fingerpicking tab · tab: the tab editor. */
-type Mode = "sheet" | "pick" | "tab";
+/** sheet: the songbook with strumming · pick: the songbook with fingerpicking tab · score: the
+ *  fingerpicking as a printed-style score · tab: the note-by-note tab editor. */
+type Mode = "sheet" | "pick" | "score" | "tab";
 
 /** Last index whose start is <= t (items sorted by start). */
 function indexAt<T>(items: T[], t: number, start: (x: T) => number): number {
@@ -1136,6 +1139,7 @@ function PickingView({ analysis, picking, pattern, onPattern, playhead, isPlayin
 const MODES: { value: Mode; label: string }[] = [
   { value: "sheet", label: "Strumming" },
   { value: "pick", label: "Fingerpicking" },
+  { value: "score", label: "Score" },
 ];
 
 /** Paste a chord chart you trust; preview where it lands, then apply it as one undoable step. */
@@ -1658,6 +1662,15 @@ export function PlayAlongView({
     [analysis, guidePrefs.pickPattern, voicingFor, capoShown, tabEdits.edits],
   );
 
+  // The score text: only rebuilt when the song's data changes (alphaTab redraws the whole score for it).
+  const scoreText = useMemo(
+    () =>
+      mode === "score" && analysis
+        ? scoreTex({ title: song.title, artist: song.artist, analysis, picking, lines, sections, chordName: display, capo: capoShown })
+        : "",
+    [mode, analysis, picking, lines, sections, display, capoShown, song.title, song.artist],
+  );
+
   // Sound + volume apply to chord previews too, not just the guide.
   useEffect(() => {
     setInstrument(guidePrefs.instrument);
@@ -1949,7 +1962,7 @@ export function PlayAlongView({
         </div>
 
         {/* One scrolling area for whichever view is selected */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5">
+        <div data-score-scroll className="flex-1 min-h-0 overflow-y-auto px-6 py-5">
           {(mode === "sheet" || mode === "pick") && (
             <SongbookView
               analysis={analysis}
@@ -1962,6 +1975,16 @@ export function PlayAlongView({
               strumPattern={strumPattern}
               fingerpicking={mode === "pick"}
               shapeFor={(label) => voicingFor(label)}
+            />
+          )}
+          {mode === "score" && (
+            <ScoreView
+              tex={scoreText}
+              analysis={analysis}
+              currentBar={playhead.bar}
+              isPlaying={isPlaying}
+              onSeek={onSeek}
+              fileName={`${song.title}${song.artist ? ` - ${song.artist}` : ""}`.replace(/[\/:*?"<>|]/g, "")}
             />
           )}
           {mode === "tab" && (

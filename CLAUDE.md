@@ -219,6 +219,10 @@ Bars come from the model's downbeats (per-bar beat counts, stray 2+2 bar lines m
 stretches with no steady pulse (intro/outro) become `free` placeholder bars that the guide
 guitar and fingerpicking skip.
 
+## Guitar page (song workspace → Lead sheet toggle)
+
+Three views: **Strumming** and **Fingerpicking** are a songbook (`SongbookView` in `play-along-view.tsx`: lyrics with each chord above the syllable where it changes, chord shapes on top, strum pattern per section, a small ASCII tab under each line when fingerpicking); **Score** renders the fingerpicking draft as a printed-style tab with **alphaTab** (`@coderline/alphatab` 1.8.4, `pages/workspace/score-view.tsx`; `lib/score-tex.ts` writes alphaTex — notes ring to the next note as 8th/quarter/dotted/half with ties, chord names where they change, section names, lyrics per beat). The Bravura font is bundled in `public/alphatab/font` (OFL); alphaTab runs without workers, player off (the song's own audio drives the bar marker); "Export Guitar Pro" downloads a .gp. The note-by-note tab grid editor stays behind ⋯. Planned next: a better draft (Basic Pitch melody where nobody sings, real bass notes), then editing in the score.
+
 ## BTC (Chord Recognition)
 
 Chords come from **BTC** (Bi-directional Transformer for Chord recognition, ISMIR 2019; 170-chord
