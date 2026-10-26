@@ -238,9 +238,9 @@ export default function SongScreen() {
     <View style={{ flex: 1, backgroundColor: t.bg }}>
       {/* The song's artwork, blurred, as a wash of its colours behind the top of the page */}
       {!!art && (
-        <Animated.View entering={FadeIn.duration(600)} pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, height: 340 }}>
-          <Image source={{ uri: art }} blurRadius={40} resizeMode="cover" style={{ width: "100%", height: "100%", opacity: t.dark ? 0.55 : 0.4 }} />
-          <LinearGradient colors={[t.dark ? "rgba(12,12,16,0.25)" : "rgba(249,249,249,0.2)", t.bg]} locations={[0, 1]} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} />
+        <Animated.View entering={FadeIn.duration(600)} pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, height: 260 }}>
+          <Image source={{ uri: art }} blurRadius={40} resizeMode="cover" style={{ width: "100%", height: "100%", opacity: t.dark ? 0.3 : 0.16 }} />
+          <LinearGradient colors={[t.dark ? "rgba(12,12,16,0.35)" : "rgba(249,249,249,0.35)", t.bg]} locations={[0, 1]} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} />
         </Animated.View>
       )}
       {/* Header */}
