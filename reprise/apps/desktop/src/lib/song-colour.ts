@@ -41,8 +41,8 @@ export async function artworkInfo(song: { id: string; thumbnail_b64?: string | n
   try {
     const img = await loadImage(src);
     if (img.width && img.height) aspect = img.width / img.height;
-    const w = 48;
-    const h = Math.max(27, Math.round((48 * img.height) / Math.max(1, img.width)));
+    const w = 120;
+    const h = Math.max(68, Math.round((120 * img.height) / Math.max(1, img.width)));
     const canvas = document.createElement("canvas");
     canvas.width = w;
     canvas.height = h;
@@ -57,13 +57,14 @@ export async function artworkInfo(song: { id: string; thumbnail_b64?: string | n
           const i = (y * w + x) * 4;
           sum += px[i] + px[i + 1] + px[i + 2];
         }
-        return sum / (w * 3) < 22;
+        return sum / (w * 3) < 30;
       };
       let top = 0;
       while (top < h / 3 && dark(top)) top++;
       let bottom = 0;
       while (bottom < h / 3 && dark(h - 1 - bottom)) bottom++;
-      bars = Math.min(0.3, Math.min(top, bottom) / h);
+      // A hair more, so a soft edge of the bar doesn't show.
+      bars = top && bottom ? Math.min(0.32, Math.min(top, bottom) / h + 0.006) : 0;
       // Hue buckets weighted by saturation; dark letterbox bars and blown-out whites don't count.
       const buckets = Array.from({ length: 12 }, () => ({ w: 0, r: 0, g: 0, b: 0 }));
       let all = { n: 0, r: 0, g: 0, b: 0 };

@@ -124,7 +124,7 @@ export default function Library() {
 
       {playable > 0 && !query && (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 26 }}>
-          <Button t={t} kind="soft" label="Play all" icon={<PlayIcon color={t.themeText} size={12} />} onPress={() => void playAll()} />
+          <Button t={t} kind="soft" label="Play all" icon={<PlayIcon color={t.text} size={12} />} onPress={() => void playAll()} />
           <Button t={t} kind={shuffle ? "soft" : "plain"} label={shuffle ? "Shuffle on" : "Shuffle"} onPress={() => usePrefsStore.getState().setRadioShuffle(!shuffle)} />
         </View>
       )}

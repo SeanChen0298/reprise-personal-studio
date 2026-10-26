@@ -67,6 +67,25 @@ function segments(text: string, annotations: Annotation[] | undefined, lineRuby:
   return segs.length ? segs : [{ text, start: 0, type: null, furigana: lineRuby }];
 }
 
+/** Split where a Japanese line may wrap: after 」！？、。 and spaces, and before 「. */
+export function phrases(text: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  for (const c of text) {
+    if (c === "「" && cur) {
+      out.push(cur);
+      cur = "";
+    }
+    cur += c;
+    if (/[」！？!?、。\s]/.test(c)) {
+      out.push(cur);
+      cur = "";
+    }
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
 interface Props {
   line: Line;
   highlights: HighlightType[];
@@ -89,6 +108,25 @@ export const AnnotatedText = memo(function AnnotatedText({ line, highlights, fon
   const weight = bold ? "600" : "400";
   const style = { fontSize, color, fontFamily: "serif", fontWeight: weight } as const;
   const hasRuby = segs.some((s) => s.furigana);
+
+  // Long Japanese lines: wrap only between phrases (after 」！？、。 and spaces, before 「), never inside a word.
+  if (!hasRuby && /[\u3040-\u30ff\u3400-\u9fff]/.test(text) && text.length > 15) {
+    const pieces = segs.flatMap((s) =>
+      phrases(s.text).map((p) => ({ text: p, type: s.type })),
+    );
+    return (
+      <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "center" }}>
+        {pieces.map((p, i) => {
+          const h = p.type ? hl.get(p.type) : null;
+          return (
+            <Text key={i} style={[{ ...style, lineHeight: fontSize * 1.4 }, h ? { backgroundColor: h.bg, color: h.color } : null]}>
+              {p.text}
+            </Text>
+          );
+        })}
+      </View>
+    );
+  }
 
   if (!hasRuby) {
     return (
