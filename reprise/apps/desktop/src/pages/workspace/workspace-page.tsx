@@ -1068,8 +1068,16 @@ function Workspace({ songId }: { songId: string }) {
           ref={sheetRef}
           onMouseDown={markInteraction}
           onWheel={markInteraction}
-          className="flex-1 min-h-0 overflow-y-auto"
-          style={{ scrollbarWidth: "thin" }}
+          className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden"
+          style={{
+            scrollbarWidth: "thin",
+            ...(view === "lyrics" && lines.length > 0
+              ? {
+                  maskImage: "linear-gradient(to bottom, black calc(100% - 150px), transparent calc(100% - 46px))",
+                  WebkitMaskImage: "linear-gradient(to bottom, black calc(100% - 150px), transparent calc(100% - 46px))",
+                }
+              : {}),
+          }}
         >
           {!audioReady && (
             <div className="mx-auto max-w-[760px] mt-5 px-4 py-3 rounded-[9px] border border-amber-300/60 bg-amber-50/60 text-[12.5px] text-amber-800 flex items-center gap-3">

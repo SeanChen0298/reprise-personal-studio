@@ -388,8 +388,14 @@ const LineRow = memo(function LineRow({
             </span>
           </div>
         )}
+        {info && (info.longestPhraseMs >= LONG_PHRASE_MS || info.peakSemitone != null) && !isCursor && (
+          <div className="flex-shrink-0 flex gap-[3px] pl-2 pt-[10px] select-none group-hover:hidden" aria-hidden>
+            {info.longestPhraseMs >= LONG_PHRASE_MS && <span className="w-[5px] h-[5px] rounded-full bg-sky-500/50" />}
+            {info.peakSemitone != null && <span className="w-[5px] h-[5px] rounded-full bg-amber-500/60" />}
+          </div>
+        )}
         {info && (info.longestPhraseMs >= LONG_PHRASE_MS || info.peakSemitone != null) && (
-          <div className="flex-shrink-0 flex flex-col items-end gap-[2px] pl-2 pt-[4px] select-none">
+          <div className={`flex-shrink-0 flex-col items-end gap-[2px] pl-2 pt-[4px] select-none ${isCursor ? "flex" : "hidden group-hover:flex"}`}>
             {info.longestPhraseMs >= LONG_PHRASE_MS && (
               <span className="text-[9.5px] px-[5px] py-[1px] rounded-[3px] bg-sky-500/10 text-sky-700" title="A long phrase without a breath in the original — fill up before it">
                 long · {(info.longestPhraseMs / 1000).toFixed(1)} s
@@ -414,7 +420,7 @@ const LineRow = memo(function LineRow({
             💬{(line.note ? 1 : 0) + (takeNotes?.length ?? 0) > 1 ? ` ${(line.note ? 1 : 0) + (takeNotes?.length ?? 0)}` : ""}
           </span>
           <div
-            className="hidden group-hover:flex absolute left-full top-0 ml-3 z-30 w-[260px] flex-col gap-[6px] p-3 rounded-[10px] border border-[var(--border)] bg-[var(--surface)] shadow-lg select-none"
+            className="hidden group-hover:flex absolute right-2 top-full -mt-1 min-[1640px]:right-auto min-[1640px]:left-full min-[1640px]:top-0 min-[1640px]:mt-0 min-[1640px]:ml-3 z-30 w-[260px] flex-col gap-[6px] p-3 rounded-[10px] border border-[var(--border)] bg-[var(--surface)] shadow-lg select-none"
             onMouseUp={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
           >
