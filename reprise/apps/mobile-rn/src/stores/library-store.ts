@@ -3,7 +3,7 @@
 //   snapshot   what the computer sent last (documentDirectory/library.json)
 //   local      what only the phone has (local.json): downloaded audio, takes
 //              recorded here, edits not yet acknowledged by the computer,
-//              when songs were last practised here
+//              when songs were last practiced here
 //
 // Sync (pull-to-refresh, opening the app, after a take) sends the phone's
 // takes and edits to the computer first, then pulls the library again.
@@ -71,7 +71,7 @@ interface LocalState {
   lineEdits: Record<string, LineEdit>;
   takeEdits: Record<string, TakeEdit>;
   practiced: Record<string, string>;
-  /** Practised times already sent. */
+  /** Practiced times already sent. */
   practicedSent: Record<string, string>;
 }
 

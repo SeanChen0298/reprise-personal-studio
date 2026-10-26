@@ -173,7 +173,7 @@ export default function Settings() {
           <>
             {row("Theme", <Segmented t={t} options={["auto", "light", "dark"] as ThemeMode[]} value={prefs.themeMode} onChange={prefs.setThemeMode} label={(m) => (m === "auto" ? "Auto" : m === "light" ? "Light" : "Dark")} />)}
             {row(
-              "Colour",
+              "Color",
               <View style={{ flexDirection: "row", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
                 <Pressable onPress={() => prefs.setAccent(null)} style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, backgroundColor: prefs.accent == null ? t.themeSoft : "transparent" }}>
                   <Text style={{ fontSize: 13, color: prefs.accent == null ? t.themeText : t.textSecondary }}>Same as computer</Text>
@@ -184,7 +184,7 @@ export default function Settings() {
                   </Pressable>
                 ))}
               </View>,
-              "Each song's own screen takes its colour from the song's artwork.",
+              "Each song's own screen takes its color from the song's artwork.",
               { below: true, last: true },
             )}
           </>,

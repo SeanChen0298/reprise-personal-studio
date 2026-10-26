@@ -76,7 +76,7 @@ export function useTheme(): Theme {
     dark,
     ...base,
     theme,
-    // A quiet tint in the dark (a solid deep colour shouts).
+    // A quiet tint in the dark (a solid deep color shouts).
     themeSoft: dark ? `${a.dark}1F` : a.soft,
     themeText: dark ? a.dark : a.text,
     accent: dark ? "#F3F4F6" : "#111111",

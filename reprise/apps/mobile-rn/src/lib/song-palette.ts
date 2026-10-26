@@ -1,7 +1,7 @@
-// A song's colours, from its artwork colour (sent by the computer), tuned for the light / dark theme:
-//   wash   the page behind the song (a breath of its colour, never dark in light mode)
+// A song's colors, from its artwork color (sent by the computer), tuned for the light / dark theme:
+//   wash   the page behind the song (a breath of its color, never dark in light mode)
 //   soft   chips / secondary buttons
-//   tint   text and icons in the song's colour (readable on the page)
+//   tint   text and icons in the song's color (readable on the page)
 //   solid  the main button
 import { useMemo } from "react";
 import { useLibraryStore } from "../stores/library-store";
@@ -46,7 +46,7 @@ export function paletteFor(hex: string | undefined, t: Theme): SongPalette {
     return { wash: t.bg, soft: t.themeSoft, tint: t.themeText, solid: t.theme, onSolid: "#fff" };
   }
   const [h, s0] = hexToHsl(hex);
-  // Grey artwork stays grey-ish; colourful artwork keeps a calm version of its hue.
+  // Grey artwork stays grey-ish; colorful artwork keeps a calm version of its hue.
   const s = Math.min(s0, 0.55);
   if (t.dark) {
     return {
@@ -69,4 +69,47 @@ export function paletteFor(hex: string | undefined, t: Theme): SongPalette {
 export function useSongPalette(songId: string | undefined, t: Theme): SongPalette {
   const hex = useLibraryStore((s) => (songId ? s.snapshot?.colors?.[songId] : undefined));
   return useMemo(() => paletteFor(hex, t), [hex, t]);
+}
+
+export interface VividLook {
+  /** The screen in the song's colour: a theme for everything drawn on it… */
+  t: Theme;
+  p: SongPalette;
+  /** …and its background, a gradient from the top to the bottom. */
+  top: string;
+  bottom: string;
+}
+
+/** The song screen's "Vivid" look: the page is the song's colour (deep, so white lyrics read well). */
+export function vividLook(hex: string | undefined, t: Theme): VividLook {
+  const [h, s0] = hex && /^#[0-9a-f]{6}$/i.test(hex) ? hexToHsl(hex) : hexToHsl(t.dark ? "#3b4a6b" : "#2f4a8a");
+  const s = Math.min(0.7, Math.max(0.18, s0));
+  const top = hsl(h, s * 0.85, 0.3);
+  const bottom = hsl(h, s * 0.75, 0.12);
+  const theme: Theme = {
+    ...t,
+    dark: true,
+    bg: bottom,
+    surface: hsl(h, s * 0.55, 0.19),
+    raised: hsl(h, s * 0.55, 0.23),
+    border: "#FFFFFF2E",
+    borderSubtle: "#FFFFFF17",
+    text: "#FFFFFF",
+    textSecondary: "#FFFFFFD0",
+    muted: "#FFFFFF8F",
+    theme: "#FFFFFF",
+    themeSoft: "#FFFFFF1F",
+    themeText: "#FFFFFF",
+    accent: "#FFFFFF",
+    onAccent: bottom,
+    danger: "#FCA5A5",
+    voice: "#E9E3FF",
+    voiceSoft: "#FFFFFF1F",
+  };
+  return {
+    t: theme,
+    p: { wash: bottom, soft: "#FFFFFF22", tint: "#FFFFFF", solid: "#FFFFFF", onSolid: hsl(h, s, 0.24) },
+    top,
+    bottom,
+  };
 }

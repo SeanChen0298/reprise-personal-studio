@@ -1,4 +1,4 @@
-// Library: the song to pick up again (in its colour, one action), what you sang recently, then every song.
+// Library: the song to pick up again (in its color, one action), what you sang recently, then every song.
 import { useMemo, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, ScrollView, TextInput, View } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
@@ -97,7 +97,7 @@ export default function Library() {
         </Card>
       )}
 
-      {/* The song to pick up again, in its own colour */}
+      {/* The song to pick up again, in its own color */}
       {hero && !query && (
         <Animated.View entering={FadeInDown.duration(420)}>
           <PressableScale onPress={() => open(hero.song)} style={{ borderRadius: 26, backgroundColor: heroP.soft, overflow: "hidden", marginBottom: 26 }}>
@@ -109,7 +109,7 @@ export default function Library() {
               </Text>
               <Text numberOfLines={1} style={{ fontSize: 14, color: t.textSecondary }}>
                 {hero.song.artist}
-                {hero.kind !== "added" ? ` · ${hero.kind === "take" ? "last take" : "practised"} ${timeAgo(hero.at)}` : ""}
+                {hero.kind !== "added" ? ` · ${hero.kind === "take" ? "last take" : "practiced"} ${timeAgo(hero.at)}` : ""}
               </Text>
               <View style={{ flexDirection: "row", marginTop: 14 }}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 8, height: 42, paddingHorizontal: 20, borderRadius: 21, backgroundColor: heroP.solid }}>
@@ -213,7 +213,7 @@ export default function Library() {
           );
         }}
       />
-      {/* Rows scroll under the status bar: give it the page colour */}
+      {/* Rows scroll under the status bar: give it the page color */}
       <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, height: insets.top, backgroundColor: t.bg, opacity: 0.94 }} />
       {radioOn && <NowPlaying t={t} />}
     </View>

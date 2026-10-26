@@ -1,4 +1,4 @@
-// The song, first: its colour, the lyrics following the music, play controls. Practising
+// The song, first: its color, the lyrics following the music, play controls. Practicing
 // (loop, speed, track, takes, record — and the hints, voice marks and notes in the lyrics) is
 // one pull-up away; the coach's card, takes and view options are behind "⋯".
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -16,10 +16,11 @@ import { usePrefsStore } from "../../src/stores/prefs-store";
 import { useLinePlayer } from "../../src/hooks/use-line-player";
 import { useTakeRecorder, type PendingTake } from "../../src/hooks/use-take-recorder";
 import { useTheme } from "../../src/lib/theme";
-import { useSongPalette } from "../../src/lib/song-palette";
+import { useSongPalette, vividLook } from "../../src/lib/song-palette";
+import { StatusBar } from "expo-status-bar";
 import { clock, megabytes } from "../../src/lib/format";
 import { DISPLAY, DISPLAY_REGULAR, Text } from "../../src/components/text";
-import { Button, Card, Chip, Label } from "../../src/components/ui";
+import { Button, Card, Chip, Label, Segmented } from "../../src/components/ui";
 import { Toggle } from "../../src/components/toggle";
 import { LyricRow } from "../../src/components/lyric-row";
 import { PlayerBar } from "../../src/components/player-bar";
@@ -61,8 +62,14 @@ async function keepTake(songId: string, p: PendingTake, note: string) {
 export default function SongScreen() {
   useKeepAwake();
   const { id, at, play } = useLocalSearchParams<{ id: string; at?: string; play?: string }>();
-  const t = useTheme();
-  const p = useSongPalette(id, t);
+  const appT = useTheme();
+  const calmP = useSongPalette(id, appT);
+  const look = usePrefsStore((s) => s.songLook);
+  const songHex = useLibraryStore((s) => s.snapshot?.colors?.[id]);
+  const vivid = useMemo(() => (look === "vivid" ? vividLook(songHex, appT) : null), [look, songHex, appT]);
+  /** What the screen draws with (sheets use the app's own theme, `appT`). */
+  const t = vivid?.t ?? appT;
+  const p = vivid?.p ?? calmP;
   const tone = { solid: p.solid, onSolid: p.onSolid, soft: p.soft, tint: p.tint };
   const insets = useSafeAreaInsets();
   const snapshot = useLibraryStore((s) => s.snapshot);
@@ -74,8 +81,8 @@ export default function SongScreen() {
   const showHints = usePrefsStore((s) => s.showHints);
   const countIn = usePrefsStore((s) => s.countIn);
   const autoDownload = usePrefsStore((s) => s.autoDownload);
-  const memorise = usePrefsStore((s) => s.memorise);
-  const practise = usePrefsStore((s) => s.practiseOpen);
+  const memorize = usePrefsStore((s) => s.memorize);
+  const practice = usePrefsStore((s) => s.practiceOpen);
 
   const song = snapshot?.songs.find((s) => s.id === id);
   const allLines = useMemo(() => linesWithEdits(snapshot, local, id), [snapshot, local, id]);
@@ -89,8 +96,8 @@ export default function SongScreen() {
   const coach = snapshot?.coach[id];
   const card = coach?.card ?? null;
   const highlights = snapshot?.highlights ?? [];
-  // Hints are practice information: only with the Practise tray open.
-  const hints = practise && showHints ? snapshot?.hints?.[id] : undefined;
+  // Hints are practice information: only with the Practice tray open.
+  const hints = practice && showHints ? snapshot?.hints?.[id] : undefined;
 
   // ── Audio ──────────────────────────────────────────────────────────────
   const files = snapshot?.files[id];
@@ -248,6 +255,8 @@ export default function SongScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: p.wash }}>
+      {vivid && <StatusBar style="light" />}
+      {vivid && <LinearGradient pointerEvents="none" colors={[vivid.top, vivid.bottom]} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} />}
       {/* Header: back, the song, more */}
       <View style={{ paddingTop: insets.top + 4, paddingHorizontal: 8, paddingBottom: 4, flexDirection: "row", alignItems: "center" }}>
         <Pressable onPress={() => router.back()} hitSlop={10} style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
@@ -353,8 +362,8 @@ export default function SongScreen() {
                 hint={hints?.[item.line.id]}
                 highlights={highlights}
                 showFurigana={showFurigana}
-                memorise={memorise}
-                practise={practise}
+                memorize={memorize}
+                practice={practice}
                 t={t}
                 onPress={onPressLine}
                 onLongPress={onLongPressLine}
@@ -363,13 +372,13 @@ export default function SongScreen() {
           }}
         />
         {/* The lyrics fade out at the edges instead of being cut off */}
-        <LinearGradient pointerEvents="none" colors={[p.wash, `${p.wash}00`]} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 28 }} />
-        <LinearGradient pointerEvents="none" colors={[`${p.wash}00`, p.wash]} style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 56 }} />
+        {!vivid && <LinearGradient pointerEvents="none" colors={[p.wash, `${p.wash}00`]} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 28 }} />}
+        {!vivid && <LinearGradient pointerEvents="none" colors={[`${p.wash}00`, p.wash]} style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 56 }} />}
       </View>
 
       {/* The computer's review of a take from here just arrived */}
       {reviewReady && !rec.pending && !rec.busy && (
-        <Animated.View entering={FadeInDown.springify().damping(18)} exiting={FadeOutDown.duration(180)} style={{ position: "absolute", left: 14, right: 14, bottom: insets.bottom + (practise ? 300 : 190) }}>
+        <Animated.View entering={FadeInDown.springify().damping(18)} exiting={FadeOutDown.duration(180)} style={{ position: "absolute", left: 14, right: 14, bottom: insets.bottom + (practice ? 300 : 190) }}>
           <Pressable
             onPress={() => {
               setTakeFocus(reviewReady.id);
@@ -393,7 +402,7 @@ export default function SongScreen() {
 
       {/* A take just finished */}
       {rec.pending && (
-        <Animated.View entering={FadeInDown.springify().damping(18)} exiting={FadeOutDown.duration(180)} style={{ position: "absolute", left: 14, right: 14, bottom: insets.bottom + (practise ? 300 : 190) }}>
+        <Animated.View entering={FadeInDown.springify().damping(18)} exiting={FadeOutDown.duration(180)} style={{ position: "absolute", left: 14, right: 14, bottom: insets.bottom + (practice ? 300 : 190) }}>
           <Card t={t} style={{ gap: 12, elevation: 6 }}>
             <Text style={{ fontFamily: DISPLAY, fontSize: 18, color: t.text }}>That take · {clock(rec.pending.durationMs)}</Text>
             <TextInput
@@ -450,8 +459,8 @@ export default function SongScreen() {
         track={activeTrack}
         onTrack={setTrack}
         hasSection={!!cursorSection}
-        practise={practise}
-        onPractise={usePrefsStore.getState().setPractiseOpen}
+        practice={practice}
+        onPractice={usePrefsStore.getState().setPracticeOpen}
         takes={takes.length}
         onTakes={() => setTakesOpen(true)}
         rec={rec}
@@ -461,24 +470,31 @@ export default function SongScreen() {
       />
 
       {/* ⋯ */}
-      <Sheet open={menuOpen} onClose={() => setMenuOpen(false)} title={song.title} t={t}>
+      <Sheet open={menuOpen} onClose={() => setMenuOpen(false)} title={song.title} t={appT}>
+        <View style={{ flexDirection: "row", alignItems: "center", paddingVertical: 8, marginBottom: 6 }}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 16, color: appT.text }}>Look</Text>
+            <Text style={{ fontSize: 13, color: appT.muted, marginTop: 2 }}>{look === "vivid" ? "In the song's color" : "Quiet, with a touch of its color"}</Text>
+          </View>
+          <Segmented t={appT} options={["calm", "vivid"] as const} value={look} onChange={usePrefsStore.getState().setSongLook} label={(v) => (v === "calm" ? "Calm" : "Vivid")} />
+        </View>
         <View style={{ gap: 4 }}>
           {[
             card && { label: "About this song", sub: card.mood || "The coach's notes on the song", go: () => fromMenu(() => setAboutOpen(true)) },
             { label: "Takes", sub: takes.length ? `${takes.length} so far` : "None yet", go: () => fromMenu(() => setTakesOpen(true)) },
-            { label: "Lyrics view", sub: "Translation, furigana, memorise", go: () => fromMenu(() => setViewOpen(true)) },
+            { label: "Lyrics view", sub: "Translation, furigana, memorize", go: () => fromMenu(() => setViewOpen(true)) },
           ]
             .filter((x): x is { label: string; sub: string; go: () => void } => !!x)
             .map((x) => (
               <Pressable key={x.label} onPress={x.go} style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", paddingVertical: 12, opacity: pressed ? 0.6 : 1 })}>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 16, color: t.text }}>{x.label}</Text>
-                  <Text numberOfLines={1} style={{ fontSize: 13, color: t.muted, marginTop: 2 }}>
+                  <Text style={{ fontSize: 16, color: appT.text }}>{x.label}</Text>
+                  <Text numberOfLines={1} style={{ fontSize: 13, color: appT.muted, marginTop: 2 }}>
                     {x.sub}
                   </Text>
                 </View>
                 <View style={{ transform: [{ rotate: "-90deg" }] }}>
-                  <ChevronIcon color={t.muted} size={16} />
+                  <ChevronIcon color={appT.muted} size={16} />
                 </View>
               </Pressable>
             ))}
@@ -488,7 +504,7 @@ export default function SongScreen() {
       <LineSheet
         line={lineSheet != null ? lines[lineSheet] ?? null : null}
         lineNo={(lineSheet ?? 0) + 1}
-        t={t}
+        t={appT}
         onClose={() => setLineSheet(null)}
         onSave={(patch) => lineSheet != null && lines[lineSheet] && useLibraryStore.getState().editLine(id, lines[lineSheet].id, patch)}
         onLoop={() => {
@@ -508,7 +524,7 @@ export default function SongScreen() {
         songId={id}
         takes={takes}
         lines={lines}
-        t={t}
+        t={appT}
         onBeforePlay={() => void player.pause()}
         onJumpToLine={(idx) => {
           setTakesOpen(false);
@@ -520,12 +536,12 @@ export default function SongScreen() {
       />
 
       {card && (
-        <Sheet open={aboutOpen} onClose={() => setAboutOpen(false)} title="About this song" t={t} tall>
+        <Sheet open={aboutOpen} onClose={() => setAboutOpen(false)} title="About this song" t={appT} tall>
           <SongCardView
             card={card}
             lines={lines}
             sections={sections}
-            t={t}
+            t={appT}
             onJump={(idx) => {
               setAboutOpen(false);
               void player.playLine(idx);
@@ -533,9 +549,9 @@ export default function SongScreen() {
           />
           {!!coach?.memory.length && (
             <View style={{ marginTop: 22, gap: 8 }}>
-              <Label t={t}>What you've learned</Label>
+              <Label t={appT}>What you've learned</Label>
               {coach.memory.map((m, i) => (
-                <Text key={i} style={{ fontSize: 14, lineHeight: 20, color: t.textSecondary }}>
+                <Text key={i} style={{ fontSize: 14, lineHeight: 20, color: appT.textSecondary }}>
                   {m}
                 </Text>
               ))}
@@ -544,24 +560,24 @@ export default function SongScreen() {
         </Sheet>
       )}
 
-      <Sheet open={viewOpen} onClose={() => setViewOpen(false)} title="Lyrics view" t={t}>
+      <Sheet open={viewOpen} onClose={() => setViewOpen(false)} title="Lyrics view" t={appT}>
         {[
           { label: "Translation", value: showTranslation, set: usePrefsStore.getState().setShowTranslation, hidden: translations.length === 0 },
           { label: "Furigana", value: showFurigana, set: usePrefsStore.getState().setShowFurigana, hidden: !lines.some((l) => l.furigana_html || l.custom_furigana_html) },
-          { label: "Song hints while practising", sub: "The original's high notes and long phrases", value: showHints, set: usePrefsStore.getState().setShowHints, hidden: !snapshot?.hints?.[id] },
-          { label: "Memorise", sub: "Only the first word of each line", value: memorise, set: usePrefsStore.getState().setMemorise, hidden: false },
+          { label: "Song hints while practicing", sub: "The original's high notes and long phrases", value: showHints, set: usePrefsStore.getState().setShowHints, hidden: !snapshot?.hints?.[id] },
+          { label: "Memorize", sub: "Only the first word of each line", value: memorize, set: usePrefsStore.getState().setMemorize, hidden: false },
         ]
           .filter((x) => !x.hidden)
           .map((x) => (
             <View key={x.label} style={{ flexDirection: "row", alignItems: "center", paddingVertical: 11 }}>
               <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 15.5, color: t.text }}>{x.label}</Text>
-                {!!x.sub && <Text style={{ fontSize: 12.5, color: t.muted, marginTop: 2 }}>{x.sub}</Text>}
+                <Text style={{ fontSize: 15.5, color: appT.text }}>{x.label}</Text>
+                {!!x.sub && <Text style={{ fontSize: 12.5, color: appT.muted, marginTop: 2 }}>{x.sub}</Text>}
               </View>
-              <Toggle value={x.value} onChange={x.set} t={t} />
+              <Toggle value={x.value} onChange={x.set} t={appT} />
             </View>
           ))}
-        <Text style={{ fontSize: 12.5, color: t.muted, marginTop: 10, lineHeight: 18 }}>
+        <Text style={{ fontSize: 12.5, color: appT.muted, marginTop: 10, lineHeight: 18 }}>
           Tap a line to play from it · swipe sideways for the previous / next line · hold a line for your note and voice mark · tap a section name for the coach's note on it.
         </Text>
       </Sheet>

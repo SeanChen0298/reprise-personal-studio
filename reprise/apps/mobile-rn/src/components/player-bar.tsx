@@ -1,5 +1,5 @@
 // The song screen's bottom: the song's progress and play controls, like a music player, and a
-// Practise tray you pull up for loop, speed, track, takes and Record.
+// Practice tray you pull up for loop, speed, track, takes and Record.
 import { useRef, useState } from "react";
 import { Pressable, View, type GestureResponderEvent } from "react-native";
 import Animated, { FadeIn, FadeOut, LinearTransition } from "react-native-reanimated";
@@ -25,8 +25,8 @@ interface Props {
   track: TrackKind;
   onTrack: (k: TrackKind) => void;
   hasSection: boolean;
-  practise: boolean;
-  onPractise: (open: boolean) => void;
+  practice: boolean;
+  onPractice: (open: boolean) => void;
   takes: number;
   onTakes: () => void;
   rec: { busy: boolean; recording: boolean; countdown: number | null; elapsedMs: number };
@@ -35,7 +35,7 @@ interface Props {
   recordLabel: string;
 }
 
-export function PlayerBar({ player, t, p, tracks, track, onTrack, hasSection, practise, onPractise, takes, onTakes, rec, onRecord, onStop, recordLabel }: Props) {
+export function PlayerBar({ player, t, p, tracks, track, onTrack, hasSection, practice, onPractice, takes, onTakes, rec, onRecord, onStop, recordLabel }: Props) {
   const insets = useSafeAreaInsets();
   const [width, setWidth] = useState(1);
   const [drag, setDrag] = useState<number | null>(null);
@@ -96,7 +96,7 @@ export function PlayerBar({ player, t, p, tracks, track, onTrack, hasSection, pr
         </PressableScale>
       </View>
 
-      {/* Practise tray */}
+      {/* Practice tray */}
       {rec.busy ? (
         <Animated.View entering={FadeIn} exiting={FadeOut} style={{ alignItems: "center", marginTop: 10 }}>
           <Button
@@ -110,11 +110,11 @@ export function PlayerBar({ player, t, p, tracks, track, onTrack, hasSection, pr
         </Animated.View>
       ) : (
         <>
-          <Pressable onPress={() => onPractise(!practise)} hitSlop={6} style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 8 }}>
-            <Text style={{ fontSize: 13, fontWeight: "600", color: practise ? p.tint : t.muted }}>Practise</Text>
-            <ChevronIcon color={practise ? p.tint : t.muted} size={14} up={!practise} />
+          <Pressable onPress={() => onPractice(!practice)} hitSlop={6} style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 8 }}>
+            <Text style={{ fontSize: 13, fontWeight: "600", color: practice ? p.tint : t.muted }}>Practice</Text>
+            <ChevronIcon color={practice ? p.tint : t.muted} size={14} up={!practice} />
           </Pressable>
-          {practise && (
+          {practice && (
             <Animated.View entering={FadeIn.duration(220)} exiting={FadeOut.duration(150)} style={{ gap: 12, paddingTop: 2, paddingBottom: 4 }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
                 <Text style={{ width: 52, fontSize: 12.5, color: t.muted }}>Loop</Text>

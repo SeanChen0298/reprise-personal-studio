@@ -8,7 +8,7 @@ import type { Theme } from "../lib/theme";
 
 export type Tone = { solid: string; onSolid: string; soft: string; tint: string };
 
-/** The app's own tone: neutral (the colour in the app comes from the songs, which pass their palette). */
+/** The app's own tone: neutral (the color in the app comes from the songs, which pass their palette). */
 export const accentTone = (t: Theme): Tone => ({ solid: t.accent, onSolid: t.onAccent, soft: t.dark ? "#FFFFFF14" : "#0000000D", tint: t.text });
 
 export function Button({

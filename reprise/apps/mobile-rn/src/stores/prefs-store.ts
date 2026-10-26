@@ -6,7 +6,7 @@ export type ThemeMode = "auto" | "light" | "dark";
 
 interface PrefsState {
   themeMode: ThemeMode;
-  /** Accent colour; follows the desktop's theme unless picked here. */
+  /** Accent color; follows the desktop's theme unless picked here. */
   accent: string | null;
   showTranslation: boolean;
   showFurigana: boolean;
@@ -22,9 +22,11 @@ interface PrefsState {
   radioTrack: "audio" | "instrumental";
   radioShuffle: boolean;
   /** Song screen: show only the start of each line, for singing from memory. */
-  memorise: boolean;
-  /** The song screen's Practise tray is open. */
-  practiseOpen: boolean;
+  memorize: boolean;
+  /** The song screen's Practice tray is open. */
+  practiceOpen: boolean;
+  /** The song screen's look: calm (white / black with a touch of the song's color) or vivid (the song's color). */
+  songLook: "calm" | "vivid";
   setThemeMode: (v: ThemeMode) => void;
   setAccent: (v: string | null) => void;
   setShowTranslation: (v: boolean) => void;
@@ -35,8 +37,9 @@ interface PrefsState {
   setKeepRecent: (v: number) => void;
   setRadioTrack: (v: "audio" | "instrumental") => void;
   setRadioShuffle: (v: boolean) => void;
-  setMemorise: (v: boolean) => void;
-  setPractiseOpen: (v: boolean) => void;
+  setMemorize: (v: boolean) => void;
+  setPracticeOpen: (v: boolean) => void;
+  setSongLook: (v: "calm" | "vivid") => void;
 }
 
 export const usePrefsStore = create<PrefsState>()(
@@ -52,8 +55,9 @@ export const usePrefsStore = create<PrefsState>()(
       keepRecent: 5,
       radioTrack: "audio",
       radioShuffle: false,
-      memorise: false,
-      practiseOpen: false,
+      memorize: false,
+      practiceOpen: false,
+      songLook: "calm",
       setThemeMode: (v) => set({ themeMode: v }),
       setAccent: (v) => set({ accent: v }),
       setShowTranslation: (v) => set({ showTranslation: v }),
@@ -64,8 +68,9 @@ export const usePrefsStore = create<PrefsState>()(
       setKeepRecent: (v) => set({ keepRecent: v }),
       setRadioTrack: (v) => set({ radioTrack: v }),
       setRadioShuffle: (v) => set({ radioShuffle: v }),
-      setMemorise: (v) => set({ memorise: v }),
-      setPractiseOpen: (v) => set({ practiseOpen: v }),
+      setMemorize: (v) => set({ memorize: v }),
+      setPracticeOpen: (v) => set({ practiceOpen: v }),
+      setSongLook: (v) => set({ songLook: v }),
     }),
     { name: "reprise-prefs", storage: createJSONStorage(() => AsyncStorage) },
   ),

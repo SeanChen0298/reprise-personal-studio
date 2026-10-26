@@ -93,7 +93,7 @@ interface Props {
   color: string;
   bold?: boolean;
   showFurigana: boolean;
-  /** Dark theme: highlight colours are made for light backgrounds, so tint instead. */
+  /** Dark theme: highlight colors are made for light backgrounds, so tint instead. */
   dark?: boolean;
 }
 

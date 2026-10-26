@@ -19,9 +19,9 @@ interface Props {
   highlights: HighlightType[];
   showFurigana: boolean;
   /** Only the start of the line (singing from memory). */
-  memorise?: boolean;
-  /** Practise tray open: show voice marks, hints and notes. */
-  practise?: boolean;
+  memorize?: boolean;
+  /** Practice tray open: show voice marks, hints and notes. */
+  practice?: boolean;
   t: Theme;
   onPress: (index: number) => void;
   onLongPress: (index: number) => void;
@@ -37,14 +37,14 @@ function lineStart(text: string): string {
   return /[\u3040-\u30ff\u3400-\u9fff]/.test(word.slice(0, 1)) ? s.slice(0, 2) : word;
 }
 
-export const LyricRow = memo(function LyricRow({ line, index, active, distance, translation, hint, highlights, showFurigana, memorise, practise, t, onPress, onLongPress }: Props) {
+export const LyricRow = memo(function LyricRow({ line, index, active, distance, translation, hint, highlights, showFurigana, memorize, practice, t, onPress, onLongPress }: Props) {
   const text = (line.custom_text ?? line.text).trim();
   // Kana / kanji count fully, Latin letters about half (they're narrower).
   const width = [...text].reduce((n, c) => n + (/[\u3000-\u9fff\uff00-\uffef]/.test(c) ? 1 : 0.55), 0);
   // Long lines a little smaller (they wrap between phrases rather than shrinking further).
   const size = width > 16.5 ? 20 : 23;
-  const voice = practise ? [line.register, line.placement].filter(Boolean).join(" · ") : "";
-  const note = practise ? line.note : undefined;
+  const voice = practice ? [line.register, line.placement].filter(Boolean).join(" · ") : "";
+  const note = practice ? line.note : undefined;
   const timed = line.start_ms != null;
   // The current line eases up to full size and brightness; the others settle back (no jump in layout:
   // every line is laid out at full size and scaled).
@@ -62,7 +62,7 @@ export const LyricRow = memo(function LyricRow({ line, index, active, distance, 
     <Pressable onPress={() => onPress(index)} onLongPress={() => onLongPress(index)} delayLongPress={350}>
       <Animated.View style={[{ paddingVertical: 9, paddingHorizontal: 14, marginHorizontal: -6, borderRadius: 14 }, band]}>
       <Animated.View style={grow}>
-      {memorise ? (
+      {memorize ? (
         <Text style={{ textAlign: "center", fontFamily: "serif", fontSize: size, lineHeight: size * 1.4, color: timed ? t.text : t.muted }}>
           {lineStart(line.custom_text ?? line.text)}
           <Text style={{ fontFamily: "serif", color: t.muted }}> · · ·</Text>
@@ -71,7 +71,7 @@ export const LyricRow = memo(function LyricRow({ line, index, active, distance, 
         <AnnotatedText line={line} highlights={highlights} fontSize={size} color={timed ? t.text : t.muted} showFurigana={showFurigana} dark={t.dark} />
       )}
       </Animated.View>
-      {!!translation && !memorise && (
+      {!!translation && !memorize && (
         <Text style={{ textAlign: "center", fontSize: 13.5, lineHeight: 19, color: t.muted, marginTop: 4 }}>{translation}</Text>
       )}
       {(!!voice || !!note || !!hint) && (
