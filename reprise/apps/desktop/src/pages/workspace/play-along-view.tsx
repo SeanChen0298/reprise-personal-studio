@@ -35,6 +35,8 @@ interface PlayAlongViewProps {
   onSeek: (ms: number) => void;
   /** Element in the page's view-switch row where the mode tabs are rendered. */
   modeTabsContainer?: HTMLElement | null;
+  /** The song's sections (headings in the songbook). */
+  sections: { name: string; start_line_order: number; end_line_order: number }[];
 }
 
 interface Playhead {
@@ -44,7 +46,8 @@ interface Playhead {
   line: number;    // index into lines, -1 if none
 }
 
-type Mode = "sheet" | "tab";
+/** sheet: the songbook with strumming · pick: the songbook with fingerpicking tab · tab: the tab editor. */
+type Mode = "sheet" | "pick" | "tab";
 
 /** Last index whose start is <= t (items sorted by start). */
 function indexAt<T>(items: T[], t: number, start: (x: T) => number): number {
@@ -685,168 +688,219 @@ function ChordPopover({
 // under the beat they're sung on
 // ---------------------------------------------------------------------------
 
-const BARS_PER_ROW = 4;
+// ---------------------------------------------------------------------------
+// Songbook — your lyrics with each chord written above the syllable where it changes
+// (instrumental stretches as a row of chords), and in fingerpicking a small tab under each line.
+// ---------------------------------------------------------------------------
 
-/** Index of the beat whose span [beats[i], beats[i+1]) contains t (-1 before the first). */
-function beatIndexAt(beats: number[], t: number): number {
-  return indexAt(beats, t, (b) => b);
+interface SongbookSection {
+  name: string;
+  start_line_order: number;
+  end_line_order: number;
 }
 
-/** Lyric characters per beat, each under the beat it's sung on. */
-function lyricsByBeat(lines: Line[], beats: number[]): Map<number, string> {
-  const cells = new Map<number, string>();
-  for (const line of lines) {
-    if (line.start_ms == null || line.end_ms == null || line.end_ms <= line.start_ms) continue;
-    const chars = Array.from(line.custom_text ?? line.text);
-    const times = characterTimes(line, chars.length);
-    chars.forEach((ch, k) => {
-      const b = beatIndexAt(beats, times[k]);
-      if (b < 0) return;
-      cells.set(b, (cells.get(b) ?? "") + ch);
-    });
-  }
-  return cells;
+type SongbookItem =
+  | { kind: "section"; key: string; name: string }
+  | { kind: "line"; key: string; line: Line; index: number; from: number; to: number }
+  | { kind: "instrumental"; key: string; from: number; to: number };
+
+/** A lyric line's text split where chords change: each piece with the chords that start on it. */
+function chordPieces(line: Line, from: number, to: number, chords: ChordSegment[]) {
+  const text = line.custom_text ?? line.text;
+  const chars = Array.from(text);
+  if (!chars.length) return [];
+  const timed = { ...line, end_ms: line.end_ms != null && line.end_ms > from ? line.end_ms : to };
+  const times = characterTimes(timed, chars.length);
+  // Chord index → the character it lands on (the first one sung at or after the change).
+  const at = new Map<number, number[]>();
+  const put = (k: number, ci: number) => at.set(k, [...(at.get(k) ?? []), ci]);
+  const sounding = indexAt(chords, from + 40, (c) => c.start_ms);
+  if (sounding >= 0 && chords[sounding].label !== "N" && chords[sounding].end_ms > from + 40) put(0, sounding);
+  chords.forEach((c, ci) => {
+    if (c.label === "N" || c.start_ms <= from + 40 || c.start_ms >= to) return;
+    let k = times.findIndex((t) => t >= c.start_ms - 120);
+    if (k < 0) k = chars.length; // after the last sung character: a trailing chord
+    if (k === 0 && at.get(0)?.length) at.set(0, []);
+    put(k, ci);
+  });
+  const cuts = [...new Set([0, ...at.keys()])].sort((a, b) => a - b);
+  return cuts.map((k, i) => ({
+    text: chars.slice(k, cuts[i + 1] ?? chars.length).join(""),
+    chords: at.get(k) ?? [],
+    t: times[Math.min(k, times.length - 1)],
+  }));
 }
 
-function LeadSheetView({ analysis, lines, chords, playhead, isPlaying }: {
+/** Fingerpicking for a stretch of the song as tab text: one row per string, bars split by |. */
+function tabRows(events: PickEvent[], slotsPerBar: number): string[] | null {
+  if (!events.length) return null;
+  const bars = [...new Set(events.map((e) => e.bar))].sort((a, b) => a - b);
+  const cell = new Map<string, number>();
+  for (const e of events) for (const n of e.notes) cell.set(`${e.bar}:${e.slot}:${n.string}`, n.fret);
+  return STRING_LABELS.map((label, si) => {
+    const string = si + 1;
+    const body = bars
+      .map((bar) =>
+        Array.from({ length: slotsPerBar }, (_, slot) => {
+          const f = cell.get(`${bar}:${slot}:${string}`);
+          return f == null ? "---" : `-${String(f).padEnd(2, "-")}`;
+        }).join(""),
+      )
+      .join("|");
+    return `${label}|${body}|`;
+  });
+}
+
+function SongbookView({ analysis, lines, sections, chords, playhead, isPlaying, picking, strumPattern, fingerpicking, shapeFor }: {
   analysis: ChordAnalysis;
   lines: Line[];
+  sections: SongbookSection[];
   chords: ChordSegment[];
   playhead: Playhead;
   isPlaying: boolean;
+  /** Fingerpicking events (shown as tab under each line when `fingerpicking`). */
+  picking: PickEvent[];
+  strumPattern: string;
+  fingerpicking: boolean;
+  /** The fingering for a chord (for the shapes at the top). */
+  shapeFor: (label: string) => ChordShape | null;
 }) {
-  const { seek, openChord, display } = useActions();
+  const { seek, display, openChord } = useActions();
   const containerRef = useRef<HTMLDivElement>(null);
-  const bars = analysis.bars ?? [];
-  /** Chord name size: long names (Em7(♭5), DM7(9)) a size smaller so they fit their beat. */
-  const nameSize = (label: string) => (display(label).length > 5 ? "text-[12px] tracking-[-0.02em]" : "text-[14px]");
-  const beats = analysis.beats_ms ?? [];
-  useFollow(containerRef, playhead.bar >= 0 ? `[data-sheet-bar="${playhead.bar}"]` : null, isPlaying, "center");
+  useFollow(containerRef, playhead.line >= 0 ? `[data-songbook-line="${playhead.line}"]` : null, isPlaying, "center");
+  const meter = analysis.time_signature?.beats_per_bar === 3 ? 3 : 4;
+  const barMs = (() => {
+    const b = (analysis.bars ?? []).find((x) => !x.free && !x.pickup);
+    return b ? b.end_ms - b.start_ms : 2400;
+  })();
 
-  const lyrics = useMemo(() => lyricsByBeat(lines, beats), [lines, beats]);
-  // Which chord starts on each beat (chord starts sit on beats).
-  // Which chord starts on each beat, and on each beat's "&".
-  const { chordStartAtBeat, chordStartOnAnd } = useMemo(() => {
-    const onBeat = new Map<number, number>();
-    const onAnd = new Map<number, number>();
-    chords.forEach((c, ci) => {
-      const b = beatIndexAt(beats, c.start_ms + 40);
-      if (b < 0) return;
-      const next = beats[b + 1] ?? c.end_ms;
-      const map = c.start_ms > (beats[b] + next) / 2 - 80 ? onAnd : onBeat;
-      if (!map.has(b)) map.set(b, ci);
+  // The song in order: section headings, lines, and the instrumental stretches between them.
+  const items = useMemo<SongbookItem[]>(() => {
+    const out: SongbookItem[] = [];
+    const timed = lines.map((l, index) => ({ l, index })).filter((x) => x.l.start_ms != null);
+    const firstChord = chords.find((c) => c.label !== "N");
+    const lastChord = [...chords].reverse().find((c) => c.label !== "N");
+    const sectionAt = (order: number) => sections.find((s) => s.start_line_order === order);
+    const hasChords = (a: number, b: number) => chords.some((c) => c.label !== "N" && c.end_ms > a + 200 && c.start_ms < b - 200);
+    let prevEnd = firstChord ? firstChord.start_ms : 0;
+    timed.forEach(({ l, index }, i) => {
+      const start = l.start_ms!;
+      // An instrumental stretch before this line (at least a bar with chords and no singing).
+      if (start - prevEnd >= barMs * 0.9 && hasChords(prevEnd, start)) out.push({ kind: "instrumental", key: `i-${prevEnd}`, from: prevEnd, to: start });
+      const sec = sectionAt(l.order);
+      if (sec) out.push({ kind: "section", key: `s-${sec.start_line_order}`, name: sec.name });
+      const nextStart = timed[i + 1]?.l.start_ms ?? Math.min(start + 12000, analysis.duration_ms ?? start + 12000);
+      const to = Math.max(start + 300, Math.min(nextStart, (l.end_ms ?? nextStart) + barMs * 0.5));
+      out.push({ kind: "line", key: l.id, line: l, index, from: start, to });
+      prevEnd = to;
     });
-    return { chordStartAtBeat: onBeat, chordStartOnAnd: onAnd };
-  }, [chords, beats]);
+    if (lastChord && lastChord.end_ms - prevEnd >= barMs * 0.9 && hasChords(prevEnd, lastChord.end_ms)) {
+      out.push({ kind: "instrumental", key: `i-${prevEnd}`, from: prevEnd, to: lastChord.end_ms });
+    }
+    return out;
+  }, [lines, sections, chords, analysis.duration_ms, barMs]);
 
-  const rows: typeof bars[] = [];
-  for (let i = 0; i < bars.length; i += BARS_PER_ROW) rows.push(bars.slice(i, i + BARS_PER_ROW));
-  const currentBeat = playhead.bar >= 0 && bars[playhead.bar]
-    ? bars[playhead.bar].first_beat + Math.floor(Math.max(0, playhead.slot) / 2)
-    : -1;
+  // The song's chord shapes, in the order they first come.
+  const shapes = useMemo(() => {
+    const seen = new Map<string, number>();
+    chords.forEach((c, i) => {
+      if (c.label !== "N" && !seen.has(display(c.label))) seen.set(display(c.label), i);
+    });
+    return [...seen.entries()].map(([shown, i]) => ({ shown, index: i, label: chords[i].label }));
+  }, [chords, display]);
+
+  const eventsIn = (a: number, b: number) => picking.filter((e) => e.t >= a - 30 && e.t < b - 30);
+
+  const chordLabel = (ci: number) => (
+    <ChordName
+      key={ci}
+      label={chords[ci].label}
+      index={ci}
+      scope={{ start: chords[ci].start_ms, end: chords[ci].end_ms }}
+      edited={chords[ci].edited}
+      className={`text-[14px] font-semibold leading-none whitespace-nowrap ${ci === playhead.chord ? "text-[var(--theme)]" : "text-[var(--theme-text)]"}`}
+    />
+  );
+
+  const noTiming = lines.length > 0 && !lines.some((l) => l.start_ms != null);
 
   return (
-    <div ref={containerRef} className="flex flex-col gap-3 max-w-[1100px]">
-      {rows.map((row, ri) => (
-        <div key={ri} className="grid gap-0" style={{ gridTemplateColumns: `repeat(${BARS_PER_ROW}, minmax(0, 1fr))` }}>
-          {row.map((bar) => {
-            const isCurrentBar = bar.index === playhead.bar;
-            const beatIdx = Array.from({ length: bar.beats }, (_, k) => bar.first_beat + k);
-            // A chord that started before this bar and is still sounding.
-            const carried = !chordStartAtBeat.has(bar.first_beat)
-              ? indexAt(chords, bar.start_ms + 40, (c) => c.start_ms)
-              : -1;
+    <div ref={containerRef} className="mx-auto max-w-[780px] pb-[30vh]">
+      {/* The song's chords, as you'd finger them */}
+      {shapes.length > 0 && (
+        <div className="flex gap-3 overflow-x-auto pb-3 mb-6 border-b border-[var(--border-subtle)]" style={{ scrollbarWidth: "thin" }}>
+          {shapes.map((s) => {
+            const shape = shapeFor(s.label);
             return (
-              <div
-                key={bar.index}
-                data-sheet-bar={bar.index}
-                className={`relative border-l border-[var(--border)] pl-1.5 pr-1.5 pt-4 pb-2 ${
-                  bar.free ? "bg-[repeating-linear-gradient(135deg,transparent,transparent_6px,var(--bg)_6px,var(--bg)_12px)]" : ""
-                } ${isCurrentBar ? "bg-[var(--theme-light)]" : ""}`}
+              <button
+                key={s.shown}
+                onClick={(e) => openChord(s.label, e.currentTarget, s.index)}
+                title="Hear it, see other fingerings or change it"
+                className="flex flex-col items-center flex-shrink-0 bg-transparent border-none cursor-pointer rounded-[8px] px-1 pt-1 hover:bg-[var(--theme-light)]"
               >
-                <button
-                  onClick={() => seek(bar.start_ms)}
-                  title="Play from this bar"
-                  className="absolute top-0 left-1 text-[9.5px] text-[var(--text-muted)] bg-transparent border-none p-0 cursor-pointer hover:text-[var(--text-primary)]"
-                >
-                  {bar.pickup ? "pickup" : bar.index + 1}{bar.free ? " · free time" : ""}
-                  {!bar.pickup && !bar.free && bar.beats !== (analysis.time_signature?.beats_per_bar ?? 4) ? ` · ${bar.beats}/4` : ""}
-                </button>
-                <div className="grid" style={{ gridTemplateColumns: `repeat(${bar.beats}, minmax(0, 1fr))` }}>
-                  {beatIdx.map((b, k) => {
-                    const ci = chordStartAtBeat.get(b);
-                    const andCi = chordStartOnAnd.get(b);
-                    const t = beats[b];
-                    const isCurrentBeat = b === currentBeat;
-                    // Clicking an empty beat edits the chord from this beat to the end of the bar.
-                    const sounding = ci ?? indexAt(chords, (t ?? bar.start_ms) + 40, (c) => c.start_ms);
-                    const scope = { start: t ?? bar.start_ms, end: bar.end_ms };
-                    return (
-                      <div key={b} className="min-w-0 flex flex-col">
-                        <div className={`relative h-[22px] flex items-end ${andCi != null ? "overflow-hidden pr-[50%]" : ""}`}>
-                          {andCi != null && (
-                            <span className="absolute left-1/2 bottom-0 max-w-[50%]" title='Starts on the "&"'>
-                              <ChordName
-                                label={chords[andCi].label}
-                                index={andCi}
-                                scope={{ start: chords[andCi].start_ms, end: bar.end_ms }}
-                                edited={chords[andCi].edited}
-                                className={`${nameSize(chords[andCi].label)} font-semibold leading-none whitespace-nowrap ${
-                                  andCi === playhead.chord ? "text-[var(--theme-text)]" : "text-[var(--text-primary)]"
-                                }`}
-                              />
-                            </span>
-                          )}
-                          {ci != null ? (
-                            <ChordName
-                              label={chords[ci].label}
-                              index={ci}
-                              scope={scope}
-                              edited={chords[ci].edited}
-                              className={`${nameSize(chords[ci].label)} font-semibold leading-none whitespace-nowrap ${
-                                ci === playhead.chord ? "text-[var(--theme-text)]" : "text-[var(--text-primary)]"
-                              }`}
-                            />
-                          ) : k === 0 && carried >= 0 && chords[carried]?.label !== "N" ? (
-                            <ChordName
-                              label={chords[carried].label}
-                              index={carried}
-                              scope={scope}
-                              className="text-[12px] leading-none whitespace-nowrap text-[var(--text-muted)] opacity-70"
-                            />
-                          ) : sounding >= 0 ? (
-                            <span
-                              role="button"
-                              tabIndex={0}
-                              title="Start a new chord on this beat"
-                              onClick={(e) => openChord(chords[sounding].label, e.currentTarget, sounding, scope)}
-                              className="w-full h-[18px] rounded-[3px] cursor-pointer text-[11px] text-transparent hover:text-[var(--text-muted)] hover:bg-[var(--bg)] leading-[18px] text-center"
-                            >
-                              +
-                            </span>
-                          ) : null}
-                        </div>
-                        <div
-                          onClick={() => t != null && seek(t)}
-                          className={`mt-1 h-[3px] rounded-full ${isCurrentBeat ? "bg-[var(--theme)]" : "bg-[var(--border-subtle)]"}`}
-                        />
-                        <div
-                          onClick={() => t != null && seek(t)}
-                          className="mt-1 min-h-[20px] text-[13.5px] leading-[20px] text-[var(--text-secondary)] break-all cursor-pointer"
-                        >
-                          {lyrics.get(b) ?? ""}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+                <span className="text-[13px] font-semibold text-[var(--text-primary)]">{s.shown}</span>
+                {shape ? <ChordDiagram shape={shape} size={58} showFingers={false} /> : <span className="h-[60px]" />}
+              </button>
             );
           })}
         </div>
-      ))}
-      <div className="text-[11px] text-[var(--text-muted)] mt-1">
-        Click a chord to hear or change it · click an empty beat (+) to start a chord there · click a bar number to play from it.
+      )}
+
+      {noTiming && (
+        <p className="text-[13px] text-[var(--text-muted)] mb-4">
+          These lyrics have no timing yet, so the chords can't be placed on them — find a timed version with Ctrl+E → Find lyrics or timing on LRCLIB.
+        </p>
+      )}
+
+      {items.map((it) => {
+        if (it.kind === "section") {
+          return (
+            <div key={it.key} className="flex items-center gap-4 mt-8 mb-3">
+              <span className="text-[11.5px] font-semibold tracking-[0.08em] uppercase text-[var(--text-muted)]">{it.name}</span>
+              {!fingerpicking && <StrumPattern pattern={strumPattern} showCounts={false} />}
+            </div>
+          );
+        }
+        if (it.kind === "instrumental") {
+          const inside = chords
+            .map((c, ci) => ({ c, ci }))
+            .filter(({ c }) => c.label !== "N" && c.end_ms > it.from + 200 && c.start_ms < it.to - 200);
+          const rows = fingerpicking ? tabRows(eventsIn(it.from, it.to), meter * 2) : null;
+          return (
+            <div key={it.key} className="my-4 pl-3 border-l-2 border-[var(--border-subtle)]">
+              <div className="text-[11px] text-[var(--text-muted)] mb-1">Instrumental</div>
+              <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1">{inside.map(({ ci }) => chordLabel(ci))}</div>
+              {rows && <pre className="mt-2 text-[11.5px] leading-[1.35] text-[var(--text-muted)] font-mono overflow-x-auto">{rows.join("\n")}</pre>}
+            </div>
+          );
+        }
+        const pieces = chordPieces(it.line, it.from, it.to, chords);
+        const current = it.index === playhead.line;
+        const rows = fingerpicking ? tabRows(eventsIn(it.from, it.to), meter * 2) : null;
+        return (
+          <div key={it.key} data-songbook-line={it.index} className="mb-3">
+            <div className="flex flex-wrap items-end">
+              {pieces.map((p, i) => (
+                <span key={i} className="inline-flex flex-col">
+                  <span className="h-[20px] flex items-end gap-2 pr-2">{p.chords.map((ci) => chordLabel(ci))}</span>
+                  <span
+                    onClick={() => seek(p.t)}
+                    className={`text-[18px] leading-[28px] whitespace-pre cursor-pointer transition-colors ${
+                      current ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                    }`}
+                    style={{ fontFamily: "var(--font-lyrics, inherit)" }}
+                  >
+                    {p.text || " "}
+                  </span>
+                </span>
+              ))}
+            </div>
+            {rows && <pre className="mt-1 text-[11.5px] leading-[1.35] text-[var(--text-muted)] font-mono overflow-x-auto">{rows.join("\n")}</pre>}
+          </div>
+        );
+      })}
+      <div className="text-[11px] text-[var(--text-muted)] mt-8">
+        Click a chord to hear it, see the fingering or change it · click the words to play from there.
       </div>
     </div>
   );
@@ -1081,7 +1135,7 @@ function PickingView({ analysis, picking, pattern, onPattern, playhead, isPlayin
 
 const MODES: { value: Mode; label: string }[] = [
   { value: "sheet", label: "Strumming" },
-  { value: "tab", label: "Fingerpicking" },
+  { value: "pick", label: "Fingerpicking" },
 ];
 
 /** Paste a chord chart you trust; preview where it lands, then apply it as one undoable step. */
@@ -1387,7 +1441,7 @@ function GuideSettings({ prefs, onChange, onClose, anchor }: {
 }
 
 export function PlayAlongView({
-  song, lines, audioRef, isPlaying, onTogglePlay, onSeek, modeTabsContainer,
+  song, lines, audioRef, isPlaying, onTogglePlay, onSeek, modeTabsContainer, sections,
 }: PlayAlongViewProps) {
   const [mode, setMode] = useState<Mode>("sheet");
   // Strumming and fingerpicking keep separate chord edits and fingering picks.
@@ -1397,7 +1451,7 @@ export function PlayAlongView({
   const pickData = useChordData(chordPath, reloadKey, "fingerstyle");
   const {
     analysis, isLoading, error, editChord, setChordLength, removeChord, shiftChordStart, resetChord, editCount, undoLastEdit, applySpans,
-  } = mode === "tab" ? pickData : strumData;
+  } = mode === "sheet" ? strumData : pickData;
   const slots = useMemo(
     () => halfBeatTimes(analysis?.beats_ms ?? [], analysis?.duration_ms ?? 0),
     [analysis],
@@ -1506,7 +1560,7 @@ export function PlayAlongView({
   // Fingering choices, saved per song (one spot, or every chord of a name).
   const strumFingerings = useFingerings(song.audio_folder, "strum");
   const pickFingerings = useFingerings(song.audio_folder, "fingerstyle");
-  const fingerings = mode === "tab" ? pickFingerings : strumFingerings;
+  const fingerings = mode === "sheet" ? strumFingerings : pickFingerings;
   const voicingKey = (v: ChordShape) => `${v.kind}@${v.position}`;
   const shapeOf = useCallback(
     (label: string) => (capoShown ? capoShapeLabel(label, capoShown) : label),
@@ -1615,7 +1669,7 @@ export function PlayAlongView({
     analysis,
     audioRef,
     enabled: guideOn,
-    mode: mode === "tab" ? "fingerstyle" : "strum",
+    mode: mode === "sheet" ? "strum" : "fingerstyle",
     volume: guidePrefs.volume,
     offsetMs: guidePrefs.offsetMs,
     chordNotes,
@@ -1712,7 +1766,7 @@ export function PlayAlongView({
                 key={value}
                 onClick={() => setMode(value)}
                 className={`px-3 py-[4px] rounded-[6px] text-[12px] font-medium cursor-pointer border-none transition-all ${
-                  mode === value
+                  mode === value || (value === "pick" && mode === "tab")
                     ? "bg-[var(--surface)] text-[var(--text-primary)] shadow-[0_1px_2px_rgba(0,0,0,0.08)]"
                     : "bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                 }`}
@@ -1747,7 +1801,25 @@ export function PlayAlongView({
             )}
           </div>
 
-          {mode !== "tab" && (
+          {mode !== "sheet" && (
+            <div className="flex p-[2px] rounded-[8px] bg-[var(--bg)] border border-[var(--border)]">
+              {PICK_PATTERNS.map((p) => (
+                <button
+                  key={p.value}
+                  onClick={() => changeGuidePrefs({ ...guidePrefs, pickPattern: p.value })}
+                  title={p.hint}
+                  className={`px-2.5 py-[3px] rounded-[6px] text-[11.5px] cursor-pointer border-none transition-all ${
+                    guidePrefs.pickPattern === p.value
+                      ? "bg-[var(--surface)] text-[var(--text-primary)] font-medium shadow-[0_1px_2px_rgba(0,0,0,0.08)]"
+                      : "bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          )}
+          {mode === "sheet" && (
             <StrumPatternButton
               pattern={strumPattern}
               activeSlot={playhead.bar >= 0 && playhead.slot >= 0 ? playhead.slot % strumPattern.length : undefined}
@@ -1791,7 +1863,7 @@ export function PlayAlongView({
               <button
                 onClick={() => setGuideOn((v) => !v)}
                 disabled={guideDisabled}
-                title={mode === "tab"
+                title={mode !== "sheet"
                   ? "Fingerpick the chords along with the song"
                   : "Strum the chords along with the song, using the strum pattern"}
                 className={`h-[25px] flex items-center gap-1.5 px-2.5 text-[12px] font-medium border-none cursor-pointer transition-all whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed ${
@@ -1831,6 +1903,20 @@ export function PlayAlongView({
                   className="absolute right-0 top-[calc(100%+6px)] z-30 w-[230px] p-1 rounded-[9px] border border-[var(--border)] bg-[var(--surface)] shadow-lg"
                   onMouseLeave={() => setMoreOpen(false)}
                 >
+                  {mode !== "sheet" && (
+                    <button
+                      onClick={() => {
+                        setMoreOpen(false);
+                        setMode(mode === "tab" ? "pick" : "tab");
+                      }}
+                      className="w-full text-left px-3 py-[6px] text-[12.5px] rounded-[5px] bg-transparent border-none cursor-pointer hover:bg-[var(--bg)] text-[var(--text-secondary)]"
+                    >
+                      {mode === "tab" ? "Back to the lyrics" : "Edit the tab note by note…"}
+                      <span className="block text-[10.5px] text-[var(--text-muted)]">
+                        {mode === "tab" ? "The fingerpicking under your lyrics" : "Change single notes of the fingerpicking"}
+                      </span>
+                    </button>
+                  )}
                   <button
                     onClick={() => {
                       setMoreOpen(false);
@@ -1864,8 +1950,19 @@ export function PlayAlongView({
 
         {/* One scrolling area for whichever view is selected */}
         <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5">
-          {mode === "sheet" && (
-            <LeadSheetView analysis={analysis} lines={lines} chords={chords} playhead={playhead} isPlaying={isPlaying} />
+          {(mode === "sheet" || mode === "pick") && (
+            <SongbookView
+              analysis={analysis}
+              lines={lines}
+              sections={sections}
+              chords={chords}
+              playhead={playhead}
+              isPlaying={isPlaying}
+              picking={picking}
+              strumPattern={strumPattern}
+              fingerpicking={mode === "pick"}
+              shapeFor={(label) => voicingFor(label)}
+            />
           )}
           {mode === "tab" && (
             <PickingView

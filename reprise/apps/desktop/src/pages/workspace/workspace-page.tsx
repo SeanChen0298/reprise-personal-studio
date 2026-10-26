@@ -1125,6 +1125,7 @@ function Workspace({ songId }: { songId: string }) {
               onTogglePlay={player.togglePlay}
               onSeek={player.seekTo}
               modeTabsContainer={modeTabsEl}
+              sections={sections}
             />
           ) : lines.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-28 gap-3 text-center">
