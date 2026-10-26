@@ -172,6 +172,8 @@ interface LineRowProps {
   line: Line;
   info: LineVocalInfo | null;
   translation?: string;
+  /** How the line is pronounced (romaji), when shown. */
+  romaji?: string;
   highlights: HighlightType[];
   isCursor: boolean;
   anchor: number;
@@ -206,7 +208,7 @@ interface LineRowProps {
 }
 
 const LineRow = memo(function LineRow({
-  line, info, translation, highlights, isCursor, anchor, focus, isPlaying, inLoop, editing, showCaret,
+  line, info, translation, romaji, highlights, isCursor, anchor, focus, isPlaying, inLoop, editing, showCaret,
   issues, onSelect, onStartEdit, onCommitEdit, onCancelEdit, onPlay, onIssueClick, onNudge,
   symbols, pickingSymbol, onPickSymbol, onCloseSymbols,
   takeNotes, editingNote, onStartNote, onCommitNote, onCancelNote, checkFlag, onCheckOk,
@@ -302,6 +304,7 @@ const LineRow = memo(function LineRow({
               {text.length === 0 && <span className="text-[var(--text-muted)] italic text-[13px]">(empty line)</span>}
             </div>
           )}
+          {romaji && <div className="text-[13px] leading-snug text-[var(--text-secondary)] mt-0.5 select-none tracking-[0.01em]">{romaji}</div>}
           {translation && <div className="text-[12px] leading-snug text-[var(--text-muted)] mt-0.5 select-none">{translation}</div>}
           {pickingSymbol && !editing && <SymbolPicker symbols={symbols} onPick={onPickSymbol} onClose={onCloseSymbols} />}
           {editingNote ? (
@@ -597,6 +600,7 @@ export interface LyricSheetProps {
   sections: Section[];
   /** Translation text per lyric line id. */
   translationById: Map<string, string>;
+  showRomaji: boolean;
   highlights: HighlightType[];
   vocalMap: VocalMap | null;
   showHints: boolean;
@@ -719,6 +723,7 @@ export function LyricSheet(p: LyricSheetProps) {
               line={line}
               info={infos.get(line.id) ?? null}
               translation={p.translationById.get(line.id)}
+              romaji={p.showRomaji && line.romaji_of === (line.custom_text ?? line.text) ? line.romaji : undefined}
               highlights={p.highlights}
               isCursor={isCursor}
               anchor={isCursor ? p.cursor!.anchor : 0}

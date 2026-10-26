@@ -14,6 +14,8 @@ interface Props {
   /** Distance from the active line (for the calm fade). */
   distance: number;
   translation?: string;
+  /** How the line is pronounced (romaji), when shown. */
+  romaji?: string;
   /** The original singer's long phrase / high note here. */
   hint?: SyncLineHint;
   highlights: HighlightType[];
@@ -37,7 +39,7 @@ function lineStart(text: string): string {
   return /[\u3040-\u30ff\u3400-\u9fff]/.test(word.slice(0, 1)) ? s.slice(0, 2) : word;
 }
 
-export const LyricRow = memo(function LyricRow({ line, index, active, distance, translation, hint, highlights, showFurigana, memorize, practice, t, onPress, onLongPress }: Props) {
+export const LyricRow = memo(function LyricRow({ line, index, active, distance, translation, romaji, hint, highlights, showFurigana, memorize, practice, t, onPress, onLongPress }: Props) {
   const text = (line.custom_text ?? line.text).trim();
   // Kana / kanji count fully, Latin letters about half (they're narrower).
   const width = [...text].reduce((n, c) => n + (/[\u3000-\u9fff\uff00-\uffef]/.test(c) ? 1 : 0.55), 0);
@@ -71,6 +73,9 @@ export const LyricRow = memo(function LyricRow({ line, index, active, distance, 
         <AnnotatedText line={line} highlights={highlights} fontSize={size} color={timed ? t.text : t.muted} showFurigana={showFurigana} dark={t.dark} />
       )}
       </Animated.View>
+      {!!romaji && !memorize && (
+        <Text style={{ textAlign: "center", fontSize: 14.5, lineHeight: 20, color: t.textSecondary, marginTop: 3 }}>{romaji}</Text>
+      )}
       {!!translation && !memorize && (
         <Text style={{ textAlign: "center", fontSize: 13.5, lineHeight: 19, color: t.muted, marginTop: 4 }}>{translation}</Text>
       )}

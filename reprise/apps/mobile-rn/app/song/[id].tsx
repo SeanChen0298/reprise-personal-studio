@@ -80,6 +80,7 @@ export default function SongScreen() {
   const pairing = useLibraryStore((s) => s.pairing);
   const downloading = useLibraryStore((s) => s.downloading[id]);
   const showTranslation = usePrefsStore((s) => s.showTranslation);
+  const showRomaji = usePrefsStore((s) => s.showRomaji);
   const showFurigana = usePrefsStore((s) => s.showFurigana);
   const showHints = usePrefsStore((s) => s.showHints);
   const countIn = usePrefsStore((s) => s.countIn);
@@ -373,6 +374,7 @@ export default function SongScreen() {
                 active={item.index === active}
                 distance={Math.abs(item.index - active)}
                 translation={showTranslation ? transById.get(item.line.id) : undefined}
+                romaji={showRomaji && item.line.romaji_of === (item.line.custom_text ?? item.line.text) ? item.line.romaji : undefined}
                 hint={hints?.[item.line.id]}
                 highlights={highlights}
                 showFurigana={showFurigana}
@@ -496,7 +498,7 @@ export default function SongScreen() {
           {[
             card && { label: "About this song", sub: card.mood || "The coach's notes on the song", go: () => fromMenu(() => setAboutOpen(true)) },
             { label: "Takes", sub: takes.length ? `${takes.length} so far` : "None yet", go: () => fromMenu(() => setTakesOpen(true)) },
-            { label: "Lyrics view", sub: "Translation, furigana, memorize", go: () => fromMenu(() => setViewOpen(true)) },
+            { label: "Lyrics view", sub: "Romaji, translation, furigana, memorize", go: () => fromMenu(() => setViewOpen(true)) },
           ]
             .filter((x): x is { label: string; sub: string; go: () => void } => !!x)
             .map((x) => (
@@ -576,6 +578,7 @@ export default function SongScreen() {
 
       <Sheet open={viewOpen} onClose={() => setViewOpen(false)} title="Lyrics view" t={appT}>
         {[
+          { label: "Romaji", sub: "How each line is pronounced", value: showRomaji, set: usePrefsStore.getState().setShowRomaji, hidden: !lines.some((l) => l.romaji) },
           { label: "Translation", value: showTranslation, set: usePrefsStore.getState().setShowTranslation, hidden: translations.length === 0 },
           { label: "Furigana", value: showFurigana, set: usePrefsStore.getState().setShowFurigana, hidden: !lines.some((l) => l.furigana_html || l.custom_furigana_html) },
           { label: "Song hints while practicing", sub: "The original's high notes and long phrases", value: showHints, set: usePrefsStore.getState().setShowHints, hidden: !snapshot?.hints?.[id] },

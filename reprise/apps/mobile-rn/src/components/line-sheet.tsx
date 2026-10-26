@@ -57,7 +57,10 @@ export function LineSheet({ line, lineNo, t, onClose, onSave, onLoop }: Props) {
     <Sheet open={!!line} onClose={close} title="This line" t={t}>
       {line && (
         <View style={{ gap: 18 }}>
-          <Text style={{ fontFamily: "serif", fontSize: 21, color: t.text, lineHeight: 29 }}>{line.custom_text ?? line.text}</Text>
+          <View style={{ gap: 4 }}>
+            <Text style={{ fontFamily: "serif", fontSize: 21, color: t.text, lineHeight: 29 }}>{line.custom_text ?? line.text}</Text>
+            {!!line.romaji && line.romaji_of === (line.custom_text ?? line.text) && <Text style={{ fontSize: 15, color: t.textSecondary }}>{line.romaji}</Text>}
+          </View>
           <View>
             <Text style={label}>Your note</Text>
             <TextInput

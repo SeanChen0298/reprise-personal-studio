@@ -27,4 +27,4 @@ export { collapseRepeats, splitLines, translationsByLine } from "./lib/lyrics";
 export { ISSUE_LABEL, isBreathIssue, reviewInsight, issueSongStartMs, issueClip, issueLineParts } from "./lib/take-words";
 export type { ReviewInsight } from "./lib/take-words";
 export type { VoiceSpec, SongCard } from "./lib/song-card";
-export { generateFurigana } from "./lib/furigana";
+export { generateFurigana, generateRomaji } from "./lib/furigana";

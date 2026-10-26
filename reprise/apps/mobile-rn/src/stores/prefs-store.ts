@@ -10,6 +10,8 @@ interface PrefsState {
   /** Accent color; follows the desktop's theme unless picked here. */
   accent: string | null;
   showTranslation: boolean;
+  /** Romaji (how Japanese lines are pronounced) under each line. */
+  showRomaji: boolean;
   showFurigana: boolean;
   /** High notes / long phrases of the original under the lines. */
   showHints: boolean;
@@ -29,6 +31,7 @@ interface PrefsState {
   setLook: (v: Look) => void;
   setAccent: (v: string | null) => void;
   setShowTranslation: (v: boolean) => void;
+  setShowRomaji: (v: boolean) => void;
   setShowFurigana: (v: boolean) => void;
   setShowHints: (v: boolean) => void;
   setCountIn: (v: number) => void;
@@ -46,6 +49,7 @@ export const usePrefsStore = create<PrefsState>()(
       look: "classic",
       accent: null,
       showTranslation: true,
+      showRomaji: false,
       showFurigana: true,
       showHints: true,
       countIn: 3,
@@ -58,6 +62,7 @@ export const usePrefsStore = create<PrefsState>()(
       setLook: (v) => set({ look: v }),
       setAccent: (v) => set({ accent: v }),
       setShowTranslation: (v) => set({ showTranslation: v }),
+      setShowRomaji: (v) => set({ showRomaji: v }),
       setShowFurigana: (v) => set({ showFurigana: v }),
       setShowHints: (v) => set({ showHints: v }),
       setCountIn: (v) => set({ countIn: v }),

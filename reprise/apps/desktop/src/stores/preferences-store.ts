@@ -23,6 +23,8 @@ interface PreferencesState {
   showWaveform: boolean;
   showPitchCurve: boolean;
   showTranslation: boolean;
+  /** Romaji (how Japanese lines are pronounced) under each line. */
+  showRomaji: boolean;
   libraryView: "grid" | "list";
   librarySort: "custom" | "title" | "artist" | "mastery" | "date_added";
   libraryGroup: "none" | "artist" | "last_practiced";
@@ -43,6 +45,7 @@ interface PreferencesState {
   setShowWaveform: (v: boolean) => void;
   setShowPitchCurve: (v: boolean) => void;
   setShowTranslation: (v: boolean) => void;
+  setShowRomaji: (v: boolean) => void;
   setLibraryView: (v: "grid" | "list") => void;
   setLibrarySort: (v: PreferencesState["librarySort"]) => void;
   setLibraryGroup: (v: PreferencesState["libraryGroup"]) => void;
@@ -66,6 +69,7 @@ export const usePreferencesStore = create<PreferencesState>()(
       showWaveform: true,
       showPitchCurve: true,
       showTranslation: true,
+      showRomaji: false,
       countInEnabled: true,
       recordingPlaybackGain: 8.0,
       playbackVolume: 1.0,
@@ -87,6 +91,7 @@ export const usePreferencesStore = create<PreferencesState>()(
       setShowWaveform: (v) => set({ showWaveform: v }),
       setShowPitchCurve: (v) => set({ showPitchCurve: v }),
       setShowTranslation: (v) => set({ showTranslation: v }),
+      setShowRomaji: (v) => set({ showRomaji: v }),
       setLibraryView: (v) => set({ libraryView: v }),
       setLibrarySort: (v) => set({ librarySort: v }),
       setLibraryGroup: (v) => set({ libraryGroup: v }),

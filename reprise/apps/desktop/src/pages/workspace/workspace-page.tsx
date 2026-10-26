@@ -97,7 +97,9 @@ function Workspace({ songId }: { songId: string }) {
     if (furiganaTried.current === songId || !rawLines?.length) return;
     if (!isJapanese(song.language) && !rawLines.some((l) => isJapanese(l.language))) return;
     const missing = rawLines.some(
-      (l) => (isJapanese(l.language) || (!l.language && isJapanese(song.language))) && !l.furigana_html && /[一-龯㐀-䶿]/.test(l.text),
+      (l) =>
+        (isJapanese(l.language) || (!l.language && isJapanese(song.language))) &&
+        ((!l.furigana_html && /[一-龯㐀-䶿]/.test(l.text)) || l.romaji_of !== (l.custom_text ?? l.text)),
     );
     furiganaTried.current = songId;
     if (missing) void useSongStore.getState().generateFuriganaForSong(songId);
@@ -111,6 +113,8 @@ function Workspace({ songId }: { songId: string }) {
   );
   const translationById = useMemo(() => translationsByLine(lines, translationLines), [lines, translationLines]);
   const showTranslation = usePreferencesStore((s) => s.showTranslation);
+  const showRomaji = usePreferencesStore((s) => s.showRomaji);
+  const setShowRomaji = usePreferencesStore((s) => s.setShowRomaji);
   const setShowTranslation = usePreferencesStore((s) => s.setShowTranslation);
   const sections = useMemo(
     () => [...(rawSections ?? [])].sort((a, b) => a.start_line_order - b.start_line_order),
@@ -842,10 +846,13 @@ function Workspace({ songId }: { songId: string }) {
       ...(translationLines.length
         ? [{ id: "translation", group: "View", label: showTranslation ? "Hide translation" : "Show translation", run: () => setShowTranslation(!showTranslation) }]
         : [{ id: "translation-add", group: "Lyrics", label: "Add a translation…", run: () => navigate(`/song/${songId}/lyrics`) }]),
+      ...(lines.some((l) => l.romaji)
+        ? [{ id: "romaji", group: "View", label: showRomaji ? "Hide romaji" : "Show romaji", run: () => setShowRomaji(!showRomaji) }]
+        : []),
       { id: "keys", group: "Help", label: "Keyboard shortcuts", shortcut: "F1", featured: true, run: () => setShortcutsOpen(true) },
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [highlights, selStart, selEnd, cursorLine, cursorSection, sections, view, showHints, panel, symbols, showTranslation, translationLines.length, player.isPlaying, player.loopEnabled, tracks, canUndo, canRedo, edits, lyricsCheck, nextCheck]);
+  }, [highlights, selStart, selEnd, cursorLine, cursorSection, sections, view, showHints, panel, symbols, showTranslation, showRomaji, translationLines.length, player.isPlaying, player.loopEnabled, tracks, canUndo, canRedo, edits, lyricsCheck, nextCheck]);
 
   // Your take notes, placed under the lyric line they were sung on.
   const takeNotesByLine = useMemo(() => {
@@ -966,6 +973,17 @@ function Workspace({ songId }: { songId: string }) {
             }`}
           >
             Translation
+          </button>
+        )}
+        {view === "lyrics" && lines.some((l) => l.romaji) && (
+          <button
+            onClick={() => setShowRomaji(!showRomaji)}
+            title="Show how each line is pronounced, in romaji"
+            className={`px-[8px] py-[3px] text-[11px] font-medium rounded-[6px] border cursor-pointer ${
+              showRomaji ? "bg-[var(--theme-light)] text-[var(--theme-text)] border-transparent" : "bg-transparent text-[var(--text-muted)] border-[var(--border)]"
+            }`}
+          >
+            Romaji
           </button>
         )}
         <div ref={setModeTabsEl} className={view === "lead" ? "" : "hidden"} />
@@ -1117,6 +1135,7 @@ function Workspace({ songId }: { songId: string }) {
                 lines={lines}
                 sections={sections}
                 translationById={showTranslation ? translationById : EMPTY_MAP}
+                showRomaji={showRomaji}
                 highlights={highlights}
                 vocalMap={vocalMap}
                 showHints={showHints}

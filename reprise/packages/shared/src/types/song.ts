@@ -69,6 +69,10 @@ export interface Line {
   play_count?: number;
   furigana_html?: string; // HTML with <ruby> tags for line.text, auto-generated for language === "ja"
   custom_furigana_html?: string; // HTML with <ruby> tags for custom_text, auto-generated when custom_text is set
+  /** How the shown text (custom_text ?? text) is pronounced, in romaji ("anata wa yūhi ni tokete"); Japanese lines. */
+  romaji?: string;
+  /** The text `romaji` was made from — when the line's text changes, it's made again. */
+  romaji_of?: string;
   language?: string; // e.g. "en", "ja" — null/undefined means primary/legacy
   /** The singer's own note on this line ("darker here", "breathe before 'kaerou'"). */
   note?: string;

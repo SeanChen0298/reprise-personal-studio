@@ -768,10 +768,46 @@ export const useSongStore = create<SongStore>()((set, get) => ({
         console.error("[furigana] custom_text furigana failed for line:", line.id, err);
       }
     }
+
+    // Romaji (how it's pronounced) for the text as shown.
+    const { generateRomaji } = await import("@reprise/shared");
+    for (const line of targets) {
+      const shown = line.custom_text ?? line.text;
+      if (!shown.trim() || line.romaji_of === shown) continue;
+      try {
+        const romaji = await generateRomaji(shown);
+        await localDb.updateLine(line.id, { romaji, romaji_of: shown });
+        set((s) => ({
+          lines: {
+            ...s.lines,
+            [songId]: (s.lines[songId] ?? []).map((l) => (l.id === line.id ? { ...l, romaji, romaji_of: shown } : l)),
+          },
+        }));
+      } catch (err) {
+        console.error("[romaji] failed for line:", line.id, err);
+      }
+    }
   },
 
   updateLineCustomText: async (songId, lineId, customText) => {
     await get().updateLine(songId, lineId, { custom_text: customText, custom_furigana_html: undefined });
+
+    // Fire-and-forget: romaji for the new text (Japanese songs only).
+    const shown = customText ?? (get().lines[songId] ?? []).find((l) => l.id === lineId)?.text;
+    if (isJapanese(get().songs.find((s) => s.id === songId)?.language) && shown?.trim()) {
+      void (async () => {
+        try {
+          const { generateRomaji } = await import("@reprise/shared");
+          const romaji = await generateRomaji(shown);
+          await localDb.updateLine(lineId, { romaji, romaji_of: shown });
+          set((s) => ({
+            lines: { ...s.lines, [songId]: (s.lines[songId] ?? []).map((l) => (l.id === lineId ? { ...l, romaji, romaji_of: shown } : l)) },
+          }));
+        } catch (err) {
+          console.error("[romaji] failed for line:", lineId, err);
+        }
+      })();
+    }
 
     // Fire-and-forget: generate furigana for custom_text (Japanese songs only)
     const song = get().songs.find((s) => s.id === songId);
@@ -1165,6 +1201,8 @@ function dbRowToLine(row: Record<string, unknown>): Line {
     play_count: (row.play_count as number | undefined) ?? 0,
     furigana_html: (row.furigana_html as string | undefined) ?? undefined,
     custom_furigana_html: (row.custom_furigana_html as string | undefined) ?? undefined,
+    romaji: (row.romaji as string | undefined) ?? undefined,
+    romaji_of: (row.romaji_of as string | undefined) ?? undefined,
     language: row.language as string | undefined,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
@@ -1191,6 +1229,8 @@ function lineToDbRow(line: Line, userId: string): Record<string, unknown> {
     play_count: line.play_count ?? 0,
     furigana_html: line.furigana_html ?? null,
     custom_furigana_html: line.custom_furigana_html ?? null,
+    romaji: line.romaji ?? null,
+    romaji_of: line.romaji_of ?? null,
     language: line.language ?? null,
     created_at: line.created_at,
     updated_at: line.updated_at,
