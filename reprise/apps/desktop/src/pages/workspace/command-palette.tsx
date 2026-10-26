@@ -115,6 +115,8 @@ const SHORTCUTS: [string, [string, string][]][] = [
   ["Timing", [
     ["T", "Line starts at the playhead, move to the next line"],
     ["Alt+A / D", "Shift the line's start ±50 ms"],
+    ["Shift+T", "Move all lines so this one starts at the playhead"],
+    ["Ctrl+Alt+A / D", "Whole song's timing ±100 ms"],
     ["Alt+Shift+A / D", "Shift the line's end ±50 ms"],
     ["Alt+F", "Next lyrics check (singing with no line, a line with no singing, unsure timing)"],
   ]],

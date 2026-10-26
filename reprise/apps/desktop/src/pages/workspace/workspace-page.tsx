@@ -524,6 +524,29 @@ function Workspace({ songId }: { songId: string }) {
   );
   useEffect(() => () => clearTimeout(replayTimer.current), []);
 
+  /** Move every timed line (translations too) by the same amount — one undo step. */
+  const shiftSong = useCallback(
+    async (delta: number, label: string) => {
+      if (!delta || takes.busy) return;
+      const all = [...lines, ...translationLines].filter((l) => l.start_ms != null);
+      if (!all.length) return say("These lyrics have no timing yet — T taps a line's start");
+      // Not before 0: the earliest line can only go back to the start of the song.
+      const d = Math.max(delta, -Math.min(...all.map((l) => l.start_ms!)));
+      if (!d) return say("The first line is already at the start of the song");
+      const move = (v?: number) => (v == null ? undefined : Math.max(0, v + d));
+      await edits.setTiming(all.map((l) => ({ lineId: l.id, start_ms: move(l.start_ms), end_ms: move(l.end_ms) })), label);
+      say(`All lines ${(Math.abs(d) / 1000).toFixed(1)} s ${d > 0 ? "later" : "earlier"} — Ctrl+Z undoes`);
+      if (cursorLine) replaySoon(cursorLine.id);
+    },
+    [lines, translationLines, edits, say, takes.busy, cursorLine, replaySoon],
+  );
+  /** Shift+T: move the whole song so the cursor line starts at the playhead. */
+  const tapSongStart = useCallback(() => {
+    if (!cursorLine) return;
+    if (cursorLine.start_ms == null) return say("This line has no time yet — T sets it");
+    void shiftSong(Math.round(nowMs) - cursorLine.start_ms, "Move all lines");
+  }, [cursorLine, nowMs, shiftSong, say]);
+
   const nudge = useCallback(
     async (field: "start_ms" | "end_ms", delta: number) => {
       if (!cursorLine || cursorLine[field] == null || takes.busy) return;
@@ -649,6 +672,8 @@ function Workspace({ songId }: { songId: string }) {
       else player.decrementSpeed();
     };
 
+    // Ctrl+Alt+A/D: the whole song's timing ±100 ms
+    if (alt && ctrl && (letter === "A" || letter === "D")) return handled(), void shiftSong(letter === "D" ? 100 : -100, "Shift all lines");
     // Alt: timing (A/D, arrows) and speed (W/S)
     if (alt && !ctrl) {
       if (letter === "F") return handled(), nextCheck();
@@ -723,7 +748,7 @@ function Workspace({ songId }: { songId: string }) {
         return shift ? loopSection() : loopLine();
       case "T":
         handled();
-        return void tapStart();
+        return void (shift ? tapSongStart() : tapStart());
       case "X":
         handled();
         return void clearMarks();
@@ -844,6 +869,9 @@ function Workspace({ songId }: { songId: string }) {
       { id: "loop-sec", group: "Play", label: "Loop this section", shortcut: "Shift+Q", featured: true, disabled: !cursorSection, run: loopSection },
       ...tracks.map((t) => ({ id: `track-${t.key}`, group: "Play", label: `Play the ${t.label === "Inst." ? "instrumental" : t.label.toLowerCase()} track`, run: () => setTrack(t.key) })),
       { id: "tap", group: "Timing", label: "Line starts at the playhead", shortcut: "T", featured: true, run: () => void tapStart() },
+      { id: "tap-song", group: "Timing", label: "Move all lines so this one starts at the playhead", shortcut: "Shift+T", featured: true, run: tapSongStart },
+      { id: "song-earlier", group: "Timing", label: "Whole song 0.1 s earlier", shortcut: "Ctrl+Alt+A", run: () => void shiftSong(-100, "Shift all lines") },
+      { id: "song-later", group: "Timing", label: "Whole song 0.1 s later", shortcut: "Ctrl+Alt+D", run: () => void shiftSong(100, "Shift all lines") },
       { id: "rec", group: "Record", label: "Record from selected line", shortcut: "R", featured: true, run: () => recordFromCursor(false) },
       { id: "rec-sec", group: "Record", label: "Record this section", shortcut: "Shift+R", featured: true, disabled: !cursorSection, run: () => recordFromCursor(true) },
       { id: "undo", group: "Edit", label: "Undo", shortcut: "Ctrl+Z", featured: true, disabled: !canUndo, run: () => void doUndo() },
