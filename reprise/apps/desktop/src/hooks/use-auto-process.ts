@@ -5,7 +5,8 @@
  *   1. lyrics, when it has none (LRCLIB, same rules as a fresh download)
  *   2. stem separation (→ pitch and chords follow on their own, see use-task-queue-processor)
  *   3. lyric timing (WhisperX) when the lyrics have no timing
- *   4. furigana and romaji for Japanese lyrics
+ *   4. furigana and romaji for Japanese lyrics (a song with no language whose lyrics are mostly
+ *      kana is set to Japanese first)
  *   5. sections from the coach, when the song has none and a coach key is set
  *
  * Heavy jobs go on the task queue (one at a time, shown there); light ones (lyrics, readings,
@@ -151,6 +152,13 @@ export function useAutoProcess() {
           break;
         }
         continue;
+      }
+      if (!song.language?.trim()) {
+        const kana = all.filter((l) => /[぀-ヿ]/.test(l.text)).length;
+        if (kana >= all.length * 0.5) {
+          job = () => useSongStore.getState().updateSong(song.id, { language: "ja" });
+          break;
+        }
       }
       const japanese = isJapanese(song.language) || all.some((l) => isJapanese(l.language));
       const needsReading = japanese && all.some(
