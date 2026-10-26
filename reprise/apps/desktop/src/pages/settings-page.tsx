@@ -1,7 +1,8 @@
 import { CoachSettings } from "../components/coach-settings";
 import { PhoneSettings } from "../components/phone-settings";
+import { PrepareActivity } from "../components/prepare-activity";
 import { useState, useCallback, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { exists } from "@tauri-apps/plugin-fs";
 import { open } from "@tauri-apps/plugin-shell";
 import { Sidebar } from "../components/sidebar";
@@ -29,7 +30,14 @@ const THEME_OPTIONS = [
 export function SettingsPage() {
   const navigate = useNavigate();
 
-  const [activeTab, setActiveTab] = useState<Tab>("highlights");
+  // The sidebar's "preparing…" note links to #prepare (on the Preferences tab).
+  const [activeTab, setActiveTab] = useState<Tab>(() => (window.location.hash === "#prepare" ? "preferences" : "highlights"));
+  const { hash } = useLocation();
+  useEffect(() => {
+    if (hash !== "#prepare") return;
+    setActiveTab("preferences");
+    requestAnimationFrame(() => document.getElementById("prepare")?.scrollIntoView({ block: "center" }));
+  }, [hash]);
   const [isDesktop, setIsDesktop] = useState(true);
   useEffect(() => { isDesktopPlatform().then(setIsDesktop); }, []);
   const highlights = useHighlightStore((s) => s.highlights);
@@ -671,10 +679,11 @@ export function SettingsPage() {
 
                   {settingRow(
                     "Prepare songs automatically",
-                    "In the background, every downloaded song gets what it's missing: lyrics (from LRCLIB), stems, pitch and chords, timing for untimed lyrics, furigana and romaji, and — when a coach key is set — sections from the coach. One step at a time; each is tried once per song.",
+                    "In the background, every downloaded song gets what it's missing: lyrics (from LRCLIB), stems, pitch and chords, lyric timing fitted to the vocals, furigana and romaji, and — when a coach key is set — sections from the coach. One step at a time; each is tried once per song.",
                     toggle(autoPrepare, setAutoPrepare),
                     true,
                   )}
+                  <PrepareActivity />
                 </div>
 
                 {/* Backup & restore */}

@@ -71,12 +71,47 @@ export function parsePlainLyrics(text: string): TimedLyricLine[] {
     .map((l) => ({ text: l, start_ms: UNTIMED, end_ms: UNTIMED }));
 }
 
+// LRCLIB is a free, volunteer-run service behind Cloudflare: when it's busy it answers 503 / 429
+// (with Retry-After). Requests are spaced out, a busy answer is waited out and tried again twice,
+// and after that it's left alone for a while (see lrclibResting).
+const GAP_MS = 400;
+const REST_MS = 10 * 60_000;
+let lastRequest = 0;
+let restUntil = 0;
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** True while LRCLIB was busy or unreachable lately — automatic lookups wait until it's over. */
+export function lrclibResting(): boolean {
+  return Date.now() < restUntil;
+}
+
 async function get(path: string, params: Record<string, string>): Promise<LrclibTrack[]> {
   const url = `${API}/${path}?${new URLSearchParams(params)}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`LRCLIB answered ${res.status}`);
-  const data = (await res.json()) as LrclibTrack[] | LrclibTrack;
-  return Array.isArray(data) ? data : [data];
+  for (let attempt = 0; ; attempt++) {
+    const gap = lastRequest + GAP_MS - Date.now();
+    if (gap > 0) await wait(gap);
+    lastRequest = Date.now();
+    let res: Response;
+    try {
+      res = await fetch(url);
+    } catch (err) {
+      restUntil = Date.now() + REST_MS;
+      throw err;
+    }
+    if (res.ok) {
+      restUntil = 0;
+      const data = (await res.json()) as LrclibTrack[] | LrclibTrack;
+      return Array.isArray(data) ? data : [data];
+    }
+    const busy = res.status === 503 || res.status === 429 || res.status === 502;
+    if (busy && attempt < 2) {
+      const after = Number(res.headers.get("retry-after"));
+      await wait(Math.min(15_000, Number.isFinite(after) && after > 0 ? after * 1000 : 2000 * (attempt + 1)));
+      continue;
+    }
+    if (busy) restUntil = Date.now() + REST_MS;
+    throw new Error(busy ? "LRCLIB is busy right now — try again in a few minutes" : `LRCLIB answered ${res.status}`);
+  }
 }
 
 const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");

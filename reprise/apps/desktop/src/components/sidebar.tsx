@@ -1,11 +1,13 @@
 import { Link, useLocation } from "react-router-dom";
 import { useTaskQueueStore } from "../stores/task-queue-store";
+import { usePrepareStore } from "../stores/prepare-store";
 
 export function Sidebar() {
   const location = useLocation();
   const queueTasks = useTaskQueueStore((s) => s.tasks);
   const runningTask = queueTasks.find((t) => t.status === "running");
   const pendingCount = queueTasks.filter((t) => t.status === "pending").length;
+  const preparing = usePrepareStore((s) => s.current);
 
   const navItem = (to: string, label: string, icon: React.ReactNode) => {
     const active = location.pathname === to;
@@ -106,6 +108,18 @@ export function Sidebar() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* The automatic preparation's light steps (lyrics, timing, sections) */}
+      {preparing && (
+        <Link
+          to="/settings#prepare"
+          title="What the automatic preparation did — Settings → Audio processing"
+          className="block px-[20px] py-2 border-t border-[var(--border-subtle)] no-underline"
+        >
+          <div className="text-[11.5px] text-[var(--text-secondary)] leading-snug">{preparing.step}…</div>
+          <div className="text-[11px] text-[var(--text-muted)] truncate">{preparing.title}</div>
+        </Link>
       )}
 
       {/* Footer */}

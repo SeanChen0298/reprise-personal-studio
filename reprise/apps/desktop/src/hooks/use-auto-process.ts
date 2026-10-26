@@ -28,6 +28,11 @@ import { fitLyrics } from "../lib/fit-lyrics";
 import { CHORD_ANALYSIS_VERSION } from "../lib/chord-analysis";
 import { readTextFile } from "@tauri-apps/plugin-fs";
 import { loadVocalMap } from "../lib/take-review";
+import { usePrepareStore } from "../stores/prepare-store";
+import { lrclibResting } from "../lib/lrclib";
+
+/** What a step did, for the preparation log. */
+type Outcome = { result: string; changed: boolean };
 
 // "fit2": fitting got the singer's-entry check (Oct 2026), so every song is fitted once more.
 type Step = "lyrics" | "sections" | "fit2";
@@ -64,12 +69,29 @@ export function forgetPrepared(songId: string, step: Step) {
 
 const primaryLines = (song: Song, lines: Line[]) => splitLines(lines, song.translation_language).lines;
 
+/** Where each downloaded song stands with the timing fit (for Settings). */
+export function fitStatus(songs: Song[], lines: Record<string, Line[]>) {
+  const t = tried();
+  const out: { song: Song; state: "fitted" | "next" | "waiting"; why?: string }[] = [];
+  for (const song of songs) {
+    if (song.download_status !== "done") continue;
+    const primary = primaryLines(song, lines[song.id] ?? []);
+    const timed = primary.filter((l) => l.start_ms != null).length;
+    if (t[song.id]?.fit2) out.push({ song, state: "fitted" });
+    else if (primary.length === 0) out.push({ song, state: "waiting", why: "no lyrics" });
+    else if (timed < 5 || timed < primary.length * 0.8) out.push({ song, state: "waiting", why: "lyrics have no timing" });
+    else if (song.pitch_status !== "done") out.push({ song, state: "waiting", why: "pitch not analyzed yet" });
+    else out.push({ song, state: "next" });
+  }
+  return out;
+}
+
 /** Ask the coach to split the song into sections and save them (no preview: it's the automatic run). */
-async function coachSections(song: Song, lines: Line[]): Promise<void> {
+async function coachSections(song: Song, lines: Line[]): Promise<Outcome> {
   const coach = useCoachStore.getState();
   const apiKey = coach.keys[coach.provider];
   const model = coach.models[coach.provider];
-  if (!apiKey || !model) return;
+  if (!apiKey || !model) return { result: "No coach key", changed: false };
   const [{ askCoach }, { COACH_SYSTEM, SECTIONS_PROMPT }, kn] = await Promise.all([
     import("../lib/coach/providers"),
     import("../lib/coach/persona"),
@@ -100,9 +122,9 @@ async function coachSections(song: Song, lines: Line[]): Promise<void> {
     quick: true,
   });
   const plan = kn.parseSectionPlan(r.text, lines.length);
-  if (!plan?.length) return;
+  if (!plan?.length) return { result: "The coach gave no usable sections", changed: false };
   // Sections may have been added by hand while the coach was thinking.
-  if ((useSongStore.getState().sections[song.id]?.length ?? 0) > 0) return;
+  if ((useSongStore.getState().sections[song.id]?.length ?? 0) > 0) return { result: "You added sections meanwhile", changed: false };
   const now = new Date().toISOString();
   const list: Section[] = plan
     .map((s) => ({ name: s.name, startIndex: s.start - 1 }))
@@ -120,16 +142,20 @@ async function coachSections(song: Song, lines: Line[]): Promise<void> {
       };
     });
   for (const s of list) await useSongStore.getState().addSection(song.id, s);
+  return { result: `Added ${list.length} sections`, changed: true };
 }
 
 /** Fit the song's timed lyrics to its vocals and save the new times. */
-async function fitToVocals(song: Song, lines: Line[], sections: Section[]): Promise<void> {
+async function fitToVocals(song: Song, lines: Line[], sections: Section[]): Promise<Outcome> {
   const map = await loadVocalMap(song);
-  if (!map) return;
+  if (!map) return { result: "Couldn't read the vocals' pitch", changed: false };
   const r = fitLyrics(lines, sections, map.singing, map.semitones.length * 10);
-  if (!r?.changes.length) return;
+  if (!r?.changes.length) return { result: "Already fits — left as it was", changed: false };
   const store = useSongStore.getState();
   for (const c of r.changes) await store.updateLine(song.id, c.lineId, { start_ms: c.start_ms, end_ms: c.end_ms });
+  const shift = r.offsetMs ? `, whole song ${r.offsetMs > 0 ? "later" : "earlier"} by ${(Math.abs(r.offsetMs) / 1000).toFixed(1)} s` : "";
+  const secs = r.sectionsShifted ? `, ${r.sectionsShifted} section${r.sectionsShifted === 1 ? "" : "s"} on their own` : "";
+  return { result: `Retimed ${r.changes.length} line${r.changes.length === 1 ? "" : "s"}${shift}${secs}`, changed: true };
 }
 
 export function useAutoProcess() {
@@ -156,20 +182,39 @@ export function useAutoProcess() {
     }
   }, [on, loaded, songs, lines, tasks]);
 
+  // Every few minutes, look again for work that waited (LRCLIB resting).
+  useEffect(() => {
+    if (!on) return;
+    const id = setInterval(() => useSongStore.setState((s) => ({ songs: [...s.songs] })), 5 * 60_000);
+    return () => clearInterval(id);
+  }, [on]);
+
   // Light jobs: one at a time, here.
   useEffect(() => {
     if (!on || !loaded || busy.current) return;
     const t = tried();
     const coach = useCoachStore.getState();
     const coachReady = !!coach.keys[coach.provider] && !!coach.models[coach.provider];
-    let job: (() => Promise<unknown>) | null = null;
+    let job: (() => Promise<Outcome | void>) | null = null;
+    /** Steps worth showing in the log (cheap checks like readings are left out). */
+    let shown: { song: Song; step: string } | null = null;
     for (const song of songs) {
       if (song.download_status !== "done") continue;
       const all = lines[song.id] ?? [];
       if (all.length === 0) {
-        if (!t[song.id]?.lyrics) {
+        if (!t[song.id]?.lyrics && !lrclibResting()) {
           markTried(song.id, "lyrics");
-          job = () => useSongStore.getState().findLyricsForSong(song.id);
+          shown = { song, step: "Find lyrics on LRCLIB" };
+          job = async () => {
+            const found = await useSongStore.getState().findLyricsForSong(song.id);
+            if (found) return { result: "Lyrics added", changed: true };
+            // LRCLIB was busy, not empty: look again once it has rested.
+            if (lrclibResting()) {
+              forgetPrepared(song.id, "lyrics");
+              return { result: "LRCLIB was busy — will look again later", changed: false };
+            }
+            return { result: "None found", changed: false };
+          };
           break;
         }
         continue;
@@ -201,6 +246,7 @@ export function useAutoProcess() {
           const queue = useTaskQueueStore.getState();
           if (version < CHORD_ANALYSIS_VERSION && !queue.tasks.some((x) => x.songId === song.id && x.type === "chords")) {
             queue.enqueue(song.id, song.title, "chords");
+            usePrepareStore.getState().finish({ songId: song.id, title: song.title, step: "Chords", result: "Queued again (newer analysis)", changed: true });
           }
         };
         break;
@@ -209,20 +255,32 @@ export function useAutoProcess() {
       const timed = primary.filter((l) => l.start_ms != null).length;
       if (song.pitch_status === "done" && timed >= 5 && timed >= primary.length * 0.8 && !t[song.id]?.fit2) {
         markTried(song.id, "fit2");
+        shown = { song, step: "Fit timing to the vocals" };
         job = () => fitToVocals(song, primary, sections[song.id] ?? []);
         break;
       }
       if (coachReady && primary.length >= 6 && (sections[song.id]?.length ?? 0) === 0 && !t[song.id]?.sections) {
         markTried(song.id, "sections");
+        shown = { song, step: "Sections from the coach" };
         job = () => coachSections(song, primary);
         break;
       }
     }
     if (!job) return;
     busy.current = true;
+    const log = usePrepareStore.getState();
+    const what = shown;
+    if (what) log.start(what.song.title, what.step);
     job()
-      .catch((err) => console.warn("[prepare]", err))
+      .then((o) => {
+        if (what && o) log.finish({ songId: what.song.id, title: what.song.title, step: what.step, ...o });
+      })
+      .catch((err) => {
+        console.warn("[prepare]", err);
+        if (what) log.finish({ songId: what.song.id, title: what.song.title, step: what.step, result: `Failed: ${err instanceof Error ? err.message : String(err)}`, changed: false });
+      })
       .finally(() => {
+        if (usePrepareStore.getState().current) usePrepareStore.setState({ current: null });
         busy.current = false;
         // Look for the next job (the stores may not have changed, e.g. no lyrics were found).
         useSongStore.setState((s) => ({ songs: [...s.songs] }));
