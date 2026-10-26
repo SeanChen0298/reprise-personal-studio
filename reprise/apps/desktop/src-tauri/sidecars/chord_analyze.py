@@ -30,7 +30,7 @@ import sys
 from collections import Counter
 from datetime import datetime, timezone
 
-OUTPUT_VERSION = 14
+OUTPUT_VERSION = 15  # 15: chords may change every couple of beats (btc_stickiness 0.85 → 0.6)
 ALTERNATIVES_PER_CHORD = 4
 
 SR = 22050
@@ -102,7 +102,9 @@ TUNING = {
     "use_stems": False,
     "beat_tracker": "beat_this",
     "chord_model": "btc",
-    "btc_stickiness": 0.85,
+    # How strongly to hold a chord: 0.85 held them for whole lines in ballads whose chords change
+    # every two beats (Suiheisen); 0.6 follows those changes and still doesn't flicker.
+    "btc_stickiness": 0.6,
     "beat_align_window": 0.07,
     "beat_align_smooth": 9,
     "temperature": 0.06,

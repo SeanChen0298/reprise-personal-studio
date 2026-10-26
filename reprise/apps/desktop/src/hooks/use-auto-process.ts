@@ -3,7 +3,8 @@
  * every downloaded song is brought up to date, one step at a time —
  *
  *   1. lyrics, when it has none (LRCLIB, same rules as a fresh download)
- *   2. stem separation (→ pitch and chords follow on their own, see use-task-queue-processor)
+ *   2. stem separation (→ pitch and chords follow on their own, see use-task-queue-processor);
+ *      chords from an older analysis are redone once
  *   3. lyric timing: timed lyrics are fitted to this recording's vocals (shifted to where the
  *      singing is, each line ending where the singing stops)
  *   4. furigana and romaji for Japanese lyrics (a song with no language whose lyrics are mostly
@@ -24,6 +25,8 @@ import { backupChain, useCoachStore } from "../stores/coach-store";
 import { isJapanese } from "../lib/language";
 import type { Line, Section, Song } from "../types/song";
 import { fitLyrics } from "../lib/fit-lyrics";
+import { CHORD_ANALYSIS_VERSION } from "../lib/chord-analysis";
+import { readTextFile } from "@tauri-apps/plugin-fs";
 import { loadVocalMap } from "../lib/take-review";
 
 type Step = "lyrics" | "sections" | "fit";
@@ -138,6 +141,8 @@ export function useAutoProcess() {
   const busy = useRef(false);
   /** Readings (furigana / romaji) tried this session — they're cheap, so per session is enough. */
   const readingsDone = useRef(new Set<string>());
+  /** chords.json versions checked this session. */
+  const chordsChecked = useRef(new Set<string>());
 
   // Heavy jobs: queue them.
   useEffect(() => {
@@ -184,6 +189,19 @@ export function useAutoProcess() {
       if (needsReading && !readingsDone.current.has(song.id)) {
         readingsDone.current.add(song.id);
         job = () => useSongStore.getState().generateFuriganaForSong(song.id);
+        break;
+      }
+      if (song.chord_status === "done" && song.chord_data_path && !chordsChecked.current.has(song.id)) {
+        chordsChecked.current.add(song.id);
+        const path = song.chord_data_path;
+        job = async () => {
+          const head = (await readTextFile(path)).slice(0, 200);
+          const version = Number(/"version"\s*:\s*(\d+)/.exec(head)?.[1] ?? 0);
+          const queue = useTaskQueueStore.getState();
+          if (version < CHORD_ANALYSIS_VERSION && !queue.tasks.some((x) => x.songId === song.id && x.type === "chords")) {
+            queue.enqueue(song.id, song.title, "chords");
+          }
+        };
         break;
       }
       const primary = primaryLines(song, all);

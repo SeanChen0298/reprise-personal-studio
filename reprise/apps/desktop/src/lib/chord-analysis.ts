@@ -219,6 +219,9 @@ export const STRUM_PRESETS: { name: string; pattern: string }[] = [
 ];
 export const DEFAULT_STRUM_PATTERN = STRUM_PRESETS[0].pattern;
 
+/** chords.json written by an older analysis is redone once (see use-auto-process). */
+export const CHORD_ANALYSIS_VERSION = 15;
+
 function settingsPath(chordDataPath: string): string {
   return chordDataPath.replace(/[\/][^\/]*$/, "") + "/chord_settings.json";
 }

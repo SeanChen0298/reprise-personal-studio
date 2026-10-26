@@ -1410,18 +1410,22 @@ export function PlayAlongView({
   const [guideSettingsAnchor, setGuideSettingsAnchor] = useState<DOMRect | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
-  // The strum pattern is the user's choice per song (chord_settings.json).
-  const [strumPattern, setStrumPattern] = useState(DEFAULT_STRUM_PATTERN);
+  // The strum pattern is the user's choice per song (chord_settings.json); until they pick one,
+  // the pattern heard most in the song (the analysis's main pattern), else a common one.
+  const [chosenPattern, setChosenPattern] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
-    setStrumPattern(DEFAULT_STRUM_PATTERN);
+    setChosenPattern(null);
     if (song.audio_folder) {
       void readChordSettings(song.audio_folder).then((s) => {
-        if (!cancelled && s.strum_pattern && /^[DU-]{8}$/.test(s.strum_pattern)) setStrumPattern(s.strum_pattern);
+        if (!cancelled && s.strum_pattern && /^[DU-]{8}$/.test(s.strum_pattern)) setChosenPattern(s.strum_pattern);
       });
     }
     return () => { cancelled = true; };
   }, [song.id, song.audio_folder]);
+  const detectedPattern = strumData.analysis?.strumming?.main_pattern;
+  const strumPattern = chosenPattern ?? (detectedPattern && /^[DU-]{8}$/.test(detectedPattern) ? detectedPattern : DEFAULT_STRUM_PATTERN);
+  const setStrumPattern = setChosenPattern;
   const changeStrumPattern = (p: string) => {
     setStrumPattern(p);
     if (song.chord_data_path) void saveChordSettings(song.chord_data_path, { strum_pattern: p });
