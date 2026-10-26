@@ -13,6 +13,8 @@ import * as FileSystem from "expo-file-system";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { Line, PhoneChanges, PhoneTake, Recording, SyncFileRef, SyncSnapshot } from "@reprise/shared/core";
 import { downloadFile, fetchLibrary, ping, SyncError, uploadFile, uploadJson, type Pairing } from "../lib/sync-client";
+import { recentSongs } from "../lib/recent";
+import { usePrefsStore } from "./prefs-store";
 
 const DOCS = FileSystem.documentDirectory!;
 const SNAPSHOT_FILE = `${DOCS}library.json`;
@@ -90,7 +92,10 @@ interface LibraryState {
   load: () => Promise<void>;
   pair: (p: Pairing) => Promise<void>;
   unpair: () => Promise<void>;
-  sync: () => Promise<void>;
+  /** `quiet`: a background check (no spinner). `force`: pull even if the computer says nothing changed. */
+  sync: (opts?: { quiet?: boolean; force?: boolean }) => Promise<void>;
+  /** Called every few seconds while the app is open: checks the computer when it's time. */
+  poll: () => void;
   downloadSong: (songId: string, kinds?: TrackKind[]) => Promise<void>;
   removeDownloads: (songId: string) => Promise<void>;
   fetchTakeAudio: (rec: Recording) => Promise<string | null>;
@@ -122,6 +127,17 @@ async function readJson<T>(uri: string): Promise<T | null> {
 const extOf = (path: string) => (path.match(/\.([a-z0-9]{2,5})$/i)?.[1] ?? "bin").toLowerCase();
 const songDir = (songId: string) => `${DOCS}songs/${songId}/`;
 const newer = (a?: string, b?: string) => !!a && (!b || a > b);
+
+/** One sync at a time (background checks don't show the spinner, so `syncing` can't be the lock). */
+let busy = false;
+/** When the computer's library last changed, as of the last pull. */
+let libraryStamp: number | null = null;
+let lastCheck = 0;
+let keepingRecent = false;
+
+/** How often to check the computer: often while a take waits for its review, otherwise now and then. */
+const CHECK_MS = 20_000;
+const REVIEW_CHECK_MS = 4_000;
 
 export const useLibraryStore = create<LibraryState>()((set, get) => {
   const setLocal = (fn: (l: LocalState) => LocalState) => {
@@ -173,12 +189,15 @@ export const useLibraryStore = create<LibraryState>()((set, get) => {
       set({ pairing: null, syncError: null });
     },
 
-    sync: async () => {
+    sync: async (opts) => {
       const p = get().pairing;
-      if (!p || get().syncing) return;
-      set({ syncing: true });
+      if (!p || busy) return;
+      busy = true;
+      lastCheck = Date.now();
+      if (!opts?.quiet) set({ syncing: true });
+      let sent = false;
       try {
-        await ping(p);
+        const info = await ping(p);
         // 1. Takes recorded here: audio first, then the note that says what it is.
         for (const t of get().local.takes.filter((x) => !x.uploaded)) {
           const file = `${t.id}.${extOf(t.uri)}`;
@@ -197,6 +216,7 @@ export const useLibraryStore = create<LibraryState>()((set, get) => {
           };
           await uploadJson(p, manifest, `${t.id}.take.json`);
           setLocal((l) => ({ ...l, takes: l.takes.map((x) => (x.id === t.id ? { ...x, uploaded: true } : x)) }));
+          sent = true;
         }
         // 2. Edits and practice times.
         const { local } = get();
@@ -213,6 +233,7 @@ export const useLibraryStore = create<LibraryState>()((set, get) => {
             practiced,
           };
           await uploadJson(p, changes, `changes-${Date.now()}.json`);
+          sent = true;
           setLocal((l) => ({
             ...l,
             lineEdits: Object.fromEntries(Object.entries(l.lineEdits).map(([id, e]) => [id, { ...e, sent: true }])),
@@ -222,16 +243,35 @@ export const useLibraryStore = create<LibraryState>()((set, get) => {
         }
         // 3. The library. (The computer imports uploads every few seconds, so
         //    edits just sent may not be in it yet — they stay shown from `local`.)
-        const snap = await fetchLibrary(p);
-        await FileSystem.writeAsStringAsync(SNAPSHOT_FILE, JSON.stringify(snap));
-        set({ snapshot: snap, lastSync: Date.now(), syncError: null });
-        prune(snap);
+        //    Skipped when the computer's library hasn't changed since the last pull.
+        const unchanged = !opts?.force && !sent && info.library != null && info.library === libraryStamp && !!get().snapshot;
+        if (!unchanged) {
+          const snap = await fetchLibrary(p);
+          await FileSystem.writeAsStringAsync(SNAPSHOT_FILE, JSON.stringify(snap));
+          libraryStamp = info.library ?? null;
+          set({ snapshot: snap });
+          prune(snap);
+        }
+        set({ lastSync: Date.now(), syncError: null });
+        void keepRecent();
       } catch (err) {
         const unreachable = err instanceof SyncError && err.unreachable;
         set({ syncError: { message: err instanceof Error ? err.message : String(err), unreachable } });
       } finally {
+        busy = false;
         set({ syncing: false });
       }
+    },
+
+    poll: () => {
+      const { pairing, snapshot, local } = get();
+      if (!pairing || busy) return;
+      const now = Date.now();
+      const reviewed = new Set((snapshot?.recordings ?? []).filter((r) => r.analysis).map((r) => r.id));
+      const waiting = local.takes.some(
+        (t) => t.uploaded && t.song_start_ms != null && !reviewed.has(t.id) && now - Date.parse(t.created_at) < 5 * 60_000,
+      );
+      if (now - lastCheck >= (waiting ? REVIEW_CHECK_MS : CHECK_MS)) void get().sync({ quiet: true });
     },
 
     downloadSong: async (songId, kinds = TRACKS) => {
@@ -341,6 +381,27 @@ export const useLibraryStore = create<LibraryState>()((set, get) => {
       setLocal((l) => ({ ...l, practiced: { ...l.practiced, [songId]: now } }));
     },
   };
+
+  /** Keep the most recent songs' audio on the phone (only runs while the computer is reachable, i.e. at home). */
+  async function keepRecent() {
+    const n = usePrefsStore.getState().keepRecent;
+    const { snapshot, local } = get();
+    if (!n || keepingRecent || !snapshot) return;
+    keepingRecent = true;
+    try {
+      const wanted = recentSongs(snapshot, local.practiced, local.takes)
+        .map((x) => x.song)
+        .concat([...snapshot.songs].sort((a, b) => b.created_at.localeCompare(a.created_at)))
+        .filter((s, i, all) => all.findIndex((x) => x.id === s.id) === i && snapshot.files[s.id]?.audio)
+        .slice(0, n);
+      for (const s of wanted) {
+        if (!get().pairing || get().syncError) break;
+        await get().downloadSong(s.id);
+      }
+    } finally {
+      keepingRecent = false;
+    }
+  }
 
   /** After a pull: drop edits the computer now has, forget removed songs' files. */
   function prune(snap: SyncSnapshot) {

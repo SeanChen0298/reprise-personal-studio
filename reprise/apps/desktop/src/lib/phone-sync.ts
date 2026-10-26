@@ -148,9 +148,15 @@ export async function buildSnapshot(host: string): Promise<SyncSnapshot> {
   };
 }
 
+/** What was last written, minus the timestamp (an unchanged library isn't rewritten, so the phone can tell nothing changed). */
+let lastWritten: string | null = null;
+
 export async function writeSnapshot(host: string): Promise<void> {
   if (!(await exists(SYNC_DIR))) await mkdir(SYNC_DIR, { recursive: true });
   const snap = await buildSnapshot(host);
+  const body = JSON.stringify({ ...snap, generated_at: "" });
+  if (body === lastWritten && (await exists(LIBRARY))) return;
+  lastWritten = body;
   // Write then rename, so the server never sends half a file.
   await writeTextFile(`${LIBRARY}.tmp`, JSON.stringify(snap));
   if (await exists(LIBRARY)) await remove(LIBRARY);

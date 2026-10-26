@@ -52,7 +52,8 @@ export class SyncError extends Error {
   }
 }
 
-export async function ping(p: Pairing): Promise<{ host: string }> {
+/** `library`: when the computer's library last changed (ms) — newer than the last pull means pull again. */
+export async function ping(p: Pairing): Promise<{ host: string; library?: number | null }> {
   let res: Response;
   try {
     res = await timed(`${base(p)}/ping`, { headers: headers(p) }, 4000);
@@ -61,7 +62,7 @@ export async function ping(p: Pairing): Promise<{ host: string }> {
   }
   if (res.status === 401) throw new SyncError(`${p.name} doesn't know this phone any more — pair again.`);
   if (!res.ok) throw new SyncError(`${p.name} answered ${res.status}.`);
-  return (await res.json()) as { host: string };
+  return (await res.json()) as { host: string; library?: number | null };
 }
 
 export async function fetchLibrary(p: Pairing): Promise<SyncSnapshot> {

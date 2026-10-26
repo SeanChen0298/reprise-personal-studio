@@ -212,6 +212,12 @@ fn receive_upload(mut req: Request, inbox: &Path) {
     }
 }
 
+/// Lets the desktop show when the phone last synced.
+fn mark_seen(root: &Path) {
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let _ = fs::write(root.join("sync").join("last-pull.txt"), secs.to_string());
+}
+
 fn handle(req: Request, root: &Path, token: &str, host: &str) {
     if !authorised(&req, token) {
         return error(req, 401, "not paired");
@@ -219,15 +225,21 @@ fn handle(req: Request, root: &Path, token: &str, host: &str) {
     let path = req.url().split('?').next().unwrap_or("").to_string();
     match (req.method(), path.as_str()) {
         (Method::Get, "/ping") => {
-            let body = serde_json::json!({ "app": "reprise", "version": 1, "host": host }).to_string();
+            // `library` = when the snapshot last changed (ms), so the phone pulls only when there's something new.
+            let lib = root.join("sync").join("library.json");
+            let changed = fs::metadata(&lib)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64);
+            mark_seen(root);
+            let body = serde_json::json!({ "app": "reprise", "version": 1, "host": host, "library": changed }).to_string();
             let _ = req.respond(json_response(200, body));
         }
         (Method::Get, "/library") => {
             let lib = root.join("sync").join("library.json");
             if lib.is_file() {
-                // Lets the desktop show when the phone last synced.
-                let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-                let _ = fs::write(root.join("sync").join("last-pull.txt"), secs.to_string());
+                mark_seen(root);
                 send_file(req, &lib)
             } else {
                 error(req, 503, "library not ready")

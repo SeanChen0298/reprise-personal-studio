@@ -39,9 +39,9 @@ export function Transport({ player, t, tracks, track, onTrack, hasSection, rec, 
   };
 
   const btn = (active = false) => ({
-    minWidth: 44,
-    height: 44,
-    borderRadius: 22,
+    minWidth: 52,
+    height: 52,
+    borderRadius: 26,
     alignItems: "center" as const,
     justifyContent: "center" as const,
     backgroundColor: active ? t.themeSoft : "transparent",
@@ -63,7 +63,8 @@ export function Transport({ player, t, tracks, track, onTrack, hasSection, rec, 
           setD(null);
         }}
         onResponderTerminate={() => setD(null)}
-        style={{ height: 22, justifyContent: "center" }}
+        hitSlop={{ top: 10, bottom: 6 }}
+        style={{ height: 26, justifyContent: "center" }}
       >
         <View style={{ height: 3, borderRadius: 2, backgroundColor: t.border }}>
           <View style={{ height: 3, borderRadius: 2, width: `${(pos / dur) * 100}%`, backgroundColor: rec.recording ? t.danger : t.theme }} />
@@ -89,29 +90,29 @@ export function Transport({ player, t, tracks, track, onTrack, hasSection, rec, 
           <Text style={{ fontSize: 12, color: player.loop !== "off" ? t.theme : t.textSecondary }}>{loopLabel}</Text>
         </Pressable>
         <Pressable onPress={() => player.step(-1)} disabled={rec.busy} style={btn()}>
-          <PrevIcon color={t.text} size={20} />
+          <PrevIcon color={t.text} size={22} />
         </Pressable>
         <Pressable
           onPress={() => player.toggle()}
           disabled={rec.busy || !player.ready}
-          style={{ width: 58, height: 58, borderRadius: 29, alignItems: "center", justifyContent: "center", backgroundColor: t.theme, opacity: player.ready ? 1 : 0.4 }}
+          style={{ width: 62, height: 62, borderRadius: 31, alignItems: "center", justifyContent: "center", backgroundColor: t.theme, opacity: player.ready ? 1 : 0.4 }}
         >
           {player.isPlaying ? <PauseIcon color="#fff" size={24} /> : <PlayIcon color="#fff" size={24} />}
         </Pressable>
         <Pressable onPress={() => player.step(1)} disabled={rec.busy} style={btn()}>
-          <NextIcon color={t.text} size={20} />
+          <NextIcon color={t.text} size={22} />
         </Pressable>
         <View style={{ flexDirection: "row", alignItems: "center" }}>
-          <Pressable onPress={() => player.setSpeed(player.speed - 0.05)} disabled={rec.busy || player.speed <= 0.5} hitSlop={6} style={{ paddingHorizontal: 6, paddingVertical: 8 }}>
-            <Text style={{ fontSize: 18, color: player.speed <= 0.5 ? t.border : t.textSecondary }}>−</Text>
+          <Pressable onPress={() => player.setSpeed(player.speed - 0.05)} disabled={rec.busy || player.speed <= 0.5} hitSlop={4} style={{ width: 34, height: 44, alignItems: "center", justifyContent: "center" }}>
+            <Text style={{ fontSize: 20, color: player.speed <= 0.5 ? t.border : t.textSecondary }}>−</Text>
           </Pressable>
           <Pressable onPress={() => player.setSpeed(1)} disabled={rec.busy}>
             <Text style={{ fontSize: 12.5, color: player.speed < 1 ? t.theme : t.textSecondary, fontVariant: ["tabular-nums"], minWidth: 38, textAlign: "center" }}>
               {player.speed.toFixed(2)}×
             </Text>
           </Pressable>
-          <Pressable onPress={() => player.setSpeed(player.speed + 0.05)} disabled={rec.busy || player.speed >= 1} hitSlop={6} style={{ paddingHorizontal: 6, paddingVertical: 8 }}>
-            <Text style={{ fontSize: 18, color: player.speed >= 1 ? t.border : t.textSecondary }}>+</Text>
+          <Pressable onPress={() => player.setSpeed(player.speed + 0.05)} disabled={rec.busy || player.speed >= 1} hitSlop={4} style={{ width: 34, height: 44, alignItems: "center", justifyContent: "center" }}>
+            <Text style={{ fontSize: 20, color: player.speed >= 1 ? t.border : t.textSecondary }}>+</Text>
           </Pressable>
         </View>
       </View>
@@ -124,21 +125,21 @@ export function Transport({ player, t, tracks, track, onTrack, hasSection, rec, 
               key={k}
               onPress={() => onTrack(k)}
               disabled={rec.busy}
-              style={{ flex: 1, paddingVertical: 7, borderRadius: 8, alignItems: "center", backgroundColor: track === k ? t.surface : "transparent" }}
+              style={{ flex: 1, paddingVertical: 10, borderRadius: 8, alignItems: "center", backgroundColor: track === k ? t.surface : "transparent" }}
             >
               <Text style={{ fontSize: 12.5, color: track === k ? t.text : t.muted, fontWeight: track === k ? "600" : "400" }}>{TRACK_LABEL[k]}</Text>
             </Pressable>
           ))}
         </View>
         {rec.busy ? (
-          <Pressable onPress={onStop} style={{ flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 14, height: 40, borderRadius: 20, backgroundColor: t.danger }}>
+          <Pressable onPress={onStop} style={{ flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 16, height: 44, borderRadius: 22, backgroundColor: t.danger }}>
             <StopIcon color="#fff" size={14} />
             <Text style={{ color: "#fff", fontSize: 13.5, fontWeight: "600", fontVariant: ["tabular-nums"] }}>
               {rec.countdown != null ? `${rec.countdown}…` : clock(rec.elapsedMs)}
             </Text>
           </Pressable>
         ) : (
-          <Pressable onPress={onRecord} disabled={!player.ready} style={{ flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 14, height: 40, borderRadius: 20, borderWidth: 1.5, borderColor: t.danger, opacity: player.ready ? 1 : 0.4 }}>
+          <Pressable onPress={onRecord} disabled={!player.ready} style={{ flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 16, height: 44, borderRadius: 22, borderWidth: 1.5, borderColor: t.danger, opacity: player.ready ? 1 : 0.4 }}>
             <MicIcon color={t.danger} size={16} />
             <Text style={{ color: t.danger, fontSize: 13.5, fontWeight: "600" }}>{recordLabel}</Text>
           </Pressable>

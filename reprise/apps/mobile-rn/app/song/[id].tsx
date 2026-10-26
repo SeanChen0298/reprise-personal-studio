@@ -1,12 +1,13 @@
 // The song: lyrics that follow the music, loops, speed, tracks, sung-along takes,
 // your notes and voice marks, and the coach's song card from the computer.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, Switch, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, FlatList, PanResponder, Pressable, Switch, Text, TextInput, View } from "react-native";
+import * as Haptics from "expo-haptics";
 import { router, useLocalSearchParams } from "expo-router";
 import { useKeepAwake } from "expo-keep-awake";
 import * as FileSystem from "expo-file-system";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { splitLines, translationsByLine, type Line, type Section } from "@reprise/shared/core";
+import { reviewInsight, splitLines, translationsByLine, type Line, type Section } from "@reprise/shared/core";
 import { linesWithEdits, takesFor, TRACKS, useLibraryStore, type TrackKind } from "../../src/stores/library-store";
 import { usePrefsStore } from "../../src/stores/prefs-store";
 import { useLinePlayer } from "../../src/hooks/use-line-player";
@@ -20,6 +21,7 @@ import { TakesSheet } from "../../src/components/takes-sheet";
 import { SongCardView } from "../../src/components/song-card-view";
 import { Sheet } from "../../src/components/sheet";
 import { BackIcon, ChevronIcon, DownloadIcon } from "../../src/components/icons";
+import { pauseRadio } from "../../src/lib/radio";
 
 type Row = { kind: "section"; section: Section; key: string } | { kind: "line"; line: Line; index: number; key: string };
 
@@ -49,7 +51,7 @@ async function keepTake(songId: string, p: PendingTake, note: string) {
 
 export default function SongScreen() {
   useKeepAwake();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, at, play } = useLocalSearchParams<{ id: string; at?: string; play?: string }>();
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const snapshot = useLibraryStore((s) => s.snapshot);
@@ -61,6 +63,7 @@ export default function SongScreen() {
   const showHints = usePrefsStore((s) => s.showHints);
   const countIn = usePrefsStore((s) => s.countIn);
   const autoDownload = usePrefsStore((s) => s.autoDownload);
+  const memorise = usePrefsStore((s) => s.memorise);
   const [focus, setFocus] = useState(false);
 
   const song = snapshot?.songs.find((s) => s.id === id);
@@ -116,7 +119,9 @@ export default function SongScreen() {
   );
 
   const touch = useCallback(() => useLibraryStore.getState().touchPracticed(id), [id]);
-  const player = useLinePlayer({ uri, lines, sectionRange, onLinePlayed: touch });
+  const player = useLinePlayer({ uri, lines, sectionRange, onLinePlayed: touch, initialMs: at ? Number(at) || 0 : 0, initialPlay: play === "1" });
+  // Practice here, so Play all stops talking over it.
+  useEffect(() => void pauseRadio(), []);
   const keep = useCallback((p: PendingTake) => void keepTake(id, p, ""), [id]);
   const rec = useTakeRecorder(player, lines, countIn, activeTrack, keep);
   const [takeNote, setTakeNote] = useState("");
@@ -152,6 +157,20 @@ export default function SongScreen() {
 
   const [lineSheet, setLineSheet] = useState<number | null>(null);
   const [takesOpen, setTakesOpen] = useState(false);
+  const [takeFocus, setTakeFocus] = useState<string | null>(null);
+
+  // A take from this phone waits for the computer's review (the app checks every few seconds while it waits);
+  // say so when it arrives.
+  const waitingReview = useRef(new Set<string>());
+  const [reviewReady, setReviewReady] = useState<{ id: string; headline: string } | null>(null);
+  useEffect(() => {
+    for (const tk of takes) {
+      const mine = tk.onPhone || local.takes.some((x) => x.id === tk.id);
+      if (!mine || tk.song_start_ms == null) continue;
+      if (!tk.analysis) waitingReview.current.add(tk.id);
+      else if (waitingReview.current.delete(tk.id)) setReviewReady({ id: tk.id, headline: reviewInsight(tk.analysis).headline });
+    }
+  }, [takes, local.takes]);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [viewOpen, setViewOpen] = useState(false);
 
@@ -165,6 +184,26 @@ export default function SongScreen() {
     [player, rec.busy, touch],
   );
   const onLongPressLine = useCallback((idx: number) => setLineSheet(idx), []);
+
+  // Swipe sideways on the lyrics for the previous / next line.
+  const stepRef = useRef(player.step);
+  stepRef.current = player.step;
+  const busyRef = useRef(rec.busy);
+  busyRef.current = rec.busy;
+  const swipe = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponderCapture: (_, g) => !busyRef.current && Math.abs(g.dx) > 24 && Math.abs(g.dx) > Math.abs(g.dy) * 2.2,
+        onPanResponderRelease: (_, g) => {
+          if (Math.abs(g.dx) < 60) return;
+          handsOffUntil.current = 0;
+          void Haptics.selectionAsync();
+          void stepRef.current(g.dx < 0 ? 1 : -1);
+        },
+        onPanResponderTerminationRequest: () => true,
+      }),
+    [],
+  );
 
   const startTake = () => {
     const sectionTake = player.loop === "section" ? sectionOf(player.cursor) : null;
@@ -253,6 +292,7 @@ export default function SongScreen() {
       {!!player.error && <Text style={{ fontSize: 12.5, color: t.danger, paddingHorizontal: 18 }}>Can't play: {player.error}</Text>}
 
       {/* Lyrics */}
+      <View style={{ flex: 1 }} {...swipe.panHandlers}>
       <FlatList
         ref={listRef}
         data={rows}
@@ -293,6 +333,7 @@ export default function SongScreen() {
               hint={hints?.[item.line.id]}
               highlights={highlights}
               showFurigana={showFurigana}
+              memorise={memorise}
               t={t}
               onPress={onPressLine}
               onLongPress={onLongPressLine}
@@ -300,6 +341,28 @@ export default function SongScreen() {
           );
         }}
       />
+      </View>
+
+      {/* The computer's review of a take from here just arrived */}
+      {reviewReady && !rec.pending && !rec.busy && (
+        <Pressable
+          onPress={() => {
+            setTakeFocus(reviewReady.id);
+            setTakesOpen(true);
+            setReviewReady(null);
+          }}
+          style={{ position: "absolute", left: 12, right: 12, bottom: insets.bottom + 190, padding: 14, borderRadius: 14, backgroundColor: t.raised, borderWidth: 1, borderColor: t.border, elevation: 6, flexDirection: "row", alignItems: "center", gap: 10 }}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 11, fontWeight: "700", letterSpacing: 1, color: t.theme, textTransform: "uppercase" }}>Your take's review</Text>
+            <Text style={{ fontSize: 14.5, color: t.text, marginTop: 3, lineHeight: 20 }}>{reviewReady.headline}</Text>
+          </View>
+          <Text style={{ fontSize: 13.5, color: t.theme, fontWeight: "600" }}>See</Text>
+          <Pressable onPress={() => setReviewReady(null)} hitSlop={10}>
+            <Text style={{ fontSize: 18, color: t.muted }}>×</Text>
+          </Pressable>
+        </Pressable>
+      )}
 
       {/* A take just finished */}
       {rec.pending && (
@@ -334,7 +397,9 @@ export default function SongScreen() {
               <Text style={{ color: t.textSecondary, fontSize: 14.5 }}>Discard</Text>
             </Pressable>
           </View>
-          <Text style={{ fontSize: 12, color: t.muted }}>Kept takes go to your computer on the next sync, where breath and high notes are checked.</Text>
+          <Text style={{ fontSize: 12, color: t.muted }}>
+            {pairing ? "A kept take goes to your computer right away when it's reachable; its breath / high-note review shows up here a few seconds later." : "Kept takes go to your computer when you pair, where breath and high notes are checked."}
+          </Text>
         </View>
       )}
       {rec.countdown != null && (
@@ -373,7 +438,11 @@ export default function SongScreen() {
 
       <TakesSheet
         open={takesOpen}
-        onClose={() => setTakesOpen(false)}
+        onClose={() => {
+          setTakesOpen(false);
+          setTakeFocus(null);
+        }}
+        focusId={takeFocus}
         songId={id}
         takes={takes}
         lines={lines}
@@ -418,6 +487,7 @@ export default function SongScreen() {
           { label: "Furigana", value: showFurigana, set: usePrefsStore.getState().setShowFurigana, hidden: !lines.some((l) => l.furigana_html || l.custom_furigana_html) },
           { label: "Song hints (high notes, long phrases)", value: showHints, set: usePrefsStore.getState().setShowHints, hidden: !snapshot?.hints?.[id] },
           { label: "Focus (hide the coach's notes and hints)", value: focus, set: setFocus, hidden: !card && !snapshot?.hints?.[id] },
+          { label: "Memorise (only the first word of each line)", value: memorise, set: usePrefsStore.getState().setMemorise, hidden: false },
         ]
           .filter((x) => !x.hidden)
           .map((x) => (
@@ -427,7 +497,7 @@ export default function SongScreen() {
             </View>
           ))}
         <Text style={{ fontSize: 12.5, color: t.muted, marginTop: 8, lineHeight: 18 }}>
-          Tap a line to play from it · hold a line for your note and voice mark · Loop cycles line → section → off · Record sings along from the current line (with a section loop on, it records that section).
+          Tap a line to play from it · swipe sideways for the previous / next line · hold a line for your note and voice mark · Loop cycles line → section → off · Record sings along from the current line (with a section loop on, it records that section).
         </Text>
       </Sheet>
     </View>

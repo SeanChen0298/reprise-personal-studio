@@ -13,6 +13,10 @@ interface Options {
   /** [startMs, endMs] of the current section, for section loops. */
   sectionRange: (lineIndex: number) => [number, number] | null;
   onLinePlayed?: (index: number) => void;
+  /** Start here (opened from Play all at this point of the song). */
+  initialMs?: number;
+  /** …and keep playing. */
+  initialPlay?: boolean;
 }
 
 /** Index of the line playing at `ms` (the last line that has started), or -1. */
@@ -35,11 +39,11 @@ export function lineAt(lines: Line[], ms: number): number {
   return found;
 }
 
-export function useLinePlayer({ uri, lines, sectionRange, onLinePlayed }: Options) {
+export function useLinePlayer({ uri, lines, sectionRange, onLinePlayed, initialMs = 0, initialPlay = false }: Options) {
   const soundRef = useRef<Audio.Sound | null>(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [positionMs, setPositionMs] = useState(0);
+  const [positionMs, setPositionMs] = useState(initialMs);
   const [durationMs, setDurationMs] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [speed, setSpeedState] = useState(1);
@@ -48,9 +52,9 @@ export function useLinePlayer({ uri, lines, sectionRange, onLinePlayed }: Option
   loopModeRef.current = loop;
   /** The loop's span, fixed when the loop starts (so it doesn't drift with the playhead). */
   const loopRangeRef = useRef<[number, number] | null>(null);
-  const [cursor, setCursor] = useState(0);
-  const posRef = useRef(0);
-  const playingRef = useRef(false);
+  const [cursor, setCursor] = useState(() => Math.max(0, lineAt(lines, initialMs)));
+  const posRef = useRef(initialMs);
+  const playingRef = useRef(initialPlay);
   const linesRef = useRef(lines);
   linesRef.current = lines;
   const playedRef = useRef(onLinePlayed);

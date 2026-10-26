@@ -21,13 +21,15 @@ interface Props {
   /** Stop the song while a take plays. */
   onBeforePlay: () => void;
   onJumpToLine: (index: number) => void;
+  /** Open with this take expanded (its review just arrived). */
+  focusId?: string | null;
 }
 
 function when(iso: string) {
   return new Date(iso).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-export function TakesSheet({ open, onClose, songId, takes, lines, t, onBeforePlay, onJumpToLine }: Props) {
+export function TakesSheet({ open, onClose, songId, takes, lines, t, onBeforePlay, onJumpToLine, focusId }: Props) {
   const local = useLibraryStore((s) => s.local);
   const [playing, setPlaying] = useState<string | null>(null);
   const [loading, setLoading] = useState<string | null>(null);
@@ -48,6 +50,8 @@ export function TakesSheet({ open, onClose, songId, takes, lines, t, onBeforePla
   };
   useEffect(() => {
     if (!open) void stop();
+    else setExpanded(focusId ?? takes[0]?.id ?? null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
   useEffect(
     () => () => {

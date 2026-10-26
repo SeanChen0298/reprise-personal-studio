@@ -1,7 +1,7 @@
 {
   "name": "@reprise/mobile",
   "version": "1.0.0",
-  "main": "expo-router/entry",
+  "main": "index.js",
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",
@@ -33,6 +33,7 @@
     "react-native-safe-area-context": "5.4.0",
     "react-native-screens": "~4.11.1",
     "react-native-svg": "15.11.2",
+    "react-native-track-player": "^4.1.2",
     "zustand": "^5.0.8"
   },
   "devDependencies": {

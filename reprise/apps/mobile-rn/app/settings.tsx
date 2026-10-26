@@ -58,7 +58,7 @@ export default function Settings() {
         <>
           {row(
             pairing.name,
-            button(syncing ? "Syncing…" : "Sync now", () => useLibraryStore.getState().sync()),
+            button(syncing ? "Syncing…" : "Sync now", () => useLibraryStore.getState().sync({ force: true })),
             `${pairing.host}${lastSync ? ` · synced ${timeAgo(lastSync)}` : ""}${unsent ? ` · ${unsent} take${unsent === 1 ? "" : "s"} to send` : ""}`,
           )}
           {syncError && <Text style={{ fontSize: 13, color: syncError.unreachable ? t.muted : t.danger, marginTop: 8, lineHeight: 18 }}>{syncError.message}</Text>}
@@ -89,6 +89,17 @@ export default function Settings() {
           : null,
         missing.length ? `${missing.length} song${missing.length === 1 ? "" : "s"} not on the phone yet` : "Every song's audio is here.",
       )}
+      {row(
+        "Keep recent songs ready",
+        <View style={{ flexDirection: "row", gap: 6 }}>
+          {[0, 3, 5, 10].map((n) => (
+            <Pressable key={n} onPress={() => prefs.setKeepRecent(n)} style={{ paddingHorizontal: 11, paddingVertical: 6, borderRadius: 8, backgroundColor: prefs.keepRecent === n ? t.themeSoft : t.bg }}>
+              <Text style={{ fontSize: 13.5, color: prefs.keepRecent === n ? t.themeText : t.textSecondary }}>{n === 0 ? "Off" : n}</Text>
+            </Pressable>
+          ))}
+        </View>,
+        "The audio of the songs you've worked on most recently is fetched at home, so it's there when you're out.",
+      )}
       {row("Get audio when a song opens", <Switch value={prefs.autoDownload} onValueChange={prefs.setAutoDownload} trackColor={{ true: t.theme, false: t.border }} thumbColor="#fff" />, "Only when the computer is reachable.")}
       {stored > 0 && (
         <View style={{ marginTop: 12, alignSelf: "flex-start" }}>
@@ -108,6 +119,19 @@ export default function Settings() {
             true,
           )}
         </View>
+      )}
+
+      {section("Play all")}
+      {row(
+        "Plays",
+        <View style={{ flexDirection: "row", gap: 6 }}>
+          {(["audio", "instrumental"] as const).map((k) => (
+            <Pressable key={k} onPress={() => prefs.setRadioTrack(k)} style={{ paddingHorizontal: 11, paddingVertical: 6, borderRadius: 8, backgroundColor: prefs.radioTrack === k ? t.themeSoft : t.bg }}>
+              <Text style={{ fontSize: 13.5, color: prefs.radioTrack === k ? t.themeText : t.textSecondary }}>{k === "audio" ? "The songs" : "Backing"}</Text>
+            </Pressable>
+          ))}
+        </View>,
+        "Backing plays the karaoke version (where the phone has it) — for singing along on a walk. Hold the player bar to stop.",
       )}
 
       {section("Takes")}

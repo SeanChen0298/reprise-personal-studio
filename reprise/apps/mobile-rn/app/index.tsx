@@ -10,6 +10,9 @@ import { recentSongs } from "../src/lib/recent";
 import { timeAgo } from "../src/lib/format";
 import { Thumb } from "../src/components/thumb";
 import { DownloadIcon, PlayIcon, SettingsIcon } from "../src/components/icons";
+import { NowPlaying } from "../src/components/now-playing";
+import { playAll, useRadio } from "../src/lib/radio";
+import { usePrefsStore } from "../src/stores/prefs-store";
 
 function SyncPill({ t }: { t: Theme }) {
   const pairing = useLibraryStore((s) => s.pairing);
@@ -26,7 +29,7 @@ function SyncPill({ t }: { t: Theme }) {
   } else if (last) text = `${err?.unreachable ? "Offline · " : ""}synced ${timeAgo(last)}`;
   else text = err?.unreachable ? "Can't reach computer" : "Not synced yet";
   return (
-    <Pressable onPress={() => (pairing ? useLibraryStore.getState().sync() : router.push("/pair"))} hitSlop={8}>
+    <Pressable onPress={() => (pairing ? useLibraryStore.getState().sync({ force: true }) : router.push("/pair"))} hitSlop={8}>
       <Text style={{ fontSize: 12, color: tone }}>{text}</Text>
     </Pressable>
   );
@@ -53,6 +56,9 @@ export default function Library() {
   const open = (song: Song) => router.push(`/song/${song.id}`);
 
   const onPhone = (id: string) => !!local.downloads[id]?.audio;
+  const radioOn = useRadio((s) => s.on);
+  const shuffle = usePrefsStore((s) => s.radioShuffle);
+  const playable = useMemo(() => (snapshot?.songs ?? []).filter((s) => local.downloads[s.id]?.audio).length, [snapshot, local.downloads]);
 
   const header = (
     <View>
@@ -116,6 +122,27 @@ export default function Library() {
         </Pressable>
       )}
 
+      {playable > 0 && !query && (
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 20 }}>
+          <Pressable
+            onPress={() => void playAll()}
+            style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 22, backgroundColor: t.themeSoft, opacity: pressed ? 0.7 : 1 })}
+          >
+            <PlayIcon color={t.themeText} size={13} />
+            <Text style={{ fontSize: 14, fontWeight: "600", color: t.themeText }}>Play all</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => usePrefsStore.getState().setRadioShuffle(!shuffle)}
+            style={{ paddingHorizontal: 14, paddingVertical: 10, borderRadius: 22, borderWidth: 1, borderColor: shuffle ? t.theme : t.borderSubtle }}
+          >
+            <Text style={{ fontSize: 13.5, color: shuffle ? t.themeText : t.textSecondary }}>Shuffle</Text>
+          </Pressable>
+          <Text style={{ flex: 1, fontSize: 12.5, color: t.muted, textAlign: "right" }}>
+            {playable} on this phone · keeps going with the screen off
+          </Text>
+        </View>
+      )}
+
       {allSongs.length > 0 && (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 6 }}>
           <Text style={{ fontSize: 13.5, fontWeight: "600", color: t.textSecondary }}>All songs</Text>
@@ -136,14 +163,15 @@ export default function Library() {
   );
 
   return (
+    <View style={{ flex: 1, backgroundColor: t.bg }}>
     <FlatList
       style={{ flex: 1, backgroundColor: t.bg }}
-      contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: insets.bottom + 24 }}
+      contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: insets.bottom + (radioOn ? 100 : 24) }}
       data={songs}
       keyExtractor={(s) => s.id}
       ListHeaderComponent={header}
       refreshControl={
-        <RefreshControl refreshing={syncing} onRefresh={() => (pairing ? useLibraryStore.getState().sync() : router.push("/pair"))} tintColor={t.theme} colors={[t.theme]} />
+        <RefreshControl refreshing={syncing} onRefresh={() => (pairing ? useLibraryStore.getState().sync({ force: true }) : router.push("/pair"))} tintColor={t.theme} colors={[t.theme]} />
       }
       renderItem={({ item }) => {
         const progress = downloading[item.id];
@@ -170,5 +198,7 @@ export default function Library() {
         );
       }}
     />
+    {radioOn && <NowPlaying t={t} />}
+    </View>
   );
 }

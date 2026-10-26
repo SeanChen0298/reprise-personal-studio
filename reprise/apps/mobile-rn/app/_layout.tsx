@@ -21,11 +21,17 @@ export default function RootLayout() {
       .load()
       .then(() => useLibraryStore.getState().sync())
       .finally(() => SplashScreen.hideAsync().catch(() => {}));
-    // Back in the app (e.g. got home): sync again.
+    // Back in the app (e.g. got home): sync again. While it's open, check the computer now and then.
     const sub = AppState.addEventListener("change", (s) => {
-      if (s === "active" && useLibraryStore.getState().ready) void useLibraryStore.getState().sync();
+      if (s === "active" && useLibraryStore.getState().ready) void useLibraryStore.getState().sync({ quiet: true });
     });
-    return () => sub.remove();
+    const timer = setInterval(() => {
+      if (AppState.currentState === "active" && useLibraryStore.getState().ready) useLibraryStore.getState().poll();
+    }, 2000);
+    return () => {
+      sub.remove();
+      clearInterval(timer);
+    };
   }, []);
 
   // reprise://pair?… opened from the QR code with the system camera.

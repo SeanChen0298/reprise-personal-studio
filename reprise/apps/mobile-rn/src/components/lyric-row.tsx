@@ -15,6 +15,8 @@ interface Props {
   hint?: SyncLineHint;
   highlights: HighlightType[];
   showFurigana: boolean;
+  /** Only the start of the line (singing from memory). */
+  memorise?: boolean;
   t: Theme;
   onPress: (index: number) => void;
   onLongPress: (index: number) => void;
@@ -22,7 +24,14 @@ interface Props {
 
 const FADE = [1, 0.62, 0.45, 0.38];
 
-export const LyricRow = memo(function LyricRow({ line, index, active, distance, translation, hint, highlights, showFurigana, t, onPress, onLongPress }: Props) {
+/** The first word (or first two characters of Japanese / Chinese). */
+function lineStart(text: string): string {
+  const s = text.trim();
+  const word = s.match(/^\S+/)?.[0] ?? s;
+  return /[\u3040-\u30ff\u3400-\u9fff]/.test(word.slice(0, 1)) ? s.slice(0, 2) : word;
+}
+
+export const LyricRow = memo(function LyricRow({ line, index, active, distance, translation, hint, highlights, showFurigana, memorise, t, onPress, onLongPress }: Props) {
   const voice = [line.register, line.placement].filter(Boolean).join(" · ");
   const timed = line.start_ms != null;
   return (
@@ -39,8 +48,15 @@ export const LyricRow = memo(function LyricRow({ line, index, active, distance, 
         opacity: active ? 1 : FADE[Math.min(distance, FADE.length - 1)],
       }}
     >
-      <AnnotatedText line={line} highlights={highlights} fontSize={active ? 22 : 20} color={timed ? t.text : t.muted} bold={active} showFurigana={showFurigana} dark={t.dark} />
-      {!!translation && (
+      {memorise ? (
+        <Text style={{ textAlign: "center", fontFamily: "serif", fontSize: active ? 22 : 20, lineHeight: (active ? 22 : 20) * 1.4, color: timed ? t.text : t.muted, fontWeight: active ? "600" : "400" }}>
+          {lineStart(line.custom_text ?? line.text)}
+          <Text style={{ color: t.muted, fontWeight: "400" }}> · · ·</Text>
+        </Text>
+      ) : (
+        <AnnotatedText line={line} highlights={highlights} fontSize={active ? 22 : 20} color={timed ? t.text : t.muted} bold={active} showFurigana={showFurigana} dark={t.dark} />
+      )}
+      {!!translation && !memorise && (
         <Text style={{ textAlign: "center", fontSize: 13.5, lineHeight: 19, color: t.muted, marginTop: 3 }}>{translation}</Text>
       )}
       {(!!voice || !!line.note || !!hint) && (
