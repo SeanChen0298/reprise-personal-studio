@@ -244,11 +244,15 @@ export default function SongScreen() {
   const cursorSection = sectionOf(player.cursor);
   // The feel of the part playing now (the coach's words for it), for the Vivid backdrop.
   const playingSection = sectionOf(active);
+  const allHints = snapshot?.hints?.[id];
+  const activeLineId = lines[active]?.id;
   const energy = useMemo(() => {
-    if (!playingSection) return 0.4;
-    const c = cardSection.get(playingSection.name.trim().toLowerCase());
-    return sectionEnergy(playingSection.name, c?.mood);
-  }, [playingSection, cardSection]);
+    const c = playingSection ? cardSection.get(playingSection.name.trim().toLowerCase()) : undefined;
+    const base = playingSection ? sectionEnergy(playingSection.name, c?.mood) : 0.4;
+    // The original singer's high notes lift it too (the only cue for songs without sections or a card).
+    const high = activeLineId && allHints?.[activeLineId]?.high ? 0.22 : 0;
+    return Math.min(1, base + high);
+  }, [playingSection, cardSection, activeLineId, allHints]);
   const recordLabel = player.loop === "section" && cursorSection ? `Record ${capitalise(cursorSection.name)}` : "Record";
 
   if (!song) {

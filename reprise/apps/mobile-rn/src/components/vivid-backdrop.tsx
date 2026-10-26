@@ -1,6 +1,6 @@
 // The Vivid look's moving background: soft glows in the song's colors drifting behind the lyrics.
 // `energy` (from the current section's feel) sets how fast and far they move and how much the
-// brighter, warmer glows show; changes ease in. Nearly still while paused; still with reduce motion.
+// brighter, warmer glows show; changes ease in. Drifting gently while paused; still with reduce motion.
 import { memo, useEffect, useMemo } from "react";
 import { StyleSheet, useWindowDimensions, View } from "react-native";
 import Animated, { Easing, useAnimatedStyle, useFrameCallback, useReducedMotion, useSharedValue, withTiming, type SharedValue } from "react-native-reanimated";
@@ -30,12 +30,12 @@ function Blob({ g, id, w, h, phase, energy }: { g: Glow; id: string; w: number; 
   const d = g.size * w;
   const style = useAnimatedStyle(() => {
     const e = energy.value;
-    const reach = 0.5 + e * 0.9;
+    const reach = 0.9 + e * 1.1;
     const tx = (g.x + Math.sin(phase.value * g.fx + g.px) * g.ax * reach) * w - d / 2;
     const ty = (g.y + Math.cos(phase.value * g.fy + g.py) * g.ay * reach) * h - d / 2;
-    const breathe = 1 + Math.sin(phase.value * 0.7 + g.px) * (0.04 + e * 0.08);
+    const breathe = 1 + Math.sin(phase.value * 0.9 + g.px) * (0.08 + e * 0.14);
     return {
-      opacity: g.bright ? 0.15 + e * 0.75 : 0.95 - e * 0.35,
+      opacity: g.bright ? 0.25 + e * 0.75 : 1 - e * 0.3,
       transform: [{ translateX: tx }, { translateY: ty }, { scale: breathe }],
     };
   });
@@ -44,8 +44,8 @@ function Blob({ g, id, w, h, phase, energy }: { g: Glow; id: string; w: number; 
       <Svg width={d} height={d}>
         <Defs>
           <RadialGradient id={id} cx="50%" cy="50%" r="50%">
-            <Stop offset="0" stopColor={g.color} stopOpacity={0.85} />
-            <Stop offset="0.55" stopColor={g.color} stopOpacity={0.32} />
+            <Stop offset="0" stopColor={g.color} stopOpacity={0.95} />
+            <Stop offset="0.55" stopColor={g.color} stopOpacity={0.4} />
             <Stop offset="1" stopColor={g.color} stopOpacity={0} />
           </RadialGradient>
         </Defs>
@@ -80,14 +80,14 @@ export const VividBackdrop = memo(function VividBackdrop({ hex, top, bottom, ene
 
   // A clock whose speed follows the energy (so speed changes are smooth, never a jump).
   const phase = useSharedValue(0);
-  const run = useSharedValue(playing ? 1 : 0.12);
+  const run = useSharedValue(playing ? 1 : 0.35);
   useEffect(() => {
-    run.value = withTiming(playing ? 1 : 0.12, { duration: 900 });
+    run.value = withTiming(playing ? 1 : 0.35, { duration: 900 });
   }, [playing, run]);
   useFrameCallback((f) => {
     if (reduce) return;
     const dt = Math.min(64, f.timeSincePreviousFrame ?? 16) / 1000;
-    phase.value += dt * (0.12 + e.value * 0.55) * run.value;
+    phase.value += dt * (0.55 + e.value * 1.5) * run.value;
   }, true);
 
   return (
@@ -97,7 +97,7 @@ export const VividBackdrop = memo(function VividBackdrop({ hex, top, bottom, ene
         <Blob key={i} g={g} id={`glow${i}`} w={w} h={h} phase={phase} energy={e} />
       ))}
       {/* Keeps the lyrics readable over the brightest glows */}
-      <View style={[StyleSheet.absoluteFill, { backgroundColor: bottom, opacity: 0.28 }]} />
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: bottom, opacity: 0.18 }]} />
     </View>
   );
 });
