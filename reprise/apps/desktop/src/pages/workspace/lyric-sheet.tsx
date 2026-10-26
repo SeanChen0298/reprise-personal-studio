@@ -782,7 +782,7 @@ function GapMarker({ gap, onAction }: { gap: LyricsGap; onAction: (gap: LyricsGa
         <button
           className={btn}
           onClick={() => onAction(gap, "add")}
-          title={gap.heard ? "Add what was heard as a line here, timed to this part (Ctrl+Z undoes)" : "Add an empty line here, timed to this part, and type it (Ctrl+Z undoes)"}
+          title="Add an empty line here, timed to this part, and type it (Ctrl+Z undoes)"
         >
           + Add line
         </button>
@@ -790,7 +790,6 @@ function GapMarker({ gap, onAction }: { gap: LyricsGap; onAction: (gap: LyricsGa
           Not lyrics
         </button>
       </div>
-      {gap.heard && <div className="mt-[3px] text-[12.5px] text-[var(--text-secondary)] italic truncate" title={gap.heard}>heard: “{gap.heard}”</div>}
     </div>
   );
 }

@@ -1,20 +1,18 @@
 import { useEffect, useState } from "react";
 import { useSongStore } from "../stores/song-store";
-import type { PitchStatus, AlignStatus, ChordStatus } from "../types/song";
+import type { PitchStatus, ChordStatus } from "../types/song";
 import { useTaskQueueStore } from "../stores/task-queue-store";
 import { backUpAndClearChordWork, readChordSettings, saveChordSettings } from "../lib/chord-analysis";
 import { ConfirmDialog } from "./confirm-dialog";
 
-/** Audio download, stems, pitch, chords and alignment for one song (the workspace's Setup drawer). */
+/** Audio download, stems, pitch and chords for one song (the workspace's Setup drawer). */
 export function SongSetupPanel({ songId: id }: { songId: string }) {
   const song = useSongStore((s) => s.songs.find((s) => s.id === id));
   const downloadSongAudio = useSongStore((s) => s.downloadSongAudio);
   const markStaleAnalysesAsFailed = useSongStore((s) => s.markStaleAnalysesAsFailed);
   const enqueue = useTaskQueueStore((s) => s.enqueue);
   const queueTasks = useTaskQueueStore((s) => s.tasks);
-  const rawLines = useSongStore((s) => (id ? s.lines[id] : undefined));
 
-  const [alignModel, setAlignModel] = useState("medium");
 
   // Per-song chord analysis option: analyse on separated drums / bass / other.
   const songFolder = song?.audio_folder;
@@ -63,15 +61,6 @@ export function SongSetupPanel({ songId: id }: { songId: string }) {
   const chordError = chordStatus === "error";
   const chordQueued = queueTasks.some((t) => t.songId === song.id && t.type === "chords");
 
-  const lines = rawLines ?? [];
-  const translationLang = song.translation_language;
-  const primaryLineCount = lines.filter((l) => !translationLang || l.language !== translationLang).length;
-  const alignStatus: AlignStatus = song.align_status ?? "idle";
-  const alignDone = alignStatus === "done";
-  const alignProcessing = alignStatus === "processing";
-  const alignError = alignStatus === "error";
-  const alignQueued = queueTasks.some((t) => t.songId === song.id && t.type === "align");
-  const canAlign = primaryLineCount > 0 && (isDownloaded || stemsDone);
 
   return (
     <div className="px-6 py-6">
@@ -529,142 +518,6 @@ export function SongSetupPanel({ songId: id }: { songId: string }) {
                 )}
               </div>
             )}
-
-            {/* Timestamp Alignment Section (WhisperX) */}
-            <div className="mb-6">
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-[10.5px] font-medium uppercase tracking-[0.09em] text-[var(--text-muted)] flex-shrink-0">
-                  Timestamp alignment (WhisperX)
-                </span>
-                <div className="flex-1 h-px bg-[var(--border-subtle)]" />
-              </div>
-
-              {/* Requirements — only shown when not yet met */}
-              {!canAlign && (
-                <div className="flex items-center gap-2 mb-3 flex-wrap">
-                  <span className="text-[11px] text-[var(--text-muted)]">Needs:</span>
-                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${primaryLineCount > 0 ? "bg-[#DCFCE7] text-[#15803D]" : "bg-[var(--surface)] border border-[var(--border)] text-[var(--text-muted)]"}`}>
-                    <span className={`w-[5px] h-[5px] rounded-full flex-shrink-0 ${primaryLineCount > 0 ? "bg-[#22C55E]" : "bg-[var(--border)]"}`} />
-                    {primaryLineCount > 0 ? `${primaryLineCount} lyrics` : "Lyrics"}
-                  </span>
-                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${isDownloaded || stemsDone ? "bg-[#DCFCE7] text-[#15803D]" : "bg-[var(--surface)] border border-[var(--border)] text-[var(--text-muted)]"}`}>
-                    <span className={`w-[5px] h-[5px] rounded-full flex-shrink-0 ${isDownloaded || stemsDone ? "bg-[#22C55E]" : "bg-[var(--border)]"}`} />
-                    Audio
-                  </span>
-                </div>
-              )}
-
-              {alignProcessing ? (
-                  <div className="flex items-center gap-3.5 p-4 bg-[#FFFBEB] border border-[#FDE68A] rounded-[var(--radius)]">
-                    <div className="w-10 h-10 rounded-[9px] bg-[#FEF3C7] text-[#D97706] flex items-center justify-center flex-shrink-0">
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="animate-spin">
-                        <circle cx="12" cy="12" r="10" />
-                        <polyline points="12 6 12 12 16 14" />
-                      </svg>
-                    </div>
-                    <div className="flex-1">
-                      <div className="text-[13px] font-medium text-[#92400E] mb-[6px]">Aligning timestamps with WhisperX…</div>
-                      <div className="h-1 bg-[#FDE68A] rounded-sm overflow-hidden">
-                        <div className="h-full w-[65%] bg-gradient-to-r from-[#F59E0B] to-[#D97706] rounded-sm animate-pulse" />
-                      </div>
-                      <div className="text-[11px] text-[#B45309] mt-1.5">
-                        First run downloads models (~3 GB). Processing locally on your machine.
-                      </div>
-                    </div>
-                  </div>
-                ) : alignDone ? (
-                  <div className="flex flex-col gap-1.5">
-                    <div className="flex items-center gap-3.5 p-4 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)] hover:shadow-[0_2px_12px_rgba(0,0,0,0.05)] transition-shadow">
-                      <div className="w-10 h-10 rounded-[9px] bg-[#DCFCE7] text-[#15803D] flex items-center justify-center flex-shrink-0">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="12" cy="12" r="10" />
-                          <polyline points="12 6 12 12 16 14" />
-                        </svg>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[13.5px] font-medium flex items-center gap-[6px]">
-                          <span className="w-[6px] h-[6px] rounded-full bg-[#22C55E] flex-shrink-0" />
-                          Timestamps aligned
-                        </div>
-                        <div className="text-[11.5px] text-[var(--text-muted)]">
-                          {song.align_error ?? `${primaryLineCount} lines have start/end times from WhisperX`}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="mt-1 flex items-center gap-1.5">
-                      <select
-                        value={alignModel}
-                        onChange={(e) => setAlignModel(e.target.value)}
-                        disabled={alignQueued || alignProcessing}
-                        className="h-[28px] px-2 rounded-[6px] border border-[var(--border)] bg-[var(--bg)] text-[11.5px] text-[var(--text-secondary)] disabled:opacity-50 cursor-pointer"
-                      >
-                        <option value="tiny">tiny (fastest)</option>
-                        <option value="base">base</option>
-                        <option value="small">small</option>
-                        <option value="medium">medium</option>
-                        <option value="large-v2">large-v2 (slowest)</option>
-                      </select>
-                      <button
-                        onClick={() => enqueue(song.id, song.title, "align", { model: alignModel })}
-                        disabled={alignQueued || alignProcessing}
-                        className="px-3 py-[5px] rounded-[6px] border-[1.5px] border-[var(--border)] bg-transparent text-[12px] font-medium text-[var(--text-secondary)] hover:border-[#888] hover:text-[var(--text-primary)] transition-all flex items-center gap-1 disabled:opacity-50"
-                      >
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <polyline points="23 4 23 10 17 10" />
-                          <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
-                        </svg>
-                        {alignQueued ? "Queued" : "Re-align"}
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-3.5 p-4 bg-[var(--bg)] border border-dashed border-[var(--border)] rounded-[var(--radius)]">
-                    <div className="w-10 h-10 rounded-[9px] bg-[var(--theme-light)] text-[var(--theme-text)] flex items-center justify-center flex-shrink-0">
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="12" cy="12" r="10" />
-                        <polyline points="12 6 12 12 16 14" />
-                      </svg>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[13.5px] font-medium text-[var(--text-muted)]">Auto-align Timestamps</div>
-                      <div className="text-[11.5px] text-[var(--text-muted)]">
-                        {alignError ? (
-                          <span className="text-red-500">{song.align_error}</span>
-                        ) : stemsDone ? (
-                          "Use WhisperX to align all lyrics to the vocals stem"
-                        ) : (
-                          "Use WhisperX to align all lyrics to the audio"
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1.5 flex-shrink-0">
-                      <select
-                        value={alignModel}
-                        onChange={(e) => setAlignModel(e.target.value)}
-                        disabled={!canAlign || alignQueued || alignProcessing}
-                        className="h-[28px] px-2 rounded-[6px] border border-[var(--border)] bg-[var(--bg)] text-[11.5px] text-[var(--text-secondary)] disabled:opacity-50 cursor-pointer"
-                      >
-                        <option value="tiny">tiny (fastest)</option>
-                        <option value="base">base</option>
-                        <option value="small">small</option>
-                        <option value="medium">medium</option>
-                        <option value="large-v2">large-v2 (slowest)</option>
-                      </select>
-                      <button
-                        onClick={() => enqueue(song.id, song.title, "align", { model: alignModel })}
-                        disabled={!canAlign || alignQueued || alignProcessing}
-                        className="px-3 py-[5px] rounded-[6px] bg-[var(--accent)] text-white border-[1.5px] border-[var(--accent)] text-[12px] font-medium hover:opacity-85 transition-opacity flex items-center gap-1 disabled:opacity-50"
-                      >
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <circle cx="12" cy="12" r="10" />
-                          <polyline points="12 6 12 12 16 14" />
-                        </svg>
-                        {alignQueued ? "Queued" : alignError ? "Retry" : "Align"}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
 
             {/* Info note */}
             <div className="flex items-start gap-2.5 p-3.5 bg-[var(--theme-light)] border border-[#BFDBFE] rounded-[9px] mt-6 mb-6">

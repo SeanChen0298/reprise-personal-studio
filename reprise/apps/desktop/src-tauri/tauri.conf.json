@@ -38,7 +38,7 @@
       "icons/128x128@2x.png",
       "icons/icon.ico"
     ],
-    "resources": ["sidecars/whisperx_align.py", "sidecars/chord_analyze.py", "sidecars/fingerstyle_arrange.py"],
+    "resources": ["sidecars/chord_analyze.py", "sidecars/fingerstyle_arrange.py"],
     "externalBin": [
       "binaries/yt-dlp",
       "binaries/deno"

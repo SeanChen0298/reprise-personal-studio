@@ -25,7 +25,6 @@ import { emptyTakeTrash } from "../../lib/take-trash";
 import { PLACEMENTS, REGISTERS } from "../../lib/coach/knowledge";
 import type { VocalMap } from "../../lib/vocal-map";
 import { checkLyrics, loadDismissed, saveDismissed, type LyricsGap } from "../../lib/lyrics-check";
-import { loadHeard } from "../../lib/whisperx-align";
 import { SongSetupPanel } from "../../components/song-setup-panel";
 import { EditSongModal } from "../../components/edit-song-modal";
 import { ConfirmDialog } from "../../components/confirm-dialog";
@@ -188,14 +187,6 @@ function Workspace({ songId }: { songId: string }) {
   }, [song.pitch_data_path, song.vocals_path]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Lyrics check (singing with no line, lines with no singing, unsure timing) ──
-  const [heard, setHeard] = useState<[number, number, string][] | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    if (song.audio_folder) void loadHeard(song.audio_folder).then((h) => !cancelled && setHeard(h));
-    return () => {
-      cancelled = true;
-    };
-  }, [song.audio_folder, song.align_status]);
   const [checkDismissed, setCheckDismissed] = useState<Set<string>>(() => loadDismissed(songId));
   useEffect(() => setCheckDismissed(loadDismissed(songId)), [songId]);
   const dismissCheck = useCallback(
@@ -208,8 +199,8 @@ function Workspace({ songId }: { songId: string }) {
     [songId],
   );
   const lyricsCheck = useMemo(
-    () => (showHints ? checkLyrics(lines, vocalMap?.singing ?? null, heard, checkDismissed) : null),
-    [showHints, lines, vocalMap, heard, checkDismissed],
+    () => (showHints ? checkLyrics(lines, vocalMap?.singing ?? null, checkDismissed) : null),
+    [showHints, lines, vocalMap, checkDismissed],
   );
 
   // ── Cursor / editing state ──────────────────────────────────────────────
@@ -398,10 +389,10 @@ function Workspace({ songId }: { songId: string }) {
         player.seekTo(Math.max(0, gap.startMs - 1000));
         return player.play();
       }
-      const id = await edits.insertLine(gap.afterLineId, gap.heard ?? "", Math.round(gap.startMs), Math.round(gap.endMs));
+      const id = await edits.insertLine(gap.afterLineId, "", Math.round(gap.startMs), Math.round(gap.endMs));
       setCursor({ lineId: id, anchor: 0, focus: 0 });
       setEditingLineId(id);
-      say(gap.heard ? "Line added from what was heard — fix the words, Enter saves" : "Line added — type it, Enter saves");
+      say("Line added — type it, Enter saves");
     },
     [dismissCheck, say, takes.busy, player, edits],
   );

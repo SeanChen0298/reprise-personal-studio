@@ -9,7 +9,6 @@ import {
   type TimedLyricLine,
 } from "../lib/audio-download";
 import { analyzePitch } from "../lib/audio-analysis";
-import { alignLyrics } from "../lib/whisperx-align";
 import { audioDurationMs, confidentMatch, searchLyrics, UNTIMED } from "../lib/lrclib";
 import { analyzeChords } from "../lib/chord-analysis";
 import { localDb } from "../lib/local-db";
@@ -78,7 +77,6 @@ interface SongStore {
   separateSongStems: (id: string) => Promise<void>;
   analyzeSongPitch: (id: string) => Promise<void>;
   analyzeSongChords: (id: string) => Promise<void>;
-  alignSongLyrics: (id: string, model?: string) => Promise<void>;
   markStaleAnalysesAsFailed: () => Promise<void>;
 
   // Lines management
@@ -445,66 +443,6 @@ export const useSongStore = create<SongStore>()((set, get) => ({
         chord_status: "error",
         chord_error: err instanceof Error ? err.message : "Chord analysis failed",
       });
-    }
-  },
-
-  alignSongLyrics: async (id, model) => {
-    const song = get().songs.find((s) => s.id === id);
-    if (!song) return;
-
-    // Prefer vocals stem (cleaner signal for ASR), fall back to full audio
-    const audioPath = song.vocals_path || song.audio_path;
-    if (!audioPath) throw new Error("No audio file available for alignment");
-    if (!song.audio_folder) throw new Error("Song folder path is missing");
-
-    // Primary language lines only (no translation rows)
-    const allLines = get().lines[id] ?? [];
-    const translationLang = song.translation_language;
-    const primaryLines = allLines
-      .filter((l) => !translationLang || l.language !== translationLang)
-      .sort((a, b) => a.order - b.order);
-
-    if (primaryLines.length === 0) throw new Error("No lyric lines found for alignment");
-
-    await get().updateSong(id, { align_status: "processing", align_error: undefined });
-
-    try {
-      const language = languageNameToCode(song.language) ?? "en";
-      const output = await alignLyrics(audioPath, primaryLines, song.audio_folder, language, model);
-
-      // Merge aligned timestamps back into the existing line records
-      const alignMap = new Map(output.lines.map((r) => [r.order, r]));
-      const unmatched = new Set(output.unmatched_lines);
-      const primaryIds = new Set(primaryLines.map((l) => l.id));
-      const updatedLines = allLines.map((line) => {
-        if (!primaryIds.has(line.id)) return line;
-        const aligned = alignMap.get(line.order);
-        // Couldn't place it: keep the old timing, flagged as unsure.
-        if (!aligned) return unmatched.has(line.order) ? { ...line, align_confidence: 0 } : line;
-        return {
-          ...line,
-          start_ms: aligned.start_ms,
-          end_ms: aligned.end_ms,
-          syllable_times: aligned.tokens,
-          align_confidence: aligned.confidence,
-        };
-      });
-
-      await get().setLines(id, updatedLines);
-
-      const unmatchedCount = output.unmatched_lines.length;
-      await get().updateSong(id, {
-        align_status: "done",
-        align_error: unmatchedCount > 0
-          ? `${unmatchedCount} line${unmatchedCount > 1 ? "s" : ""} could not be matched`
-          : undefined,
-      });
-    } catch (err) {
-      await get().updateSong(id, {
-        align_status: "error",
-        align_error: err instanceof Error ? err.message : "Alignment failed",
-      });
-      throw err;
     }
   },
 

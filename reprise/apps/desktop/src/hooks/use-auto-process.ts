@@ -4,9 +4,8 @@
  *
  *   1. lyrics, when it has none (LRCLIB, same rules as a fresh download)
  *   2. stem separation (→ pitch and chords follow on their own, see use-task-queue-processor)
- *   3. lyric timing: lyrics that came with timing (LRCLIB) are fitted to this recording's vocals
- *      (shifted to where the singing is, each line ending where the singing stops); lyrics with
- *      no timing are timed by WhisperX
+ *   3. lyric timing: timed lyrics are fitted to this recording's vocals (shifted to where the
+ *      singing is, each line ending where the singing stops)
  *   4. furigana and romaji for Japanese lyrics (a song with no language whose lyrics are mostly
  *      kana is set to Japanese first)
  *   5. sections from the coach, when the song has none and a coach key is set
@@ -27,7 +26,7 @@ import type { Line, Section, Song } from "../types/song";
 import { fitLyrics } from "../lib/fit-lyrics";
 import { loadVocalMap } from "../lib/take-review";
 
-type Step = "lyrics" | "align" | "sections" | "fit";
+type Step = "lyrics" | "sections" | "fit";
 const TRIED_KEY = "reprise-auto-prepared";
 
 function tried(): Record<string, Partial<Record<Step, number>>> {
@@ -133,19 +132,9 @@ export function useAutoProcess() {
     if (!on || !loaded) return;
     const { enqueue } = useTaskQueueStore.getState();
     const queued = (id: string, type: string) => tasks.some((t) => t.songId === id && t.type === type);
-    const t = tried();
     for (const song of songs) {
       if (song.download_status !== "done") continue;
-      if ((!song.stem_status || song.stem_status === "idle") && !queued(song.id, "stems")) {
-        enqueue(song.id, song.title, "stems");
-        continue;
-      }
-      const primary = primaryLines(song, lines[song.id] ?? []);
-      const untimed = primary.length > 0 && primary.every((l) => l.start_ms == null);
-      if (untimed && song.stem_status === "done" && (!song.align_status || song.align_status === "idle") && !t[song.id]?.align && !queued(song.id, "align")) {
-        markTried(song.id, "align");
-        enqueue(song.id, song.title, "align");
-      }
+      if ((!song.stem_status || song.stem_status === "idle") && !queued(song.id, "stems")) enqueue(song.id, song.title, "stems");
     }
   }, [on, loaded, songs, lines, tasks]);
 
@@ -187,8 +176,7 @@ export function useAutoProcess() {
       }
       const primary = primaryLines(song, all);
       const timed = primary.filter((l) => l.start_ms != null).length;
-      const byWhisper = primary.some((l) => l.align_confidence != null) || song.align_status === "done";
-      if (song.pitch_status === "done" && timed >= 5 && timed >= primary.length * 0.8 && !byWhisper && !t[song.id]?.fit) {
+      if (song.pitch_status === "done" && timed >= 5 && timed >= primary.length * 0.8 && !t[song.id]?.fit) {
         markTried(song.id, "fit");
         job = () => fitToVocals(song, primary, sections[song.id] ?? []);
         break;

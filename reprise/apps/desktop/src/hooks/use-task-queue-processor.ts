@@ -18,7 +18,6 @@ export function useTaskQueueProcessor() {
   const downloadSongAudio = useSongStore((s) => s.downloadSongAudio);
   const separateSongStems = useSongStore((s) => s.separateSongStems);
   const analyzeSongPitch = useSongStore((s) => s.analyzeSongPitch);
-  const alignSongLyrics = useSongStore((s) => s.alignSongLyrics);
   const analyzeSongChords = useSongStore((s) => s.analyzeSongChords);
 
   useEffect(() => {
@@ -35,7 +34,7 @@ export function useTaskQueueProcessor() {
       firstPending.type === "stems"    ? separateSongStems(firstPending.songId) :
       firstPending.type === "pitch"    ? analyzeSongPitch(firstPending.songId)  :
       firstPending.type === "chords"   ? analyzeSongChords(firstPending.songId) :
-      /* align */                        alignSongLyrics(firstPending.songId, firstPending.options?.model);
+      /* a job type that no longer exists (e.g. an old lyric alignment) */ Promise.resolve();
 
     work
       .then(() => {

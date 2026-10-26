@@ -4,9 +4,8 @@
  * Checks the lyrics against the song itself:
  *  - singing that no lyric line covers (a missing line, or a repeat the lyrics leave out)
  *  - lines with no singing under them (an extra line, or the timing is off)
- *  - lines the alignment couldn't place confidently
- * Singing comes from the vocal map (pitch of the vocal stem); WhisperX's
- * transcript, when there is one, suggests the words for a gap.
+ *  - lines an earlier automatic alignment couldn't place confidently (align_confidence)
+ * Singing comes from the vocal map (pitch of the vocal stem).
  */
 
 import type { Line } from "../types/song";
@@ -21,8 +20,6 @@ export interface LyricsGap {
   singingMs: number;
   /** The line the gap comes after (null = before the first line). */
   afterLineId: string | null;
-  /** What WhisperX heard there, if it ran. */
-  heard?: string;
 }
 
 export interface LyricsCheck {
@@ -94,7 +91,6 @@ function lineSpans(lines: Line[]): { line: Line; start: number; end: number }[] 
 export function checkLyrics(
   lines: Line[],
   singing: Phrase[] | null,
-  heard: [number, number, string][] | null,
   dismissed: ReadonlySet<string> = new Set(),
 ): LyricsCheck {
   const out: LyricsCheck = { gaps: [], lines: new Map() };
@@ -156,20 +152,12 @@ export function checkLyrics(
     if (dismissed.has(key)) continue;
     let after: Line | null = null;
     for (const s of spans) if (s.start <= g.start) after = s.line;
-    const words = (heard ?? [])
-      .filter(([a, b]) => {
-        const mid = (a + b) / 2;
-        return mid >= g.start - 500 && mid <= g.end + 500;
-      })
-      .map(([, , t]) => t.trim())
-      .filter(Boolean);
     out.gaps.push({
       key,
       startMs: g.start,
       endMs: g.end,
       singingMs: g.singing,
       afterLineId: after?.id ?? null,
-      heard: words.length ? words.join(" ") : undefined,
     });
   }
 
