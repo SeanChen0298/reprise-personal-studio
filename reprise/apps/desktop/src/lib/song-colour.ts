@@ -19,24 +19,27 @@ function toHex(r: number, g: number, b: number): string {
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
+    // YouTube's thumbnails allow it (access-control-allow-origin: *), so the canvas can read them.
+    img.crossOrigin = "anonymous";
     img.onload = () => resolve(img);
     img.onerror = () => reject(new Error("image"));
     img.src = src;
   });
 }
 
-/** Colour and letterbox of a song's artwork (base64 thumbnail only — remote images can't be read back). */
-export async function artworkInfo(song: { id: string; thumbnail_b64?: string | null }): Promise<ArtworkInfo> {
+/** Colour and letterbox of a song's artwork (the stored thumbnail, else its YouTube image). */
+export async function artworkInfo(song: { id: string; thumbnail_b64?: string | null; thumbnail_url?: string | null }): Promise<ArtworkInfo> {
   const b64 = song.thumbnail_b64;
-  if (!b64) return { bars: 0, aspect: 16 / 9 };
-  const key = `${song.id}:${b64.length}`;
+  const src = b64 ? (b64.startsWith("data:") ? b64 : `data:image/jpeg;base64,${b64}`) : song.thumbnail_url;
+  if (!src) return { bars: 0, aspect: 16 / 9 };
+  const key = `${song.id}:${b64 ? b64.length : src}`;
   const hit = cache.get(key);
   if (hit) return hit;
   let out: string | null = null;
   let bars = 0;
   let aspect = 16 / 9;
   try {
-    const img = await loadImage(b64.startsWith("data:") ? b64 : `data:image/jpeg;base64,${b64}`);
+    const img = await loadImage(src);
     if (img.width && img.height) aspect = img.width / img.height;
     const w = 48;
     const h = Math.max(27, Math.round((48 * img.height) / Math.max(1, img.width)));
@@ -89,7 +92,8 @@ export async function artworkInfo(song: { id: string; thumbnail_b64?: string | n
       else if (all.n) out = toHex(all.r / all.n, all.g / all.n, all.b / all.n);
     }
   } catch {
-    out = null;
+    // Offline, or the image is gone: try again next time rather than remembering nothing.
+    return { bars: 0, aspect: 16 / 9 };
   }
   const info: ArtworkInfo = { color: out ?? undefined, bars: Math.round(bars * 1000) / 1000, aspect: Math.round(aspect * 1000) / 1000 };
   if (cache.size > 500) cache.clear();
