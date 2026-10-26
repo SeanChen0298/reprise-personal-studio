@@ -92,13 +92,13 @@
             {
               "name": "Pickup",
               "label": "Pick up",
-              "description": "The song you were last working on — tap to sing it",
+              "description": "Play, sing or pick up the song you were last working on",
               "minWidth": "250dp",
               "minHeight": "110dp",
               "targetCellWidth": 4,
-              "targetCellHeight": 2,
+              "targetCellHeight": 3,
               "maxResizeWidth": "520dp",
-              "maxResizeHeight": "260dp",
+              "maxResizeHeight": "320dp",
               "resizeMode": "horizontal|vertical",
               "previewImage": "./assets/widget-preview.png",
               "updatePeriodMillis": 1800000

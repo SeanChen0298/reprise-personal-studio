@@ -73,6 +73,8 @@ interface LocalState {
   practiced: Record<string, string>;
   /** Practiced times already sent. */
   practicedSent: Record<string, string>;
+  /** Where you last were in each song (ms). */
+  positions?: Record<string, number>;
 }
 
 const EMPTY_LOCAL: LocalState = { downloads: {}, takeFiles: {}, takes: [], lineEdits: {}, takeEdits: {}, practiced: {}, practicedSent: {} };
@@ -104,6 +106,7 @@ interface LibraryState {
   addTake: (take: Omit<LocalTake, "uploaded">) => Promise<void>;
   deleteLocalTake: (id: string) => Promise<void>;
   touchPracticed: (songId: string) => void;
+  setPosition: (songId: string, ms: number) => void;
 }
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -371,6 +374,11 @@ export const useLibraryStore = create<LibraryState>()((set, get) => {
       if (!t || t.uploaded) return;
       await FileSystem.deleteAsync(t.uri, { idempotent: true });
       setLocal((l) => ({ ...l, takes: l.takes.filter((x) => x.id !== id) }));
+    },
+
+    setPosition: (songId, ms) => {
+      if (Math.abs((get().local.positions?.[songId] ?? -1e9) - ms) < 2000) return;
+      setLocal((l) => ({ ...l, positions: { ...l.positions, [songId]: Math.round(ms) } }));
     },
 
     touchPracticed: (songId) => {
