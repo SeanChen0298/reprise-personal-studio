@@ -17,7 +17,7 @@
  */
 
 import { useEffect, useRef } from "react";
-import { splitLines } from "@reprise/shared";
+import { followTranslations, splitLines } from "@reprise/shared";
 import { usePreferencesStore } from "../stores/preferences-store";
 import { useSongStore } from "../stores/song-store";
 import { useTaskQueueStore } from "../stores/task-queue-store";
@@ -146,13 +146,16 @@ async function coachSections(song: Song, lines: Line[]): Promise<Outcome> {
 }
 
 /** Fit the song's timed lyrics to its vocals and save the new times. */
-async function fitToVocals(song: Song, lines: Line[], sections: Section[]): Promise<Outcome> {
+async function fitToVocals(song: Song, lines: Line[], translations: Line[], sections: Section[]): Promise<Outcome> {
   const map = await loadVocalMap(song);
   if (!map) return { result: "Couldn't read the vocals' pitch", changed: false };
   const r = fitLyrics(lines, sections, map.singing, map.semitones.length * 10);
   if (!r?.changes.length) return { result: "Already fits — left as it was", changed: false };
   const store = useSongStore.getState();
-  for (const c of r.changes) await store.updateLine(song.id, c.lineId, { start_ms: c.start_ms, end_ms: c.end_ms });
+  // The translation moves with its lines.
+  for (const c of [...r.changes, ...followTranslations(lines, translations, r.changes)]) {
+    await store.updateLine(song.id, c.lineId, { start_ms: c.start_ms, end_ms: c.end_ms });
+  }
   const shift = r.offsetMs ? `, whole song ${r.offsetMs > 0 ? "later" : "earlier"} by ${(Math.abs(r.offsetMs) / 1000).toFixed(1)} s` : "";
   const secs = r.sectionsShifted ? `, ${r.sectionsShifted} section${r.sectionsShifted === 1 ? "" : "s"} on their own` : "";
   return { result: `Retimed ${r.changes.length} line${r.changes.length === 1 ? "" : "s"}${shift}${secs}`, changed: true };
@@ -256,7 +259,7 @@ export function useAutoProcess() {
       if (song.pitch_status === "done" && timed >= 5 && timed >= primary.length * 0.8 && !t[song.id]?.fit2) {
         markTried(song.id, "fit2");
         shown = { song, step: "Fit timing to the vocals" };
-        job = () => fitToVocals(song, primary, sections[song.id] ?? []);
+        job = () => fitToVocals(song, primary, splitLines(all, song.translation_language).translations, sections[song.id] ?? []);
         break;
       }
       if (coachReady && primary.length >= 6 && (sections[song.id]?.length ?? 0) === 0 && !t[song.id]?.sections) {
