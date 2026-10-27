@@ -20,14 +20,17 @@ export const MAX_SONG_MEMORY = 15;
 
 // The song card's shape and reader are shared with the phone app.
 export { REGISTERS, PLACEMENTS, normaliseCard } from "@reprise/shared";
-export type { VoiceSpec, SongCard } from "@reprise/shared";
-import { normaliseCard } from "@reprise/shared";
-import type { SongCard } from "@reprise/shared";
+export type { VoiceSpec, SongCard, Warmup, WarmupDrill } from "@reprise/shared";
+import { normaliseCard, normaliseWarmup } from "@reprise/shared";
+import type { SongCard, Warmup } from "@reprise/shared";
 
 export interface SongKnowledge {
   card: SongCard | null;
   card_sources: { title: string; url: string }[];
   card_made_at?: string;
+  /** The coach's warm-up for this song. */
+  warmup?: Warmup | null;
+  warmup_made_at?: string;
   /** Lasting insights about this song, approved by the singer. */
   memory: string[];
   chat: (CoachTurn & {
@@ -68,7 +71,11 @@ export async function loadKnowledge(song: Song): Promise<SongKnowledge> {
 }
 
 function withCard(k: SongKnowledge): SongKnowledge {
-  return { ...k, card: k.card ? normaliseCard(k.card as unknown as Record<string, unknown>) : null };
+  return {
+    ...k,
+    card: k.card ? normaliseCard(k.card as unknown as Record<string, unknown>) : null,
+    warmup: k.warmup ? normaliseWarmup(k.warmup) : null,
+  };
 }
 
 export async function saveKnowledge(song: Song, k: SongKnowledge): Promise<void> {
@@ -123,6 +130,15 @@ function knowledgeMarkdown(song: Song, k: SongKnowledge): string {
       out.push("", "## Sources");
       for (const s of k.card_sources) out.push(`- [${s.title}](${s.url})`);
     }
+    out.push("");
+  }
+  if (k.warmup) {
+    const w = k.warmup;
+    out.push(`## Warm-up (${w.minutes} min)`, w.focus, "");
+    w.drills.forEach((d, i) => {
+      const notes = d.pattern?.length ? ` Notes: ${d.pattern.join(" ")} from ${d.from} up to ${d.to}${d.glide ? " (slide)" : ""}.` : "";
+      out.push(`${i + 1}. **${d.name}** (${d.minutes} min${d.syllable ? `, on "${d.syllable}"` : ""}${d.lines ? `, for ${d.lines}` : ""}) — ${d.purpose} ${d.how}${d.image ? ` _Imagine: ${d.image}_` : ""}${notes}`);
+    });
     out.push("");
   }
   if (k.memory.length) {

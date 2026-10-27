@@ -29,6 +29,7 @@ import { PlayerBar } from "../../src/components/player-bar";
 import { LineSheet } from "../../src/components/line-sheet";
 import { TakesSheet } from "../../src/components/takes-sheet";
 import { SongCardView } from "../../src/components/song-card-view";
+import { WarmupSheet } from "../../src/components/warmup-sheet";
 import { Sheet } from "../../src/components/sheet";
 import { BackIcon, ChevronIcon, DownloadIcon, MoreIcon } from "../../src/components/icons";
 import { pauseRadio } from "../../src/lib/radio";
@@ -185,6 +186,7 @@ export default function SongScreen() {
   const [takeFocus, setTakeFocus] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [warmupOpen, setWarmupOpen] = useState(false);
   const [viewOpen, setViewOpen] = useState(false);
   /** Open another sheet once the menu has slid away. */
   const fromMenu = (open: () => void) => {
@@ -496,6 +498,7 @@ export default function SongScreen() {
         </View>
         <View style={{ gap: 4 }}>
           {[
+            coach?.warmup && { label: "Warm up", sub: `${coach.warmup.minutes} min · ${coach.warmup.drills.length} drills for this song`, go: () => fromMenu(() => setWarmupOpen(true)) },
             card && { label: "About this song", sub: card.mood || "The coach's notes on the song", go: () => fromMenu(() => setAboutOpen(true)) },
             { label: "Takes", sub: takes.length ? `${takes.length} so far` : "None yet", go: () => fromMenu(() => setTakesOpen(true)) },
             { label: "Lyrics view", sub: "Romaji, translation, furigana, memorize", go: () => fromMenu(() => setViewOpen(true)) },
@@ -550,6 +553,21 @@ export default function SongScreen() {
           if (row != null) listRef.current?.scrollToIndex({ index: row, viewPosition: 0.3, animated: true });
         }}
       />
+
+      {coach?.warmup && (
+        <WarmupSheet
+          open={warmupOpen}
+          onClose={() => setWarmupOpen(false)}
+          warmup={coach.warmup}
+          lines={lines}
+          t={appT}
+          onBeforePlay={() => void player.pause()}
+          onJump={(idx) => {
+            setWarmupOpen(false);
+            void player.playLine(idx);
+          }}
+        />
+      )}
 
       {card && (
         <Sheet open={aboutOpen} onClose={() => setAboutOpen(false)} title="About this song" t={appT} tall>

@@ -2,6 +2,7 @@
 import type { HighlightType } from "./highlight";
 import type { Line, Recording, Section, Song } from "./song";
 import type { SongCard } from "../lib/song-card";
+import type { Warmup } from "../lib/warmup";
 
 /** A file on the desktop the phone can download (GET /file?path=…). */
 export interface SyncFileRef {
@@ -22,6 +23,8 @@ export interface SyncCoach {
   card: SongCard | null;
   card_made_at?: string;
   memory: string[];
+  /** The coach's warm-up for this song. */
+  warmup?: Warmup | null;
 }
 
 /** What the original singer does on a line (from the desktop's vocal map) — the lyric sheet's "song hints". */

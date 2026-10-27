@@ -5,7 +5,7 @@
 // transport plays the song for everything; the right panel holds takes and
 // the selected line's details. Every lyric edit is undoable.
 
-import { splitLines, translationsByLine } from "@reprise/shared";
+import { followTranslations, splitLines, translationsByLine } from "@reprise/shared";
 import { isJapanese, languageCode } from "../../lib/language";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -239,6 +239,7 @@ function Workspace({ songId }: { songId: string }) {
   const [cardTabNonce, setCardTabNonce] = useState(0);
   const [sectionsNonce, setSectionsNonce] = useState(0);
   const [translateNonce, setTranslateNonce] = useState(0);
+  const [warmupNonce, setWarmupNonce] = useState(0);
   const setLinesForLanguage = useSongStore((s) => s.setLinesForLanguage);
   /** Where a coach translation goes: the song's translation language (English by default). */
   const coachTranslation = useMemo(() => {
@@ -832,7 +833,7 @@ function Workspace({ songId }: { songId: string }) {
               run: () => {
                 const r = fitLyrics(lines, sections, vocalMap.singing, vocalMap.semitones.length * 10);
                 if (!r?.changes.length) return say("The timing already fits the vocals as well as I can make it");
-                void edits.setTiming(r.changes, "Fit timing to the vocals");
+                void edits.setTiming([...r.changes, ...followTranslations(lines, translationLines, r.changes)], "Fit timing to the vocals");
                 say(
                   `Fitted ${r.changes.length} lines to the vocals${r.offsetMs ? ` (shifted ${(r.offsetMs / 1000).toFixed(1)} s)` : ""}${r.sectionsShifted ? `, ${r.sectionsShifted} section${r.sectionsShifted > 1 ? "s" : ""} shifted on ${r.sectionsShifted > 1 ? "their" : "its"} own` : ""} — Ctrl+Z undoes it`,
                 );
@@ -856,6 +857,7 @@ function Workspace({ songId }: { songId: string }) {
         run: () => nextCheck(),
       },
       { id: "hints", group: "View", label: showHints ? "Focus on the lyrics (hide song hints and coach notes)" : "Show song hints and coach notes", shortcut: "V", run: () => setShowHints((v) => !v) },
+      { id: "coach-warmup", group: "Coach", featured: true, label: "Warm up for this song", run: () => (setPanel("coach"), setWarmupNonce((n) => n + 1)) },
       ...(coachTranslation
         ? [{ id: "coach-translate", group: "Coach", label: `Translate the lyrics with the coach (${coachTranslation.languageName})`, run: () => (setPanel("coach"), setTranslateNonce((n) => n + 1)) }]
         : []),
@@ -890,7 +892,7 @@ function Workspace({ songId }: { songId: string }) {
       { id: "keys", group: "Help", label: "Keyboard shortcuts", shortcut: "F1", featured: true, run: () => setShortcutsOpen(true) },
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [highlights, selStart, selEnd, cursorLine, cursorSection, sections, view, showHints, panel, symbols, showTranslation, showRomaji, translationLines.length, player.isPlaying, player.loopEnabled, tracks, canUndo, canRedo, edits, lyricsCheck, nextCheck, vocalMap, lines, say]);
+  }, [highlights, selStart, selEnd, cursorLine, cursorSection, sections, view, showHints, panel, symbols, showTranslation, showRomaji, translationLines.length, player.isPlaying, player.loopEnabled, tracks, canUndo, canRedo, edits, lyricsCheck, nextCheck, vocalMap, lines, translationLines, say]);
 
   // Your take notes, placed under the lyric line they were sung on.
   const takeNotesByLine = useMemo(() => {
@@ -1308,6 +1310,8 @@ function Workspace({ songId }: { songId: string }) {
                 cardTabNonce={cardTabNonce}
                 sectionsNonce={sectionsNonce}
                 translateNonce={translateNonce}
+                warmupNonce={warmupNonce}
+                vocalMap={vocalMap}
                 translation={coachTranslation}
                 onJumpToLine={(idx) => {
                   markInteraction();

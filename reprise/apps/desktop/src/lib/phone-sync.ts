@@ -8,7 +8,7 @@
 import { artworkInfo } from "./song-colour";
 import { invoke } from "@tauri-apps/api/core";
 import { exists, mkdir, readDir, readTextFile, remove, rename, stat, writeTextFile } from "@tauri-apps/plugin-fs";
-import { normaliseCard } from "@reprise/shared";
+import { normaliseCard, normaliseWarmup } from "@reprise/shared";
 import type { Line, PhoneChanges, PhoneTake, SyncCoach, SyncFileRef, SyncLineHint, SyncSnapshot, SyncSongFiles } from "@reprise/shared";
 import { useSongStore } from "../stores/song-store";
 import { usePreferencesStore } from "../stores/preferences-store";
@@ -125,11 +125,11 @@ export async function buildSnapshot(host: string): Promise<SyncSnapshot> {
       const h = await songHints(song, st.lines[song.id] ?? []);
       if (h && Object.keys(h).length) hints[song.id] = h;
       if (song.audio_folder) {
-        const k = await readJson<{ card?: Record<string, unknown>; card_made_at?: string; memory?: string[] }>(
+        const k = await readJson<{ card?: Record<string, unknown>; card_made_at?: string; memory?: string[]; warmup?: unknown }>(
           `${song.audio_folder}/coach.json`,
         );
-        if (k && (k.card || k.memory?.length)) {
-          coach[song.id] = { card: normaliseCard(k.card ?? null), card_made_at: k.card_made_at, memory: k.memory ?? [] };
+        if (k && (k.card || k.memory?.length || k.warmup)) {
+          coach[song.id] = { card: normaliseCard(k.card ?? null), card_made_at: k.card_made_at, memory: k.memory ?? [], warmup: normaliseWarmup(k.warmup) };
         }
       }
     }),

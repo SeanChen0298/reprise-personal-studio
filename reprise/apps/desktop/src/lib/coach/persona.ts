@@ -69,6 +69,28 @@ export const SONG_CARD_PROMPT = `Write the song card: what the singer needs to k
 }
 Use 3–5 arc steps and 2–4 techniques. Use the section names from the lyrics; if there are none, use your own (Verse 1, Chorus…).`;
 
+/**
+ * The warm-up job: drills aimed at this song, JSON only. `voice` is what the app measured in the
+ * original vocal (range, high-note lines, long phrases, key, tempo).
+ */
+export function warmupPrompt(voice: string): string {
+  return `Write a warm-up for singing this song today: 5–7 short drills, about 10–12 minutes in all, in order — body and breath first, then easy sounds that free the voice (lip trill, "ng", straw), then the range and registers this song needs, and last one or two drills made from the song's own hardest moments (its high notes, long phrases, vowels and register changes — name the lines). Build on what you know about me (P#) and on the song card. Every drill gets a picture to imagine; high notes stay light and forward, never pushed.
+
+WHAT THE APP MEASURED IN THE ORIGINAL VOCAL:
+${voice}
+
+Give drills that use notes a pattern: semitones above the start note (e.g. [0,2,4,5,7,5,4,2,0] for a 5-note scale, [0,4,7,12,7,4,0] for an arpeggio, [0,7,0] for a siren with "glide": true), the start note of the first repetition ("from") and of the last ("to"); the app plays it, moving up a half step each time. The pattern's top note on the last repetition should reach the song's highest note, not go past it. Start low and comfortable. Drills for breath or the body have no pattern.
+
+Reply with ONLY a JSON object, no prose:
+{"focus": "one sentence: what this warm-up prepares in this song",
+ "minutes": 11,
+ "drills": [{"name": "short name", "minutes": 2, "purpose": "why, for this song — name lines like L19", "lines": "L19, L22",
+             "how": "one to three short sentences", "image": "a picture to imagine", "syllable": "lip trill | ng | nay | mum | oo | …",
+             "register": "chest | mix | head | falsetto | breathy", "placement": "forward | nasal | top | back | chest",
+             "pattern": [0, 2, 4, 5, 7, 5, 4, 2, 0], "from": "C3", "to": "G3", "glide": false, "tempo": 150}]}
+Leave out keys a drill doesn't need. Note names like C3, F#3, Bb3 (C4 = middle C).`;
+}
+
 /** The debrief job for one take. */
 export function debriefPrompt(takeSummary: string): string {
   return `Debrief this take. Here is what I noted and what the automatic check found:\n\n${takeSummary}\n\nWhat should I focus on next time? Keep it to the most useful two or three points and one exercise.`;

@@ -3,7 +3,11 @@ import { useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-shell";
 import { backupChain, useCoachStore, searchesToday } from "../../stores/coach-store";
 import { askCoach, CoachError } from "../../lib/coach/providers";
-import { COACH_SYSTEM, SECTIONS_PROMPT, SONG_CARD_PROMPT, TIDY_MEMORY_PROMPT, translatePrompt } from "../../lib/coach/persona";
+import { COACH_SYSTEM, SECTIONS_PROMPT, SONG_CARD_PROMPT, TIDY_MEMORY_PROMPT, translatePrompt, warmupPrompt } from "../../lib/coach/persona";
+import { songVoiceFacts } from "../../lib/coach/voice-facts";
+import { WarmupView } from "../../components/warmup-view";
+import { normaliseWarmup } from "@reprise/shared";
+import type { VocalMap } from "../../lib/vocal-map";
 import {
   MAX_SINGER_FACTS,
   MAX_SONG_MEMORY,
@@ -81,7 +85,6 @@ const QUICK = [
   "What is this song about, and how should it feel?",
   "How should I sing the chorus differently from the verses?",
   "Plan a 20-minute practice for this song today.",
-  "Warm me up for this song: 5 minutes — easy slides and trills first, then drills for its techniques, ending on the hardest lines.",
 ];
 
 export function CoachPanel({
@@ -99,6 +102,8 @@ export function CoachPanel({
   cardTabNonce,
   sectionsNonce,
   translateNonce,
+  warmupNonce,
+  vocalMap,
   translation,
   onJumpToLine,
   onApplySections,
@@ -122,6 +127,10 @@ export function CoachPanel({
   sectionsNonce?: number;
   /** Bumped from the command palette: translate the lyrics. */
   translateNonce?: number;
+  /** Bumped from the command palette: show the warm-up (writing it first if there's none). */
+  warmupNonce?: number;
+  /** The original vocal's map — the warm-up is built on its range and high notes. */
+  vocalMap: VocalMap | null;
   /** Where a coach translation goes; null when it can't (e.g. the lyrics are already in that language). */
   translation: { languageName: string; onApply: (texts: string[]) => void } | null;
   onJumpToLine: (lineIndex: number) => void;
@@ -131,7 +140,9 @@ export function CoachPanel({
 }) {
   const coach = useCoachStore();
   const [input, setInput] = useState("");
-  const [busy, setBusy] = useState<null | "card" | "chat" | "sections" | "translate">(null);
+  const [busy, setBusy] = useState<null | "card" | "chat" | "sections" | "translate" | "warmup">(null);
+  const [warmupOpen, setWarmupOpen] = useState(true);
+  const warmupRef = useRef<HTMLDivElement>(null);
   /** The coach's translation, waiting for approval (index = line). */
   const [draftTranslation, setDraftTranslation] = useState<string[] | null>(null);
   /** The coach's suggested section split, waiting for approval. */
@@ -255,6 +266,57 @@ export function CoachPanel({
       setStartedAt(null);
     }
   };
+  const writeWarmup = async () => {
+    if (!knowledge || busy) return;
+    setBusy("warmup");
+    setStartedAt(Date.now());
+    setError(null);
+    try {
+      const voice = await songVoiceFacts(song, lines, vocalMap);
+      const r = await askCoach({
+        provider: coach.provider,
+        apiKey,
+        model,
+        system: COACH_SYSTEM,
+        context: context(),
+        history: [],
+        prompt: warmupPrompt(voice.text),
+        maxSearches: null,
+        fallbackModels: backupChain(coach),
+        quick: true,
+      });
+      const start = r.text.indexOf("{");
+      const end = r.text.lastIndexOf("}");
+      let warmup = null;
+      try {
+        warmup = start >= 0 && end > start ? normaliseWarmup(JSON.parse(r.text.slice(start, end + 1)), voice.topNote) : null;
+      } catch {
+        warmup = null;
+      }
+      if (!warmup) throw new CoachError("The coach's warm-up came back in an unexpected shape — try again.");
+      const next = { ...knowledge, warmup, warmup_made_at: new Date().toISOString() };
+      setKnowledge(next);
+      setWarmupOpen(true);
+      await saveKnowledge(song, next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+      setStreaming("");
+      setStartedAt(null);
+    }
+  };
+  const lastWarmupNonce = useRef(0);
+  useEffect(() => {
+    if (warmupNonce && warmupNonce !== lastWarmupNonce.current && knowledge) {
+      lastWarmupNonce.current = warmupNonce;
+      setWarmupOpen(true);
+      requestAnimationFrame(() => warmupRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }));
+      if (!knowledge.warmup && apiKey && model) void writeWarmup();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [warmupNonce, knowledge !== null]);
+
   const lastTranslateNonce = useRef(0);
   useEffect(() => {
     if (translateNonce && translateNonce !== lastTranslateNonce.current && knowledge && apiKey && model) {
@@ -424,6 +486,38 @@ export function CoachPanel({
               <div className="mt-3">
                 <SongCardView card={card} nextTab={cardTabNonce} />
                 <Sources sources={knowledge.card_sources} />
+              </div>
+            )
+          )}
+        </div>
+
+        {/* Warm-up for this song */}
+        <div ref={warmupRef} className="rounded-[10px] border border-[var(--border)] bg-[var(--bg)] p-3">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setWarmupOpen((v) => !v)}
+              className="flex items-center gap-[6px] text-[10px] font-semibold uppercase tracking-[0.09em] text-[var(--text-muted)] bg-transparent border-none cursor-pointer p-0"
+            >
+              <svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor" className={`transition-transform ${warmupOpen ? "rotate-90" : ""}`}><polygon points="6,3 20,12 6,21" /></svg>
+              Warm-up
+            </button>
+            <button
+              onClick={() => void writeWarmup()}
+              disabled={busy != null}
+              title="Drills aimed at this song's range, high notes and long phrases"
+              className="ml-auto text-[11px] text-[var(--theme)] bg-transparent border-none cursor-pointer hover:underline disabled:opacity-40"
+            >
+              {busy === "warmup" ? "Writing…" : knowledge.warmup ? "Rewrite" : "Write it"}
+            </button>
+          </div>
+          {!knowledge.warmup ? (
+            <p className="text-[12px] text-[var(--text-muted)] mt-2 leading-relaxed">
+              A 10-minute warm-up made for this song — breath, easy trills, then its range and its hardest lines{vocalMap ? ", using the notes measured in the original vocal" : ""}. Each drill with notes you can play and sing along to.
+            </p>
+          ) : (
+            warmupOpen && (
+              <div className="mt-3">
+                <WarmupView warmup={knowledge.warmup} />
               </div>
             )
           )}
