@@ -13,7 +13,7 @@ import type { Theme } from "../lib/theme";
 
 /** A short, stable name for a drill's notes (the cached WAV's file name). */
 function drillKey(d: WarmupDrill): string {
-  const s = JSON.stringify([d.pattern, d.from, d.to, d.glide, d.tempo]);
+  const s = JSON.stringify(["v2", d.pattern, d.from, d.to, d.glide, d.tempo]);
   let h = 0;
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
   return `drill-${(h >>> 0).toString(36)}.wav`;

@@ -141,7 +141,11 @@ export function drillDurationMs(d: WarmupDrill): number {
 
 const hz = (midi: number) => 440 * Math.pow(2, (midi - 69) / 12);
 
-/** The drill as a mono 16-bit WAV: a soft, piano-like tone (sung-along guide, not an instrument). */
+// Partials of the tone. Phone speakers hardly play below ~300 Hz, where most drill notes are, so
+// the tone leans on its 2nd–5th harmonics: the ear still hears the fundamental's pitch from them.
+const PARTIALS = [0.45, 0.8, 0.7, 0.5, 0.35, 0.22, 0.14, 0.08];
+
+/** The drill as a mono 16-bit WAV: a bright, piano-like tone (sung-along guide, not an instrument), as loud as it goes without clipping. */
 export function renderDrill(d: WarmupDrill, sampleRate = 22050): Uint8Array | null {
   const notes = drillNotes(d);
   if (!notes.length) return null;
@@ -163,8 +167,18 @@ export function renderDrill(d: WarmupDrill, sampleRate = 22050): Uint8Array | nu
         Math.min(1, x / 0.015) *
         (n.glideTo != null ? 0.8 : 0.55 + 0.45 * Math.exp(-x * 3)) *
         (i > len ? Math.max(0, 1 - (i - len) / tail) : 1);
-      buf[start + i] += env * (0.6 * Math.sin(phase) + 0.25 * Math.sin(2 * phase) + 0.08 * Math.sin(3 * phase));
+      let v = 0;
+      for (let k = 0; k < PARTIALS.length; k++) if (f * (k + 1) < sampleRate * 0.45) v += PARTIALS[k] * Math.sin((k + 1) * phase);
+      buf[start + i] += env * v;
     }
+  }
+  // Loud: normalise the peak, then a soft limiter (tanh) to lift the quieter parts of each note.
+  let peak = 0;
+  for (let i = 0; i < total; i++) peak = Math.max(peak, Math.abs(buf[i]));
+  if (peak > 0) {
+    const drive = 3;
+    const norm = Math.tanh(drive);
+    for (let i = 0; i < total; i++) buf[i] = (0.97 * Math.tanh((buf[i] / peak) * drive)) / norm;
   }
   return wav(buf, sampleRate);
 }
@@ -186,7 +200,7 @@ function wav(samples: Float32Array, sampleRate: number): Uint8Array {
   v.setUint16(34, 16, true);
   text(36, "data");
   v.setUint32(40, samples.length * 2, true);
-  for (let i = 0; i < samples.length; i++) v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, samples[i] * 0.7)) * 32767, true);
+  for (let i = 0; i < samples.length; i++) v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, samples[i])) * 32767, true);
   return bytes;
 }
 
