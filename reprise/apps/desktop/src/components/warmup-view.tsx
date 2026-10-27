@@ -4,12 +4,22 @@
 import { useEffect, useRef, useState } from "react";
 import { drillDurationMs, renderDrill, type Warmup, type WarmupDrill } from "@reprise/shared";
 import { WithLineRefs } from "./song-card-view";
+import { usePreferencesStore } from "../stores/preferences-store";
+
+// The drill tone is made loud for phone speakers; on the computer's speakers half of the song's
+// level sits about as loud as the song itself.
+const DESKTOP_LEVEL = 0.5;
 
 export function WarmupView({ warmup }: { warmup: Warmup }) {
   const [playing, setPlaying] = useState<number | null>(null);
   const [progress, setProgress] = useState(0);
   const audio = useRef<HTMLAudioElement | null>(null);
   const url = useRef<string | null>(null);
+  // Follows the song's playback volume (the transport's volume control), also while it plays.
+  const volume = usePreferencesStore((s) => s.playbackVolume);
+  useEffect(() => {
+    if (audio.current) audio.current.volume = volume * DESKTOP_LEVEL;
+  }, [volume]);
 
   const stop = () => {
     audio.current?.pause();
@@ -29,6 +39,7 @@ export function WarmupView({ warmup }: { warmup: Warmup }) {
     if (!bytes) return;
     url.current = URL.createObjectURL(new Blob([bytes as BlobPart], { type: "audio/wav" }));
     const a = new Audio(url.current);
+    a.volume = volume * DESKTOP_LEVEL;
     audio.current = a;
     a.ontimeupdate = () => setProgress(a.duration ? a.currentTime / a.duration : 0);
     a.onended = stop;
