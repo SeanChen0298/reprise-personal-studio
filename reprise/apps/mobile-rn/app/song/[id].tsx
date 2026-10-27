@@ -258,12 +258,14 @@ export default function SongScreen() {
     return Math.min(1, base + high);
   }, [playingSection, cardSection, activeLineId, allHints]);
   const recordLabel = player.loop === "section" && cursorSection ? `Record ${capitalise(cursorSection.name)}` : "Record";
+  // Opened straight from the widget / a link, the song is the only screen: back goes to the library.
+  const leave = () => (router.canGoBack() ? router.back() : router.replace("/"));
 
   if (!song) {
     return (
       <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: t.bg, padding: 24, gap: 14 }}>
         <Text style={{ color: t.textSecondary, fontSize: 15, textAlign: "center" }}>This song isn't in the library any more.</Text>
-        <Button t={t} kind="soft" label="Back" onPress={() => router.back()} />
+        <Button t={t} kind="soft" label="Back" onPress={leave} />
       </View>
     );
   }
@@ -276,7 +278,7 @@ export default function SongScreen() {
       {vivid && <VividBackdrop hex={songHex} top={vivid.top} bottom={vivid.bottom} energy={energy} playing={player.isPlaying} />}
       {/* Header: back, the song, more */}
       <View style={{ paddingTop: insets.top + 4, paddingHorizontal: 8, paddingBottom: 4, flexDirection: "row", alignItems: "center" }}>
-        <Pressable onPress={() => router.back()} hitSlop={10} style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
+        <Pressable onPress={leave} hitSlop={10} style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
           <BackIcon color={t.text} size={22} />
         </Pressable>
         <View style={{ flex: 1, minWidth: 0, alignItems: "center" }}>

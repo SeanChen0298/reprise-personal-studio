@@ -89,7 +89,10 @@ export function useTakeRecorder(
       await player.pause();
       const at = fromLine ? lines.indexOf(fromLine) : -1;
       if (at >= 0) player.setCursor(at);
-      const perm = await Audio.requestPermissionsAsync();
+      // Only ask when it isn't allowed yet: on Android 17 asking again for a granted mic shows no prompt
+      // and the answer never comes back, so the take hung before it started.
+      const had = await Audio.getPermissionsAsync();
+      const perm = had.granted ? had : await Audio.requestPermissionsAsync();
       if (!perm.granted) {
         setError("Reprise needs the microphone to record. Allow it in the phone's settings.");
         return;
